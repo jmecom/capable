@@ -1,0 +1,10 @@
+module sys.buffer
+
+pub opaque struct Alloc
+pub opaque struct Buffer
+pub opaque struct Slice
+pub opaque struct MutSlice
+
+pub enum AllocErr {
+  Oom
+}
