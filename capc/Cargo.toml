@@ -9,6 +9,12 @@ clap = { version = "4.5.9", features = ["derive"] }
 logos = "0.14"
 miette = { version = "7.2", features = ["fancy"] }
 thiserror = "1.0"
+cranelift-codegen = "0.108"
+cranelift-frontend = "0.108"
+cranelift-module = "0.108"
+cranelift-object = "0.108"
+cranelift-native = "0.108"
+target-lexicon = "0.13"
 
 [dev-dependencies]
 insta = { version = "1.39", features = ["glob"] }

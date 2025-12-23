@@ -20,3 +20,6 @@ parse file:
 
 check-file file:
   cargo run -p capc -- check {{file}}
+
+build file:
+  cargo run -p capc -- build {{file}}
