@@ -16,8 +16,18 @@ struct Cli {
 enum Command {
     Parse { path: PathBuf },
     Check { path: PathBuf },
-    Build { path: PathBuf, #[arg(short, long)] out: Option<PathBuf> },
-    Run { path: PathBuf },
+    Build {
+        path: PathBuf,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
+    Run {
+        path: PathBuf,
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -60,13 +70,13 @@ fn main() -> Result<()> {
             println!("ok");
             Ok(())
         }
-        Command::Build { path, out } => {
-            let out_path = build_binary(&path, out)?;
+        Command::Build { path, out, out_dir } => {
+            let out_path = build_binary(&path, out, out_dir)?;
             println!("built {}", out_path.display());
             Ok(())
         }
-        Command::Run { path } => {
-            let out_path = build_binary(&path, None)?;
+        Command::Run { path, out_dir } => {
+            let out_path = build_binary(&path, None, out_dir)?;
             let status = std::process::Command::new(&out_path)
                 .status()
                 .map_err(|err| miette!("failed to run {}: {err}", out_path.display()))?;
@@ -78,7 +88,7 @@ fn main() -> Result<()> {
     }
 }
 
-fn build_binary(path: &PathBuf, out: Option<PathBuf>) -> Result<PathBuf> {
+fn build_binary(path: &PathBuf, out: Option<PathBuf>, out_dir: Option<PathBuf>) -> Result<PathBuf> {
     let source = std::fs::read_to_string(path)
         .map_err(|err| miette!("failed to read {}: {err}", path.display()))?;
     let module = parse_module(&source).map_err(|err| {
@@ -98,7 +108,7 @@ fn build_binary(path: &PathBuf, out: Option<PathBuf>) -> Result<PathBuf> {
     })?;
 
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let build_dir = workspace_root.join("target").join("capc-out");
+    let build_dir = out_dir.unwrap_or_else(|| workspace_root.join("target").join("capc-out"));
     std::fs::create_dir_all(&build_dir).map_err(|err| {
         miette!("failed to create build dir {}: {err}", build_dir.display())
     })?;
