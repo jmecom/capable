@@ -34,6 +34,14 @@ fn typecheck_struct_literal_ok() {
 }
 
 #[test]
+fn typecheck_if_while_ok() {
+    let source = load_program("if_while.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_with_helper_module() {
     let source = load_program("with_helper.cap");
     let module = parse_module(&source).expect("parse module");

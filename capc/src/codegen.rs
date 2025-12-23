@@ -5,6 +5,7 @@ use std::path::Path;
 use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, Signature, Type};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{Configurable, Flags};
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{DataDescription, Linkage, Module as ModuleTrait};
 use cranelift_object::{ObjectBuilder, ObjectModule};
@@ -13,6 +14,7 @@ use thiserror::Error;
 
 use crate::ast::{
     BinaryOp, Expr, Item, Literal, Module as AstModule, Path as AstPath, Stmt, Type as AstType,
+    UnaryOp,
 };
 
 #[derive(Debug, Error)]
@@ -390,10 +392,108 @@ fn emit_stmt(
                 data_counter,
             )?;
         }
-        Stmt::If(_) | Stmt::While(_) => {
-            return Err(CodegenError::Unsupported(
-                "control flow".to_string(),
-            ))
+        Stmt::If(if_stmt) => {
+            let then_block = builder.create_block();
+            let merge_block = builder.create_block();
+            let else_block = if if_stmt.else_block.is_some() {
+                builder.create_block()
+            } else {
+                merge_block
+            };
+            let cond_val = emit_expr(
+                builder,
+                &if_stmt.cond,
+                locals,
+                fn_map,
+                use_map,
+                module_name,
+                stdlib,
+                module,
+                data_counter,
+            )?;
+            let cond_b1 = to_b1(builder, cond_val)?;
+            builder.ins().brif(cond_b1, then_block, &[], else_block, &[]);
+
+            builder.switch_to_block(then_block);
+            for stmt in &if_stmt.then_block.stmts {
+                emit_stmt(
+                    builder,
+                    stmt,
+                    locals,
+                    fn_map,
+                    use_map,
+                    module_name,
+                    stdlib,
+                    module,
+                    data_counter,
+                )?;
+            }
+            builder.ins().jump(merge_block, &[]);
+            builder.seal_block(then_block);
+
+            if let Some(else_block_ast) = &if_stmt.else_block {
+                builder.switch_to_block(else_block);
+                for stmt in &else_block_ast.stmts {
+                    emit_stmt(
+                        builder,
+                        stmt,
+                        locals,
+                        fn_map,
+                        use_map,
+                        module_name,
+                        stdlib,
+                        module,
+                        data_counter,
+                    )?;
+                }
+                builder.ins().jump(merge_block, &[]);
+                builder.seal_block(else_block);
+            }
+
+            builder.switch_to_block(merge_block);
+            builder.seal_block(merge_block);
+        }
+        Stmt::While(while_stmt) => {
+            let header_block = builder.create_block();
+            let body_block = builder.create_block();
+            let exit_block = builder.create_block();
+
+            builder.ins().jump(header_block, &[]);
+            builder.switch_to_block(header_block);
+            let cond_val = emit_expr(
+                builder,
+                &while_stmt.cond,
+                locals,
+                fn_map,
+                use_map,
+                module_name,
+                stdlib,
+                module,
+                data_counter,
+            )?;
+            let cond_b1 = to_b1(builder, cond_val)?;
+            builder.ins().brif(cond_b1, body_block, &[], exit_block, &[]);
+
+            builder.switch_to_block(body_block);
+            for stmt in &while_stmt.body.stmts {
+                emit_stmt(
+                    builder,
+                    stmt,
+                    locals,
+                    fn_map,
+                    use_map,
+                    module_name,
+                    stdlib,
+                    module,
+                    data_counter,
+                )?;
+            }
+            builder.ins().jump(header_block, &[]);
+            builder.seal_block(body_block);
+            builder.seal_block(header_block);
+
+            builder.switch_to_block(exit_block);
+            builder.seal_block(exit_block);
         }
     }
     Ok(())
@@ -505,6 +605,45 @@ fn emit_expr(
                 (BinaryOp::Add, ValueRepr::Single(a), ValueRepr::Single(b)) => {
                     Ok(ValueRepr::Single(builder.ins().iadd(a, b)))
                 }
+                (BinaryOp::Sub, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().isub(a, b)))
+                }
+                (BinaryOp::Mul, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().imul(a, b)))
+                }
+                (BinaryOp::Div, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().sdiv(a, b)))
+                }
+                (BinaryOp::Eq, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::Equal, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Neq, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::NotEqual, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Lt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedLessThan, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Lte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedLessThanOrEqual, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Gt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Gte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::And, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().band(a, b)))
+                }
+                (BinaryOp::Or, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().bor(a, b)))
+                }
                 _ => Err(CodegenError::Unsupported("binary op".to_string())),
             }
         }
@@ -519,10 +658,42 @@ fn emit_expr(
             module,
             data_counter,
         ),
-        Expr::Unary(_) | Expr::Match(_) | Expr::StructLiteral(_) => Err(CodegenError::Unsupported(
+        Expr::Unary(unary) => {
+            let value = emit_expr(
+                builder,
+                &unary.expr,
+                locals,
+                fn_map,
+                use_map,
+                module_name,
+                stdlib,
+                module,
+                data_counter,
+            )?;
+            match (&unary.op, value) {
+                (UnaryOp::Neg, ValueRepr::Single(v)) => Ok(ValueRepr::Single(builder.ins().ineg(v))),
+                (UnaryOp::Not, ValueRepr::Single(v)) => {
+                    let one = builder.ins().iconst(ir::types::I8, 1);
+                    Ok(ValueRepr::Single(builder.ins().bxor(v, one)))
+                }
+                _ => Err(CodegenError::Unsupported("unary op".to_string())),
+            }
+        }
+        Expr::Match(_) | Expr::StructLiteral(_) => Err(CodegenError::Unsupported(
             "expression".to_string(),
         )),
     }
+}
+
+fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, CodegenError> {
+    match value {
+        ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
+        ValueRepr::Pair(_, _) => Err(CodegenError::Unsupported("string condition".to_string())),
+    }
+}
+
+fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
+    builder.ins().uextend(ir::types::I8, value)
 }
 
 fn emit_string(
