@@ -5,6 +5,8 @@ use sys.console
 use sys.io
 use sys.string
 use sys.bytes
+use sys.buffer
+use sys.vec
 
 pub fn main(sys: System) -> i32 {
   let c = system.console(sys)
@@ -12,27 +14,18 @@ pub fn main(sys: System) -> i32 {
     Ok(s) => {
       let buf = string.bytes(s)
       let bytes = bytes.len(buf)
+      let words_vec = string.split_whitespace(s)
+      let words = vec.vec_string_len(words_vec)
+      let alloc = buffer.alloc_default()
+      vec.vec_string_free(alloc, words_vec)
       let i: i32 = 0
       let lines: i32 = 0
-      let words: i32 = 0
-      let in_word: bool = false
       while (i < bytes) {
         let b = bytes.at(buf, i)
         if (b == 10u8) {
           lines = lines + 1
         }
-        if (bytes.is_whitespace(b)) {
-          if (in_word) {
-            words = words + 1
-            in_word = false
-          }
-        } else {
-          in_word = true
-        }
         i = i + 1
-      }
-      if (in_word) {
-        words = words + 1
       }
       console.print_i32(c, lines)
       console.print(c, " ")

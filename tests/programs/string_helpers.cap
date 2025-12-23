@@ -4,6 +4,8 @@ use sys.system
 use sys.console
 use sys.string
 use sys.bytes
+use sys.buffer
+use sys.vec
 
 pub fn main(sys: System) -> i32 {
   let c = system.console(sys)
@@ -11,7 +13,11 @@ pub fn main(sys: System) -> i32 {
   let buf = string.bytes(s)
   let n = bytes.len(buf)
   let b = bytes.at(buf, 0)
-  if (n == 3 && b == 97u8) {
+  let words = string.split_whitespace("a b  c")
+  let count = vec.vec_string_len(words)
+  let alloc = buffer.alloc_default()
+  vec.vec_string_free(alloc, words)
+  if (n == 3 && b == 97u8 && count == 3) {
     console.println(c, "string ok")
     return 0
   }
