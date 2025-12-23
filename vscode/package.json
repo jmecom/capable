@@ -39,10 +39,15 @@
     "configuration": {
       "title": "Capable",
       "properties": {
+        "capable.capcPath": {
+          "type": "string",
+          "default": "capc",
+          "description": "Path to the capc compiler used for diagnostics."
+        },
         "capable.serverPath": {
           "type": "string",
-          "default": "caplsp",
-          "description": "Path to the caplsp language server binary."
+          "default": "",
+          "description": "Deprecated: use capable.capcPath instead."
         }
       }
     }
@@ -50,8 +55,5 @@
   "scripts": {
     "lint": "echo \"no lint\"",
     "test": "echo \"no tests\""
-  },
-  "dependencies": {
-    "vscode-languageclient": "^9.0.1"
   }
 }

@@ -22,24 +22,19 @@ tree-sitter generate
 
 ## VS Code
 
-1. Build/install the LSP server:
-
-```sh
-just lsp
-```
-
-2. Install the extension dependencies:
-
-```sh
-cd vscode
-npm install
-```
-
-3. Launch VS Code with the extension in dev mode:
+1. Launch VS Code (or Cursor) with the extension in dev mode:
 
 ```sh
 code --extensionDevelopmentPath=./vscode
 ```
 
-The extension registers the `cap` language, basic highlighting, and runs `caplsp`
-for diagnostics (errors from `capc check` show as squiggles).
+The extension registers the `cap` language, basic highlighting, and runs
+`capc check` for diagnostics (errors show as squiggles).
+
+If `capc` is not on your PATH, set:
+
+```json
+{
+  "capable.capcPath": "/absolute/path/to/capc"
+}
+```

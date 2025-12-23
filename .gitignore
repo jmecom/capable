@@ -1,2 +1,5 @@
 target/
 .DS_Store
+.hermit/
+vscode/node_modules/
+vscode/package-lock.json
