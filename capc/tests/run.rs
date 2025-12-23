@@ -88,3 +88,17 @@ fn run_malloc_demo() {
     assert_eq!(code, 0);
     assert!(stdout.contains("malloc ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_slice_unsafe() {
+    let out_dir = make_out_dir("slice_unsafe");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/slice_unsafe.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("slice ok"), "stdout was: {stdout:?}");
+}
