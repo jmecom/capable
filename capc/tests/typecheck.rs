@@ -228,6 +228,14 @@ fn typecheck_string_helpers_ok() {
 }
 
 #[test]
+fn typecheck_wc_stdin_ok() {
+    let source = load_program("wc_stdin.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app

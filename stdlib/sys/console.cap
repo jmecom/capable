@@ -10,3 +10,11 @@ pub fn print(c: Console, s: string) -> unit {
 pub fn println(c: Console, s: string) -> unit {
   return ()
 }
+
+pub fn print_i32(c: Console, v: i32) -> unit {
+  return ()
+}
+
+pub fn println_i32(c: Console, v: i32) -> unit {
+  return ()
+}

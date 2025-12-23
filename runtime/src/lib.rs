@@ -75,6 +75,20 @@ pub extern "C" fn capable_rt_console_println(_console: Handle, ptr: *const u8, l
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_console_print_i32(_console: Handle, value: i32) {
+    let mut stdout = io::stdout().lock();
+    let _ = write!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_console_println_i32(_console: Handle, value: i32) {
+    let mut stdout = io::stdout().lock();
+    let _ = writeln!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_fs_read_to_string(
     fs: Handle,
     path_ptr: *const u8,

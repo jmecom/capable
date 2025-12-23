@@ -1,0 +1,56 @@
+package safe
+module wc_stdin
+use sys.system
+use sys.console
+use sys.io
+use sys.string
+
+fn is_space(b: u8) -> bool {
+  if (b == 32u8 || b == 9u8 || b == 10u8 || b == 13u8) {
+    return true
+  }
+  return false
+}
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  let code = match io.read_stdin_to_string() {
+    Ok(s) => {
+      let bytes = string.len(s)
+      let i: i32 = 0
+      let lines: i32 = 0
+      let words: i32 = 0
+      let in_word: bool = false
+      while (i < bytes) {
+        let b = string.byte_at(s, i)
+        if (b == 10u8) {
+          lines = lines + 1
+        }
+        if (is_space(b)) {
+          if (in_word) {
+            words = words + 1
+            in_word = false
+          }
+        } else {
+          in_word = true
+        }
+        i = i + 1
+      }
+      if (in_word) {
+        words = words + 1
+      }
+      console.print_i32(c, lines)
+      console.print(c, " ")
+      console.print_i32(c, words)
+      console.print(c, " ")
+      console.print_i32(c, bytes)
+      console.println(c, "")
+      0
+    }
+    Err(e) => {
+      console.println(c, "stdin err")
+      1
+    }
+  }
+  return code
+}

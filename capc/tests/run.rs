@@ -201,3 +201,17 @@ fn run_string_helpers() {
     assert_eq!(code, 0);
     assert!(stdout.contains("string ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_wc_stdin() {
+    let out_dir = make_out_dir("wc_stdin");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/wc_stdin.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("0 0 0"), "stdout was: {stdout:?}");
+}
