@@ -19,3 +19,15 @@ The grammar lives in `tree-sitter-capable/`. You can generate a parser with:
 cd tree-sitter-capable
 tree-sitter generate
 ```
+
+## Neovim example
+
+Load the parser + LSP with:
+
+```lua
+require("nvim-treesitter.parsers").get_parser_configs()
+require("path.to.nvim.capable").setup()
+```
+
+`caplsp` publishes `textDocument/publishDiagnostics`, so errors from `capc check`
+show up as squiggles automatically.
