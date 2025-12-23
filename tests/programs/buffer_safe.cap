@@ -1,0 +1,27 @@
+package safe
+module buffer_safe
+use sys.system
+use sys.console
+use sys.buffer
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  let alloc = buffer.alloc_default()
+  match buffer.buffer_new(alloc, 3) {
+    Ok(b) => {
+      let slice = buffer.buffer_as_slice(b)
+      let len = buffer.slice_len(slice)
+      if (len == 3) {
+        console.println(c, "buffer ok")
+      } else {
+        console.println(c, "buffer bad")
+      }
+      buffer.buffer_free(alloc, b)
+      return 0
+    }
+    Err(e) => {
+      console.println(c, "buffer err")
+      return 1
+    }
+  }
+}

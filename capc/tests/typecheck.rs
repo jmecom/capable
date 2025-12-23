@@ -180,6 +180,14 @@ fn typecheck_slice_unsafe_ok() {
 }
 
 #[test]
+fn typecheck_buffer_safe_ok() {
+    let source = load_program("buffer_safe.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app

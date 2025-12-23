@@ -117,3 +117,17 @@ fn run_buffer_unsafe() {
     assert!(stdout.contains("buffer ok"), "stdout was: {stdout:?}");
     assert!(stdout.contains("slice ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_buffer_safe() {
+    let out_dir = make_out_dir("buffer_safe");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/buffer_safe.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("buffer ok"), "stdout was: {stdout:?}");
+}
