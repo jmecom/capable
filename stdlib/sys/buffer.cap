@@ -1,3 +1,4 @@
+package safe
 module sys.buffer
 
 pub opaque struct Alloc
@@ -7,4 +8,44 @@ pub opaque struct MutSlice
 
 pub enum AllocErr {
   Oom
+}
+
+pub fn alloc_default() -> Alloc {
+  return ()
+}
+
+pub fn buffer_new(a: Alloc, initial_len: i32) -> Result[Buffer, AllocErr] {
+  return Err(AllocErr.Oom)
+}
+
+pub fn buffer_len(b: Buffer) -> i32 {
+  return 0
+}
+
+pub fn buffer_push(b: Buffer, x: u8) -> Result[unit, AllocErr] {
+  return Err(AllocErr.Oom)
+}
+
+pub fn buffer_free(a: Alloc, b: Buffer) -> unit {
+  return ()
+}
+
+pub fn buffer_as_slice(b: Buffer) -> Slice[u8] {
+  return ()
+}
+
+pub fn buffer_as_mut_slice(b: Buffer) -> MutSlice[u8] {
+  return ()
+}
+
+pub fn slice_len(s: Slice[u8]) -> i32 {
+  return 0
+}
+
+pub fn slice_at(s: Slice[u8], i: i32) -> u8 {
+  return 0
+}
+
+pub fn mut_slice_at(s: MutSlice[u8], i: i32) -> u8 {
+  return 0
 }
