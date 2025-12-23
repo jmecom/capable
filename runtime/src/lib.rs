@@ -5,6 +5,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
+use getrandom::getrandom;
+
 pub type Handle = u64;
 
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
@@ -17,6 +19,14 @@ struct ReadFsState {
 }
 
 fn new_handle() -> Handle {
+    let mut buf = [0u8; 8];
+    if getrandom(&mut buf).is_ok() {
+        let value = u64::from_le_bytes(buf);
+        if value != 0 {
+            return value;
+        }
+    }
+    // Fall back to a monotonic counter if the OS RNG fails.
     NEXT_HANDLE.fetch_add(1, Ordering::Relaxed)
 }
 
