@@ -259,3 +259,17 @@ fn run_vec_helpers() {
     assert_eq!(code, 0);
     assert!(stdout.contains("vec ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_string_split() {
+    let out_dir = make_out_dir("string_split");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/string_split.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("split ok"), "stdout was: {stdout:?}");
+}
