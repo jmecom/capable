@@ -23,3 +23,6 @@ check-file file:
 
 build file:
   cargo run -p capc -- build {{file}}
+
+run file:
+  cargo run -p capc -- run {{file}}

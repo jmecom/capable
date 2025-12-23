@@ -279,6 +279,7 @@ pub enum Pattern {
     Wildcard(Span),
     Path(Path),
     Binding(Ident),
+    Literal(Literal),
     Call {
         path: Path,
         binding: Option<Ident>,

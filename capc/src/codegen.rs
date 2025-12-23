@@ -13,7 +13,7 @@ use cranelift_native;
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, Expr, Item, Literal, Module as AstModule, Path as AstPath, Stmt, Type as AstType,
+    BinaryOp, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Stmt, Type as AstType,
     UnaryOp,
 };
 
@@ -157,7 +157,7 @@ pub fn build_object(
                 let block = builder.create_block();
                 builder.append_block_params_for_function_params(block);
                 builder.switch_to_block(block);
-                builder.seal_block(block);
+                // Blocks sealed after body emission.
 
                 let mut locals: HashMap<String, ValueRepr> = HashMap::new();
                 let mut param_index = 0;
@@ -199,6 +199,7 @@ pub fn build_object(
                     builder.ins().return_(&[]);
                 }
 
+                builder.seal_all_blocks();
                 builder.finalize();
                 module
                     .define_function(func_id, &mut ctx)
@@ -380,17 +381,31 @@ fn emit_stmt(
             }
         }
         Stmt::Expr(expr_stmt) => {
-            let _ = emit_expr(
-                builder,
-                &expr_stmt.expr,
-                locals,
-                fn_map,
-                use_map,
-                module_name,
-                stdlib,
-                module,
-                data_counter,
-            )?;
+            if let Expr::Match(match_expr) = &expr_stmt.expr {
+                emit_match_stmt(
+                    builder,
+                    match_expr,
+                    locals,
+                    fn_map,
+                    use_map,
+                    module_name,
+                    stdlib,
+                    module,
+                    data_counter,
+                )?;
+            } else {
+                let _ = emit_expr(
+                    builder,
+                    &expr_stmt.expr,
+                    locals,
+                    fn_map,
+                    use_map,
+                    module_name,
+                    stdlib,
+                    module,
+                    data_counter,
+                )?;
+            }
         }
         Stmt::If(if_stmt) => {
             let then_block = builder.create_block();
@@ -590,6 +605,27 @@ fn emit_expr(
                 module,
                 data_counter,
             )?;
+            if matches!(binary.op, BinaryOp::And | BinaryOp::Or) {
+                let lhs_val = match lhs {
+                    ValueRepr::Single(v) => v,
+                    ValueRepr::Pair(_, _) => {
+                        return Err(CodegenError::Unsupported("boolean op on string".to_string()))
+                    }
+                };
+                return emit_short_circuit_expr(
+                    builder,
+                    lhs_val,
+                    &binary.right,
+                    matches!(binary.op, BinaryOp::And),
+                    locals,
+                    fn_map,
+                    use_map,
+                    module_name,
+                    stdlib,
+                    module,
+                    data_counter,
+                );
+            }
             let rhs = emit_expr(
                 builder,
                 &binary.right,
@@ -638,12 +674,6 @@ fn emit_expr(
                     let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, a, b);
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
-                (BinaryOp::And, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().band(a, b)))
-                }
-                (BinaryOp::Or, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().bor(a, b)))
-                }
                 _ => Err(CodegenError::Unsupported("binary op".to_string())),
             }
         }
@@ -685,6 +715,108 @@ fn emit_expr(
     }
 }
 
+fn emit_match_stmt(
+    builder: &mut FunctionBuilder,
+    match_expr: &crate::ast::MatchExpr,
+    locals: &mut HashMap<String, ValueRepr>,
+    fn_map: &HashMap<String, FnInfo>,
+    use_map: &UseMap,
+    module_name: &str,
+    stdlib: &StdlibIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<(), CodegenError> {
+    let value = emit_expr(
+        builder,
+        &match_expr.expr,
+        locals,
+        fn_map,
+        use_map,
+        module_name,
+        stdlib,
+        module,
+        data_counter,
+    )?;
+    let match_val = match value {
+        ValueRepr::Single(v) => v,
+        ValueRepr::Pair(_, _) => {
+            return Err(CodegenError::Unsupported("match on string".to_string()))
+        }
+    };
+
+    let merge_block = builder.create_block();
+    let mut current_block = builder.current_block().ok_or_else(|| {
+        CodegenError::Codegen("no current block for match".to_string())
+    })?;
+
+    for (idx, arm) in match_expr.arms.iter().enumerate() {
+        let is_last = idx + 1 == match_expr.arms.len();
+        let arm_block = builder.create_block();
+        let next_block = if is_last {
+            merge_block
+        } else {
+            builder.create_block()
+        };
+
+        if idx > 0 {
+            builder.switch_to_block(current_block);
+        }
+        let cond = match_pattern_cond(builder, &arm.pattern, match_val)?;
+        builder.ins().brif(cond, arm_block, &[], next_block, &[]);
+
+        builder.switch_to_block(arm_block);
+        for stmt in &arm.body.stmts {
+            emit_stmt(
+                builder,
+                stmt,
+                locals,
+                fn_map,
+                use_map,
+                module_name,
+                stdlib,
+                module,
+                data_counter,
+            )?;
+        }
+        builder.ins().jump(merge_block, &[]);
+        builder.seal_block(arm_block);
+
+        if is_last {
+            break;
+        }
+        current_block = next_block;
+    }
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(())
+}
+
+fn match_pattern_cond(
+    builder: &mut FunctionBuilder,
+    pattern: &Pattern,
+    match_val: ir::Value,
+) -> Result<ir::Value, CodegenError> {
+    match pattern {
+        Pattern::Wildcard(_) | Pattern::Binding(_) => {
+            let one = builder.ins().iconst(ir::types::I8, 1);
+            Ok(builder.ins().icmp_imm(IntCC::NotEqual, one, 0))
+        }
+        Pattern::Literal(lit) => match lit {
+            Literal::Bool(value) => {
+                let rhs = builder.ins().iconst(ir::types::I8, *value as i64);
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
+            Literal::Int(value) => {
+                let rhs = builder.ins().iconst(ir::types::I32, *value);
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
+            _ => Err(CodegenError::Unsupported("literal pattern".to_string())),
+        },
+        _ => Err(CodegenError::Unsupported("pattern".to_string())),
+    }
+}
+
 fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, CodegenError> {
     match value {
         ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
@@ -694,6 +826,61 @@ fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, C
 
 fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
     builder.ins().uextend(ir::types::I8, value)
+}
+
+fn emit_short_circuit_expr(
+    builder: &mut FunctionBuilder,
+    lhs: ir::Value,
+    rhs_expr: &Expr,
+    is_and: bool,
+    locals: &HashMap<String, ValueRepr>,
+    fn_map: &HashMap<String, FnInfo>,
+    use_map: &UseMap,
+    module_name: &str,
+    stdlib: &StdlibIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    let rhs_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, ir::types::I8);
+
+    let lhs_cond = builder.ins().icmp_imm(IntCC::NotEqual, lhs, 0);
+    if is_and {
+        builder.ins().brif(lhs_cond, rhs_block, &[], merge_block, &[lhs]);
+    } else {
+        builder.ins().brif(lhs_cond, merge_block, &[lhs], rhs_block, &[]);
+    }
+    let current = builder.current_block().ok_or_else(|| {
+        CodegenError::Codegen("no block for short-circuit".to_string())
+    })?;
+    builder.seal_block(current);
+
+    builder.switch_to_block(rhs_block);
+    let rhs_value = emit_expr(
+        builder,
+        rhs_expr,
+        locals,
+        fn_map,
+        use_map,
+        module_name,
+        stdlib,
+        module,
+        data_counter,
+    )?;
+    let rhs_val = match rhs_value {
+        ValueRepr::Single(v) => v,
+        ValueRepr::Pair(_, _) => {
+            return Err(CodegenError::Unsupported("boolean op on string".to_string()))
+        }
+    };
+    builder.ins().jump(merge_block, &[rhs_val]);
+    builder.seal_block(rhs_block);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    let merged = builder.block_params(merge_block)[0];
+    Ok(ValueRepr::Single(merged))
 }
 
 fn emit_string(

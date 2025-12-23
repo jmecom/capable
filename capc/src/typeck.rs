@@ -812,6 +812,7 @@ fn bind_pattern(
             locals.insert(ident.item.clone(), match_ty.clone());
             Ok(())
         }
+        Pattern::Literal(_) => Ok(()),
         Pattern::Path(_) | Pattern::Wildcard(_) => Ok(()),
     }
 }

@@ -1,0 +1,12 @@
+module match_bool
+use sys.system
+use sys.console
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  match true {
+    true => { console.println(c, "yes") }
+    _ => { console.println(c, "no") }
+  }
+  return 0
+}

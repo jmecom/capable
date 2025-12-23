@@ -497,6 +497,21 @@ impl Parser {
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
         match self.peek_kind() {
+            Some(TokenKind::Int) => {
+                let token = self.bump().unwrap();
+                let value = token.text.parse::<i64>().map_err(|_| {
+                    self.error_at(token.span, "invalid integer literal".to_string())
+                })?;
+                Ok(Pattern::Literal(Literal::Int(value)))
+            }
+            Some(TokenKind::True) => {
+                self.bump();
+                Ok(Pattern::Literal(Literal::Bool(true)))
+            }
+            Some(TokenKind::False) => {
+                self.bump();
+                Ok(Pattern::Literal(Literal::Bool(false)))
+            }
             Some(TokenKind::Ident) => {
                 let path = self.parse_path()?;
                 if self.peek_kind() == Some(TokenKind::LParen) {

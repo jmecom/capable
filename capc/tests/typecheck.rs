@@ -42,6 +42,14 @@ fn typecheck_if_while_ok() {
 }
 
 #[test]
+fn typecheck_match_bool_ok() {
+    let source = load_program("match_bool.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_with_helper_module() {
     let source = load_program("with_helper.cap");
     let module = parse_module(&source).expect("parse module");
