@@ -1,0 +1,14 @@
+package safe
+module sys.args
+
+pub enum ArgsErr {
+  OutOfRange
+}
+
+pub fn len(sys: System) -> i32 {
+  return 0
+}
+
+pub fn at(sys: System, index: i32) -> Result[string, ArgsErr] {
+  return Err(ArgsErr.OutOfRange)
+}

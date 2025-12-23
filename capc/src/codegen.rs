@@ -399,6 +399,42 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         params: vec![TyKind::Handle],
         ret: TyKind::Handle,
     };
+    let args_len = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::I32,
+    };
+    let args_at = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+    };
+    let args_at_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::I32,
+            TyKind::ResultString,
+        ],
+        ret: TyKind::ResultString,
+    };
+    let io_read_stdin = FnSig {
+        params: vec![],
+        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+    };
+    let io_read_stdin_abi = FnSig {
+        params: vec![TyKind::ResultString],
+        ret: TyKind::ResultString,
+    };
+    let string_len = FnSig {
+        params: vec![TyKind::String],
+        ret: TyKind::I32,
+    };
+    let string_byte_at = FnSig {
+        params: vec![TyKind::String, TyKind::I32],
+        ret: TyKind::U8,
+    };
+    let string_as_slice = FnSig {
+        params: vec![TyKind::String],
+        ret: TyKind::Handle,
+    };
 
     map.insert(
         "sys.system.console".to_string(),
@@ -676,6 +712,60 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_buffer_as_slice,
             abi_sig: None,
             symbol: "capable_rt_buffer_as_mut_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.args.len".to_string(),
+        FnInfo {
+            sig: args_len,
+            abi_sig: None,
+            symbol: "capable_rt_args_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.args.at".to_string(),
+        FnInfo {
+            sig: args_at,
+            abi_sig: Some(args_at_abi),
+            symbol: "capable_rt_args_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.io.read_stdin_to_string".to_string(),
+        FnInfo {
+            sig: io_read_stdin,
+            abi_sig: Some(io_read_stdin_abi),
+            symbol: "capable_rt_read_stdin_to_string".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.len".to_string(),
+        FnInfo {
+            sig: string_len,
+            abi_sig: None,
+            symbol: "capable_rt_string_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.byte_at".to_string(),
+        FnInfo {
+            sig: string_byte_at,
+            abi_sig: None,
+            symbol: "capable_rt_string_byte_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.as_slice".to_string(),
+        FnInfo {
+            sig: string_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_string_as_slice".to_string(),
             is_runtime: true,
         },
     );

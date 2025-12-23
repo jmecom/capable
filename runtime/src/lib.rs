@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -15,6 +15,7 @@ static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static BUFFERS: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static ARGS: LazyLock<Vec<String>> = LazyLock::new(|| std::env::args().collect());
 
 #[derive(Debug, Clone)]
 struct ReadFsState {
@@ -358,6 +359,100 @@ pub extern "C" fn capable_rt_buffer_as_mut_slice(buffer: Handle) -> Handle {
     handle
 }
 
+#[no_mangle]
+pub extern "C" fn capable_rt_args_len(_sys: Handle) -> i32 {
+    ARGS.len().min(i32::MAX as usize) as i32
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_args_at(
+    _sys: Handle,
+    index: i32,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+    };
+    let Some(arg) = ARGS.get(idx) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    unsafe {
+        if !out_ptr.is_null() {
+            *out_ptr = arg.as_ptr();
+        }
+        if !out_len.is_null() {
+            *out_len = arg.len() as u64;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_read_stdin_to_string(
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let mut input = String::new();
+    let result = io::stdin().read_to_string(&mut input);
+    match result {
+        Ok(_) => write_string_result(out_ptr, out_len, out_err, Ok(input)),
+        Err(_) => write_string_result(out_ptr, out_len, out_err, Err(0)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_len(ptr: *const u8, len: usize) -> i32 {
+    let _ = ptr;
+    len.min(i32::MAX as usize) as i32
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_byte_at(
+    ptr: *const u8,
+    len: usize,
+    index: i32,
+) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => return 0,
+    };
+    if ptr.is_null() || idx >= len {
+        return 0;
+    }
+    unsafe { *ptr.add(idx) }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_as_slice(ptr: *const u8, len: usize) -> Handle {
+    let handle = new_handle();
+    let mut table = SLICES.lock().expect("slice table");
+    table.insert(
+        handle,
+        SliceState {
+            ptr: ptr as usize,
+            len,
+            mutable: false,
+        },
+    );
+    handle
+}
+
 unsafe fn write_bytes(ptr: *const u8, len: usize, newline: bool) {
     if ptr.is_null() {
         return;
@@ -428,6 +523,49 @@ fn write_result(
             unsafe {
                 if !out_err.is_null() {
                     *out_err = err as i32;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_string_result(
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+    result: Result<String, i32>,
+) -> u8 {
+    unsafe {
+        if !out_ptr.is_null() {
+            *out_ptr = std::ptr::null();
+        }
+        if !out_len.is_null() {
+            *out_len = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(s) => {
+            let len = s.len();
+            let ptr = s.as_ptr();
+            std::mem::forget(s);
+            unsafe {
+                if !out_ptr.is_null() {
+                    *out_ptr = ptr;
+                }
+                if !out_len.is_null() {
+                    *out_len = len as u64;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
                 }
             }
             1
