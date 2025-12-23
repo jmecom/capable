@@ -34,6 +34,8 @@ pub enum CodegenError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TyKind {
     I32,
+    U32,
+    U8,
     Bool,
     Unit,
     String,
@@ -256,6 +258,8 @@ fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
         TyKind::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
         TyKind::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
         TyKind::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        TyKind::U32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        TyKind::U8 => signature.params.push(AbiParam::new(ir::types::I8)),
         TyKind::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
         TyKind::Result(ok, err) => {
             signature.params.push(AbiParam::new(ir::types::I8)); // tag
@@ -274,6 +278,8 @@ fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
     match ty {
         TyKind::Unit => {}
         TyKind::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        TyKind::U32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        TyKind::U8 => signature.returns.push(AbiParam::new(ir::types::I8)),
         TyKind::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
         TyKind::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
         TyKind::Ptr => signature.returns.push(AbiParam::new(ptr_ty)),
@@ -316,6 +322,18 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     let console_print = FnSig {
         params: vec![TyKind::Handle, TyKind::String],
         ret: TyKind::Unit,
+    };
+    let mem_malloc = FnSig {
+        params: vec![TyKind::I32],
+        ret: TyKind::Ptr,
+    };
+    let mem_free = FnSig {
+        params: vec![TyKind::Ptr],
+        ret: TyKind::Unit,
+    };
+    let mem_cast = FnSig {
+        params: vec![TyKind::Ptr],
+        ret: TyKind::Ptr,
     };
 
     map.insert(
@@ -360,6 +378,42 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: fs_read_to_string,
             abi_sig: Some(fs_read_to_string_abi),
             symbol: "capable_rt_fs_read_to_string".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.malloc".to_string(),
+        FnInfo {
+            sig: mem_malloc,
+            abi_sig: None,
+            symbol: "capable_rt_malloc".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.free".to_string(),
+        FnInfo {
+            sig: mem_free,
+            abi_sig: None,
+            symbol: "capable_rt_free".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.cast_u8_to_u32".to_string(),
+        FnInfo {
+            sig: mem_cast.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_cast_u8_to_u32".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.cast_u32_to_u8".to_string(),
+        FnInfo {
+            sig: mem_cast,
+            abi_sig: None,
+            symbol: "capable_rt_cast_u32_to_u8".to_string(),
             is_runtime: true,
         },
     );
@@ -1368,7 +1422,12 @@ fn value_from_params(
 ) -> ValueRepr {
     match ty {
         TyKind::Unit => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
-        TyKind::I32 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
+        TyKind::I32
+        | TyKind::U32
+        | TyKind::U8
+        | TyKind::Bool
+        | TyKind::Handle
+        | TyKind::Ptr => {
             let val = params[*idx];
             *idx += 1;
             ValueRepr::Single(val)
@@ -1402,7 +1461,12 @@ fn value_from_results(
 ) -> Result<ValueRepr, CodegenError> {
     match ty {
         TyKind::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
-        TyKind::I32 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
+        TyKind::I32
+        | TyKind::U32
+        | TyKind::U8
+        | TyKind::Bool
+        | TyKind::Handle
+        | TyKind::Ptr => {
             let val = results
                 .get(*idx)
                 .ok_or_else(|| CodegenError::Codegen("missing return value".to_string()))?;
@@ -1533,6 +1597,12 @@ fn lower_ty(
     };
     if resolved == "i32" {
         return TyKind::I32;
+    }
+    if resolved == "u32" {
+        return TyKind::U32;
+    }
+    if resolved == "u8" {
+        return TyKind::U8;
     }
     if resolved == "bool" {
         return TyKind::Bool;

@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 use getrandom::getrandom;
+use libc;
 
 pub type Handle = u64;
 
@@ -105,6 +106,34 @@ pub extern "C" fn capable_rt_fs_read_to_string(
 pub extern "C" fn capable_rt_start() -> i32 {
     let sys = new_handle();
     unsafe { capable_main(sys) }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_malloc(size: i32) -> *mut u8 {
+    if size <= 0 {
+        return std::ptr::null_mut();
+    }
+    unsafe { libc::malloc(size as usize) as *mut u8 }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_free(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        libc::free(ptr as *mut libc::c_void);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_cast_u8_to_u32(ptr: *mut u8) -> *mut u32 {
+    ptr as *mut u32
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_cast_u32_to_u8(ptr: *mut u32) -> *mut u8 {
+    ptr as *mut u8
 }
 
 unsafe fn write_bytes(ptr: *const u8, len: usize, newline: bool) {

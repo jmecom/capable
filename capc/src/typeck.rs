@@ -15,6 +15,7 @@ pub enum BuiltinType {
     I32,
     I64,
     U32,
+    U8,
     Bool,
     String,
     Unit,
@@ -827,17 +828,22 @@ fn check_expr(
                         ))
                     }
                 }
-                BinaryOp::Eq
-                | BinaryOp::Neq
-                | BinaryOp::Lt
-                | BinaryOp::Lte
-                | BinaryOp::Gt
-                | BinaryOp::Gte => {
+                BinaryOp::Eq | BinaryOp::Neq => {
                     if left == right {
                         Ok(Ty::Builtin(BuiltinType::Bool))
                     } else {
                         Err(TypeError::new(
                             "comparison expects matching operand types".to_string(),
+                            binary.span,
+                        ))
+                    }
+                }
+                BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
+                    if left == right && is_orderable_type(&left) {
+                        Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else {
+                        Err(TypeError::new(
+                            "ordering expects matching integer types".to_string(),
                             binary.span,
                         ))
                     }
@@ -1203,6 +1209,7 @@ fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, T
                     "i32" => Some(BuiltinType::I32),
                     "i64" => Some(BuiltinType::I64),
                     "u32" => Some(BuiltinType::U32),
+                    "u8" => Some(BuiltinType::U8),
                     "bool" => Some(BuiltinType::Bool),
                     "string" => Some(BuiltinType::String),
                     "unit" => Some(BuiltinType::Unit),
@@ -1224,6 +1231,16 @@ fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, T
             Ok(Ty::Path(joined, args))
         }
     }
+}
+
+fn is_orderable_type(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Builtin(BuiltinType::I32)
+            | Ty::Builtin(BuiltinType::I64)
+            | Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U8)
+    )
 }
 
 trait SpanExt {

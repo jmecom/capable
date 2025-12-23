@@ -1,5 +1,7 @@
 package unsafe
 module sys.mem
 
-pub extern fn malloc(size: i64) -> *u32
-pub extern fn free(ptr: *u32) -> unit
+pub extern fn malloc(size: i32) -> *u8
+pub extern fn free(ptr: *u8) -> unit
+pub extern fn cast_u8_to_u32(ptr: *u8) -> *u32
+pub extern fn cast_u32_to_u8(ptr: *u32) -> *u8
