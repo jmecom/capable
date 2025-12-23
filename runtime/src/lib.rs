@@ -32,7 +32,6 @@ struct ReadFsState {
 struct SliceState {
     ptr: usize,
     len: usize,
-    mutable: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -189,7 +188,6 @@ pub extern "C" fn capable_rt_slice_from_ptr(ptr: *mut u8, len: i32) -> Handle {
         SliceState {
             ptr: ptr as usize,
             len,
-            mutable: false,
         },
     );
     handle
@@ -205,7 +203,6 @@ pub extern "C" fn capable_rt_mut_slice_from_ptr(ptr: *mut u8, len: i32) -> Handl
         SliceState {
             ptr: ptr as usize,
             len,
-            mutable: true,
         },
     );
     handle
@@ -353,7 +350,6 @@ pub extern "C" fn capable_rt_buffer_as_slice(buffer: Handle) -> Handle {
         SliceState {
             ptr,
             len,
-            mutable: false,
         },
     );
     handle
@@ -379,7 +375,6 @@ pub extern "C" fn capable_rt_buffer_as_mut_slice(buffer: Handle) -> Handle {
         SliceState {
             ptr,
             len,
-            mutable: true,
         },
     );
     handle
@@ -562,7 +557,6 @@ pub extern "C" fn capable_rt_vec_u8_as_slice(vec: Handle) -> Handle {
         SliceState {
             ptr,
             len,
-            mutable: false,
         },
     );
     handle
@@ -969,7 +963,6 @@ pub extern "C" fn capable_rt_string_as_slice(ptr: *const u8, len: usize) -> Hand
         SliceState {
             ptr: ptr as usize,
             len,
-            mutable: false,
         },
     );
     handle
