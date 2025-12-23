@@ -22,3 +22,4 @@
   - collections + string split intrinsics: done (M4)
 - CLI (capc check/build/run/audit, safe-only, link flags) + justfile: done (M4)
 - Tests (positive/negative programs, runtime run tests, externs, path normalization): done (M4)
+- Editor tooling (tree-sitter grammar + minimal LSP diagnostics): done (M4)
