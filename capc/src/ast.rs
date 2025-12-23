@@ -119,6 +119,7 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Let(LetStmt),
+    Assign(AssignStmt),
     Return(ReturnStmt),
     If(IfStmt),
     While(WhileStmt),
@@ -156,6 +157,13 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprStmt {
+    pub expr: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssignStmt {
+    pub name: Ident,
     pub expr: Expr,
     pub span: Span,
 }

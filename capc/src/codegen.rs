@@ -105,6 +105,12 @@ enum ValueRepr {
 }
 
 #[derive(Clone, Debug)]
+enum LocalValue {
+    Value(ValueRepr),
+    Slot(ir::StackSlot, Type),
+}
+
+#[derive(Clone, Debug)]
 struct ResultShape {
     kind: ResultKind,
     slots: Vec<ir::StackSlot>,
@@ -191,14 +197,15 @@ pub fn build_object(
                 builder.switch_to_block(block);
                 // Blocks sealed after body emission.
 
-                let mut locals: HashMap<String, ValueRepr> = HashMap::new();
+                let mut locals: HashMap<String, LocalValue> = HashMap::new();
                 let params = builder.block_params(block).to_vec();
                 let mut param_index = 0;
                 for param in &func.params {
                     let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index);
                     let value =
                         value_from_params(&mut builder, &ty_kind, &params, &mut param_index);
-                    locals.insert(param.name.item.clone(), value);
+                    let local = store_local(&mut builder, value);
+                    locals.insert(param.name.item.clone(), local);
                 }
 
                 for stmt in &func.body.stmts {
@@ -335,6 +342,10 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         params: vec![TyKind::Handle, TyKind::String],
         ret: TyKind::Unit,
     };
+    let console_print_i32 = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::Unit,
+    };
     let mem_malloc = FnSig {
         params: vec![TyKind::I32],
         ret: TyKind::Ptr,
@@ -469,6 +480,24 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: console_print,
             abi_sig: None,
             symbol: "capable_rt_console_print".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.print_i32".to_string(),
+        FnInfo {
+            sig: console_print_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_console_print_i32".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.println_i32".to_string(),
+        FnInfo {
+            sig: console_print_i32,
+            abi_sig: None,
+            symbol: "capable_rt_console_println_i32".to_string(),
             is_runtime: true,
         },
     );
@@ -847,7 +876,7 @@ fn mangle_symbol(module_name: &str, func_name: &str) -> String {
 fn emit_stmt(
     builder: &mut FunctionBuilder,
     stmt: &Stmt,
-    locals: &mut HashMap<String, ValueRepr>,
+    locals: &mut HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -870,7 +899,36 @@ fn emit_stmt(
                 module,
                 data_counter,
             )?;
-            locals.insert(let_stmt.name.item.clone(), value);
+            let local = store_local(builder, value);
+            locals.insert(let_stmt.name.item.clone(), local);
+        }
+        Stmt::Assign(assign) => {
+            let value = emit_expr(
+                builder,
+                &assign.expr,
+                locals,
+                fn_map,
+                use_map,
+                module_name,
+                stdlib,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            let Some(local) = locals.get_mut(&assign.name.item) else {
+                return Err(CodegenError::UnknownVariable(assign.name.item.clone()));
+            };
+            match local {
+                LocalValue::Slot(slot, _ty) => {
+                    let ValueRepr::Single(val) = value else {
+                        return Err(CodegenError::Unsupported("assignment".to_string()));
+                    };
+                    builder.ins().stack_store(val, *slot, 0);
+                }
+                LocalValue::Value(_) => {
+                    return Err(CodegenError::Unsupported("assignment".to_string()));
+                }
+            }
         }
         Stmt::Return(ret_stmt) => {
             if let Some(expr) = &ret_stmt.expr {
@@ -1051,7 +1109,7 @@ fn block_ends_with_return(block: &crate::ast::Block) -> bool {
 fn emit_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
-    locals: &HashMap<String, ValueRepr>,
+    locals: &HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1071,7 +1129,7 @@ fn emit_expr(
         Expr::Path(path) => {
             if path.segments.len() == 1 {
                 if let Some(value) = locals.get(&path.segments[0].item) {
-                    return Ok(value.clone());
+                    return Ok(load_local(builder, value));
                 }
             }
             if let Some(index) = resolve_enum_variant(path, use_map, enum_index) {
@@ -1387,7 +1445,7 @@ fn emit_expr(
 fn emit_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::ast::MatchExpr,
-    locals: &mut HashMap<String, ValueRepr>,
+    locals: &mut HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1445,7 +1503,7 @@ fn emit_match_stmt(
         builder.ins().brif(cond, arm_block, &[], next_block, &[]);
 
         builder.switch_to_block(arm_block);
-        bind_match_pattern_value(&arm.pattern, &value, match_result.as_ref(), locals)?;
+        bind_match_pattern_value(builder, &arm.pattern, &value, match_result.as_ref(), locals)?;
         for stmt in &arm.body.stmts {
             emit_stmt(
                 builder,
@@ -1485,7 +1543,7 @@ fn emit_match_stmt(
 fn emit_match_expr(
     builder: &mut FunctionBuilder,
     match_expr: &crate::ast::MatchExpr,
-    locals: &HashMap<String, ValueRepr>,
+    locals: &HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1538,7 +1596,13 @@ fn emit_match_expr(
 
         builder.switch_to_block(arm_block);
         let mut arm_locals = locals.clone();
-        bind_match_pattern_value(&arm.pattern, &value, match_result.as_ref(), &mut arm_locals)?;
+        bind_match_pattern_value(
+            builder,
+            &arm.pattern,
+            &value,
+            match_result.as_ref(),
+            &mut arm_locals,
+        )?;
         let Some((last, prefix)) = arm.body.stmts.split_last() else {
             return Err(CodegenError::Unsupported("empty match arm".to_string()));
         };
@@ -1684,10 +1748,11 @@ fn match_pattern_cond(
 }
 
 fn bind_match_pattern_value(
+    builder: &mut FunctionBuilder,
     pattern: &Pattern,
     value: &ValueRepr,
     result: Option<&(ValueRepr, ValueRepr)>,
-    locals: &mut HashMap<String, ValueRepr>,
+    locals: &mut HashMap<String, LocalValue>,
 ) -> Result<(), CodegenError> {
     match pattern {
         Pattern::Binding(ident) => match value {
@@ -1695,7 +1760,7 @@ fn bind_match_pattern_value(
                 Err(CodegenError::Unsupported("binding result value".to_string()))
             }
             _ => {
-                locals.insert(ident.item.clone(), value.clone());
+                locals.insert(ident.item.clone(), store_local(builder, value.clone()));
                 Ok(())
             }
         },
@@ -1706,11 +1771,11 @@ fn bind_match_pattern_value(
             };
             if let Some(binding) = binding {
                 if name == "Ok" {
-                    locals.insert(binding.item.clone(), ok_val.clone());
+                    locals.insert(binding.item.clone(), store_local(builder, ok_val.clone()));
                     return Ok(());
                 }
                 if name == "Err" {
-                    locals.insert(binding.item.clone(), err_val.clone());
+                    locals.insert(binding.item.clone(), store_local(builder, err_val.clone()));
                     return Ok(());
                 }
             }
@@ -1743,7 +1808,7 @@ fn emit_short_circuit_expr(
     lhs: ir::Value,
     rhs_expr: &Expr,
     is_and: bool,
-    locals: &HashMap<String, ValueRepr>,
+    locals: &HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1762,10 +1827,9 @@ fn emit_short_circuit_expr(
     } else {
         builder.ins().brif(lhs_cond, merge_block, &[lhs], rhs_block, &[]);
     }
-    let current = builder.current_block().ok_or_else(|| {
+    let _current = builder.current_block().ok_or_else(|| {
         CodegenError::Codegen("no block for short-circuit".to_string())
     })?;
-    builder.seal_block(current);
 
     builder.switch_to_block(rhs_block);
     let rhs_value = emit_expr(
@@ -1827,6 +1891,30 @@ fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
             out.extend(flatten_value(err));
             out
         }
+    }
+}
+
+fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
+    match value {
+        ValueRepr::Single(val) => {
+            let ty = builder.func.dfg.value_type(val);
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                ty.bytes().max(1) as u32,
+            ));
+            builder.ins().stack_store(val, slot, 0);
+            LocalValue::Slot(slot, ty)
+        }
+        other => LocalValue::Value(other),
+    }
+}
+
+fn load_local(builder: &mut FunctionBuilder, local: &LocalValue) -> ValueRepr {
+    match local {
+        LocalValue::Slot(slot, ty) => {
+            ValueRepr::Single(builder.ins().stack_load(*ty, *slot, 0))
+        }
+        LocalValue::Value(value) => value.clone(),
     }
 }
 

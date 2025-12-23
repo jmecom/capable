@@ -285,6 +285,13 @@ impl Parser {
             Some(TokenKind::Return) => Ok(Stmt::Return(self.parse_return()?)),
             Some(TokenKind::If) => Ok(Stmt::If(self.parse_if()?)),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
+            Some(TokenKind::Ident) => {
+                if self.peek_token(1).is_some_and(|t| t.kind == TokenKind::Eq) {
+                    Ok(Stmt::Assign(self.parse_assign()?))
+                } else {
+                    Ok(Stmt::Expr(self.parse_expr_stmt()?))
+                }
+            }
             _ => Ok(Stmt::Expr(self.parse_expr_stmt()?)),
         }
     }
@@ -303,6 +310,21 @@ impl Parser {
         Ok(LetStmt {
             name,
             ty,
+            expr,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_assign(&mut self) -> Result<AssignStmt, ParseError> {
+        let name = self.expect_ident()?;
+        let start = name.span.start;
+        self.expect(TokenKind::Eq)?;
+        let expr = self.parse_expr()?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(expr.span().end, |t| t.span.end);
+        Ok(AssignStmt {
+            name,
             expr,
             span: Span::new(start, end),
         })

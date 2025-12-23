@@ -387,6 +387,7 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
                     }
                 }
             }
+            Stmt::Assign(_) => {}
             Stmt::If(if_stmt) => {
                 if let Some(span) = block_contains_ptr(&if_stmt.then_block) {
                     return Some(span);
@@ -498,6 +499,33 @@ fn check_stmt(
                 expr_ty
             };
             locals.insert(let_stmt.name.item.clone(), final_ty);
+        }
+        Stmt::Assign(assign) => {
+            let Some(existing) = locals.get(&assign.name.item) else {
+                return Err(TypeError::new(
+                    format!("unknown identifier `{}`", assign.name.item),
+                    assign.name.span,
+                ));
+            };
+            let expr_ty = check_expr(
+                &assign.expr,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
+            if &expr_ty != existing {
+                return Err(TypeError::new(
+                    format!(
+                        "assignment type mismatch: expected {existing:?}, found {expr_ty:?}"
+                    ),
+                    assign.span,
+                ));
+            }
         }
         Stmt::Return(ret_stmt) => {
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
