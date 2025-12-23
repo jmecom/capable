@@ -12,6 +12,7 @@ pub struct ParseError {
     message: String,
     #[label]
     span: SourceSpan,
+    span_raw: Span,
 }
 
 impl ParseError {
@@ -19,7 +20,16 @@ impl ParseError {
         Self {
             message,
             span: (span.start, span.end - span.start).into(),
+            span_raw: span,
         }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span_raw
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -30,6 +40,7 @@ pub struct TypeError {
     message: String,
     #[label]
     span: SourceSpan,
+    span_raw: Span,
 }
 
 impl TypeError {
@@ -37,6 +48,15 @@ impl TypeError {
         Self {
             message,
             span: (span.start, span.end - span.start).into(),
+            span_raw: span,
         }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span_raw
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
