@@ -159,3 +159,45 @@ fn run_slice_safe_read() {
     assert_eq!(code, 0);
     assert!(stdout.contains("slice read ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_args_safe() {
+    let out_dir = make_out_dir("args_safe");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/args_safe.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("args ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_stdin_safe() {
+    let out_dir = make_out_dir("stdin_safe");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/stdin_safe.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("stdin ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_string_helpers() {
+    let out_dir = make_out_dir("string_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/string_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("string ok"), "stdout was: {stdout:?}");
+}

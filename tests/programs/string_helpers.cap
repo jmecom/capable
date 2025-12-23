@@ -1,0 +1,18 @@
+package safe
+module string_helpers
+use sys.system
+use sys.console
+use sys.string
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  let s = "abc"
+  let n = string.len(s)
+  let b = string.byte_at(s, 0)
+  if (n == 3 && b == 97u8) {
+    console.println(c, "string ok")
+    return 0
+  }
+  console.println(c, "string bad")
+  return 1
+}
