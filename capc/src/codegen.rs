@@ -2541,7 +2541,6 @@ fn lower_ty(
         || resolved == "sys.buffer.Buffer"
         || resolved == "sys.buffer.Slice"
         || resolved == "sys.buffer.MutSlice"
-        || resolved == "sys.list.ListString"
         || resolved == "sys.vec.VecU8"
         || resolved == "sys.vec.VecI32"
         || resolved == "sys.vec.VecString"
