@@ -1,0 +1,11 @@
+package safe
+module slice_safe
+use sys.buffer
+
+fn parse_bytes(data: Slice[u8]) -> i32 {
+  return 0
+}
+
+pub fn main(sys: System) -> i32 {
+  return 0
+}
