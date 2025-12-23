@@ -50,6 +50,7 @@ pub struct UseDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Item {
     Function(Function),
+    ExternFunction(ExternFunction),
     Struct(StructDecl),
     Enum(EnumDecl),
 }
@@ -60,6 +61,15 @@ pub struct Function {
     pub params: Vec<Param>,
     pub ret: Type,
     pub body: Block,
+    pub is_pub: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternFunction {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub ret: Type,
     pub is_pub: bool,
     pub span: Span,
 }

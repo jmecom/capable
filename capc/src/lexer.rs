@@ -25,6 +25,8 @@ pub enum TokenKind {
     Use,
     #[token("pub")]
     Pub,
+    #[token("extern")]
+    Extern,
     #[token("fn")]
     Fn,
     #[token("let")]

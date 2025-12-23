@@ -81,6 +81,14 @@ impl Parser {
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         let is_pub = self.maybe_consume(TokenKind::Pub).is_some();
         let is_opaque = self.maybe_consume(TokenKind::Opaque).is_some();
+        if self.peek_kind() == Some(TokenKind::Extern) {
+            if is_opaque {
+                return Err(self.error_current(
+                    "opaque applies only to struct declarations".to_string(),
+                ));
+            }
+            return Ok(Item::ExternFunction(self.parse_extern_function(is_pub)?));
+        }
         match self.peek_kind() {
             Some(TokenKind::Fn) => {
                 if is_opaque {
@@ -104,6 +112,42 @@ impl Parser {
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
+    }
+
+    fn parse_extern_function(&mut self, is_pub: bool) -> Result<ExternFunction, ParseError> {
+        let start = self.expect(TokenKind::Extern)?.span.start;
+        self.expect(TokenKind::Fn)?;
+        let name = self.expect_ident()?;
+        self.expect(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if self.peek_kind() != Some(TokenKind::RParen) {
+            loop {
+                let param_name = self.expect_ident()?;
+                self.expect(TokenKind::Colon)?;
+                let ty = self.parse_type()?;
+                params.push(Param {
+                    name: param_name,
+                    ty,
+                });
+                if self.maybe_consume(TokenKind::Comma).is_some() {
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::Arrow)?;
+        let ret = self.parse_type()?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(ret.span.end, |t| t.span.end);
+        Ok(ExternFunction {
+            name,
+            params,
+            ret,
+            is_pub,
+            span: Span::new(start, end),
+        })
     }
 
     fn parse_function(&mut self, is_pub: bool) -> Result<Function, ParseError> {

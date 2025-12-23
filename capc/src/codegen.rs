@@ -375,7 +375,8 @@ fn register_user_functions(
     let module_name = module.name.to_string();
     let use_map = UseMap::new(module);
     for item in &module.items {
-        if let Item::Function(func) = item {
+        match item {
+            Item::Function(func) => {
                 let sig = FnSig {
                     params: func
                         .params
@@ -384,21 +385,43 @@ fn register_user_functions(
                         .collect(),
                     ret: lower_ty(&func.ret, &use_map, stdlib, enum_index),
                 };
-            let key = format!("{module_name}.{}", func.name.item);
-            let symbol = if module_name == entry.name.to_string() && func.name.item == "main" {
-                "capable_main".to_string()
-            } else {
-                mangle_symbol(&module_name, &func.name.item)
-            };
-            map.insert(
-                key,
-                FnInfo {
-                    sig,
-                    abi_sig: None,
-                    symbol,
-                    is_runtime: false,
-                },
-            );
+                let key = format!("{module_name}.{}", func.name.item);
+                let symbol = if module_name == entry.name.to_string() && func.name.item == "main" {
+                    "capable_main".to_string()
+                } else {
+                    mangle_symbol(&module_name, &func.name.item)
+                };
+                map.insert(
+                    key,
+                    FnInfo {
+                        sig,
+                        abi_sig: None,
+                        symbol,
+                        is_runtime: false,
+                    },
+                );
+            }
+            Item::ExternFunction(func) => {
+                let sig = FnSig {
+                    params: func
+                        .params
+                        .iter()
+                        .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
+                        .collect(),
+                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index),
+                };
+                let key = format!("{module_name}.{}", func.name.item);
+                map.insert(
+                    key,
+                    FnInfo {
+                        sig,
+                        abi_sig: None,
+                        symbol: func.name.item.clone(),
+                        is_runtime: true,
+                    },
+                );
+            }
+            _ => {}
         }
     }
     Ok(())

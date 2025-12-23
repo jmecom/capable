@@ -122,6 +122,15 @@ fn typecheck_mint_without_system() {
 }
 
 #[test]
+fn typecheck_extern_requires_unsafe_package() {
+    let source = load_program("extern_safe.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("extern declarations require `package unsafe`"));
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app

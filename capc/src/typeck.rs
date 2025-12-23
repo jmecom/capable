@@ -109,26 +109,38 @@ fn collect_functions(
         let module_name = module.name.to_string();
         let local_use = UseMap::new(module);
         for item in &module.items {
-            if let Item::Function(func) = item {
-                let sig = FunctionSig {
-                    params: func
-                        .params
-                        .iter()
-                        .map(|p| lower_type(&p.ty, &local_use, stdlib))
-                        .collect::<Result<_, _>>()?,
-                    ret: lower_type(&func.ret, &local_use, stdlib)?,
-                };
-                let key = if module_name == entry_name {
-                    func.name.item.clone()
-                } else {
-                    format!("{module_name}.{}", func.name.item)
-                };
-                if functions.insert(key.clone(), sig).is_some() {
-                    return Err(TypeError::new(
-                        format!("duplicate function `{key}`"),
-                        func.name.span,
-                    ));
-                }
+            let (name, params, ret, span) = match item {
+                Item::Function(func) => (
+                    &func.name,
+                    &func.params,
+                    &func.ret,
+                    func.name.span,
+                ),
+                Item::ExternFunction(func) => (
+                    &func.name,
+                    &func.params,
+                    &func.ret,
+                    func.name.span,
+                ),
+                _ => continue,
+            };
+            let sig = FunctionSig {
+                params: params
+                    .iter()
+                    .map(|p| lower_type(&p.ty, &local_use, stdlib))
+                    .collect::<Result<_, _>>()?,
+                ret: lower_type(ret, &local_use, stdlib)?,
+            };
+            let key = if module_name == entry_name {
+                name.item.clone()
+            } else {
+                format!("{module_name}.{}", name.item)
+            };
+            if functions.insert(key.clone(), sig).is_some() {
+                return Err(TypeError::new(
+                    format!("duplicate function `{key}`"),
+                    span,
+                ));
             }
         }
     }
@@ -251,6 +263,10 @@ pub fn type_check_program(
         .chain(std::iter::once(module))
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();
+    validate_package_safety(module)?;
+    for user_module in user_modules {
+        validate_package_safety(user_module)?;
+    }
     let struct_map = collect_structs(&modules, &module_name, &stdlib_index)?;
     let enum_map = collect_enums(&modules, &module_name)?;
     let functions = collect_functions(&modules, &module_name, &stdlib_index)?;
@@ -269,6 +285,21 @@ pub fn type_check_program(
         }
     }
 
+    Ok(())
+}
+
+fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
+    if module.package != PackageSafety::Safe {
+        return Ok(());
+    }
+    for item in &module.items {
+        if let Item::ExternFunction(func) = item {
+            return Err(TypeError::new(
+                "extern declarations require `package unsafe`".to_string(),
+                func.span,
+            ));
+        }
+    }
     Ok(())
 }
 

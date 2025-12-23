@@ -73,7 +73,7 @@ fn main() -> Result<()> {
                 miette::Report::new(err)
             })?;
             if safe_only {
-                enforce_safe_only(&module, &user_modules)?;
+                enforce_safe_only(&module, &user_modules, root)?;
             }
             type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
                 let named = NamedSource::new(path.display().to_string(), source);
@@ -130,7 +130,7 @@ fn build_binary(
         .load_user_modules_transitive(path, &module)
         .map_err(|err| miette::Report::new(err))?;
     if safe_only {
-        enforce_safe_only(&module, &user_modules)?;
+        enforce_safe_only(&module, &user_modules, root)?;
     }
     type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
         let named = NamedSource::new(path.display().to_string(), source.clone());
@@ -182,14 +182,26 @@ fn build_binary(
     Ok(out_path)
 }
 
-fn enforce_safe_only(entry: &capc::ast::Module, user_modules: &[capc::ast::Module]) -> Result<()> {
+fn enforce_safe_only(
+    entry: &capc::ast::Module,
+    user_modules: &[capc::ast::Module],
+    root: &std::path::Path,
+) -> Result<()> {
     let mut offenders = Vec::new();
     if entry.package == capc::ast::PackageSafety::Unsafe {
-        offenders.push(entry.name.to_string());
+        offenders.push(format!(
+            "{} ({}): package unsafe",
+            entry.name,
+            module_path_for(root, &entry.name).display()
+        ));
     }
     for module in user_modules {
         if module.package == capc::ast::PackageSafety::Unsafe {
-            offenders.push(module.name.to_string());
+            offenders.push(format!(
+                "{} ({}): package unsafe",
+                module.name,
+                module_path_for(root, &module.name).display()
+            ));
         }
     }
     if offenders.is_empty() {
@@ -197,10 +209,12 @@ fn enforce_safe_only(entry: &capc::ast::Module, user_modules: &[capc::ast::Modul
     }
     offenders.sort();
     offenders.dedup();
-    Err(miette!(
-        "safe-only build rejected unsafe package(s): {}",
-        offenders.join(", ")
-    ))
+    let mut message = String::from("safe-only build rejected unsafe package(s):");
+    for entry in offenders {
+        message.push_str("\n- ");
+        message.push_str(&entry);
+    }
+    Err(miette!(message))
 }
 
 fn audit_unsafe(path: &PathBuf) -> Result<()> {
