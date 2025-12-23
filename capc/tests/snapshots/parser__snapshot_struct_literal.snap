@@ -1,0 +1,232 @@
+---
+source: capc/tests/parser.rs
+expression: module
+---
+Module {
+    package: Safe,
+    name: Spanned {
+        item: "demo",
+        span: Span {
+            start: 7,
+            end: 11,
+        },
+    },
+    uses: [],
+    items: [
+        Struct(
+            StructDecl {
+                name: Spanned {
+                    item: "Pair",
+                    span: Span {
+                        start: 20,
+                        end: 24,
+                    },
+                },
+                fields: [
+                    Field {
+                        name: Spanned {
+                            item: "left",
+                            span: Span {
+                                start: 27,
+                                end: 31,
+                            },
+                        },
+                        ty: Type {
+                            path: Path {
+                                segments: [
+                                    Spanned {
+                                        item: "i32",
+                                        span: Span {
+                                            start: 33,
+                                            end: 36,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 33,
+                                    end: 36,
+                                },
+                            },
+                            args: [],
+                            span: Span {
+                                start: 33,
+                                end: 36,
+                            },
+                        },
+                    },
+                    Field {
+                        name: Spanned {
+                            item: "right",
+                            span: Span {
+                                start: 38,
+                                end: 43,
+                            },
+                        },
+                        ty: Type {
+                            path: Path {
+                                segments: [
+                                    Spanned {
+                                        item: "i32",
+                                        span: Span {
+                                            start: 45,
+                                            end: 48,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 45,
+                                    end: 48,
+                                },
+                            },
+                            args: [],
+                            span: Span {
+                                start: 45,
+                                end: 48,
+                            },
+                        },
+                    },
+                ],
+                is_pub: false,
+                is_opaque: false,
+                span: Span {
+                    start: 13,
+                    end: 50,
+                },
+            },
+        ),
+        Function(
+            Function {
+                name: Spanned {
+                    item: "make",
+                    span: Span {
+                        start: 55,
+                        end: 59,
+                    },
+                },
+                params: [],
+                ret: Type {
+                    path: Path {
+                        segments: [
+                            Spanned {
+                                item: "Pair",
+                                span: Span {
+                                    start: 65,
+                                    end: 69,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 65,
+                            end: 69,
+                        },
+                    },
+                    args: [],
+                    span: Span {
+                        start: 65,
+                        end: 69,
+                    },
+                },
+                body: Block {
+                    stmts: [
+                        Return(
+                            ReturnStmt {
+                                expr: Some(
+                                    StructLiteral(
+                                        StructLiteralExpr {
+                                            path: Path {
+                                                segments: [
+                                                    Spanned {
+                                                        item: "Pair",
+                                                        span: Span {
+                                                            start: 81,
+                                                            end: 85,
+                                                        },
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 81,
+                                                    end: 85,
+                                                },
+                                            },
+                                            fields: [
+                                                StructLiteralField {
+                                                    name: Spanned {
+                                                        item: "left",
+                                                        span: Span {
+                                                            start: 88,
+                                                            end: 92,
+                                                        },
+                                                    },
+                                                    expr: Literal(
+                                                        LiteralExpr {
+                                                            value: Int(
+                                                                1,
+                                                            ),
+                                                            span: Span {
+                                                                start: 94,
+                                                                end: 95,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: Span {
+                                                        start: 81,
+                                                        end: 95,
+                                                    },
+                                                },
+                                                StructLiteralField {
+                                                    name: Spanned {
+                                                        item: "right",
+                                                        span: Span {
+                                                            start: 97,
+                                                            end: 102,
+                                                        },
+                                                    },
+                                                    expr: Literal(
+                                                        LiteralExpr {
+                                                            value: Int(
+                                                                2,
+                                                            ),
+                                                            span: Span {
+                                                                start: 104,
+                                                                end: 105,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: Span {
+                                                        start: 81,
+                                                        end: 105,
+                                                    },
+                                                },
+                                            ],
+                                            span: Span {
+                                                start: 81,
+                                                end: 107,
+                                            },
+                                        },
+                                    ),
+                                ),
+                                span: Span {
+                                    start: 74,
+                                    end: 109,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 70,
+                        end: 109,
+                    },
+                },
+                is_pub: false,
+                span: Span {
+                    start: 52,
+                    end: 109,
+                },
+            },
+        ),
+    ],
+    span: Span {
+        start: 0,
+        end: 109,
+    },
+}

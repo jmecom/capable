@@ -25,6 +25,13 @@ struct FunctionSig {
     ret: Ty,
 }
 
+#[derive(Debug, Clone)]
+struct StructInfo {
+    fields: HashMap<String, Ty>,
+    is_opaque: bool,
+    module: String,
+}
+
 struct UseMap {
     aliases: HashMap<String, Vec<String>>,
 }
@@ -121,8 +128,46 @@ fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
     path.segments.iter().map(|seg| seg.item.clone()).collect()
 }
 
+fn collect_structs(
+    module: &Module,
+    use_map: &UseMap,
+) -> Result<HashMap<String, StructInfo>, TypeError> {
+    let mut structs = HashMap::new();
+    for item in &module.items {
+        if let Item::Struct(decl) = item {
+            let name = decl.name.item.clone();
+            if structs.contains_key(&name) {
+                return Err(TypeError::new(
+                    format!("duplicate struct `{name}`"),
+                    decl.name.span,
+                ));
+            }
+            let mut fields = HashMap::new();
+            for field in &decl.fields {
+                let ty = lower_type(&field.ty, use_map)?;
+                if fields.insert(field.name.item.clone(), ty).is_some() {
+                    return Err(TypeError::new(
+                        format!("duplicate field `{}`", field.name.item),
+                        field.name.span,
+                    ));
+                }
+            }
+            structs.insert(
+                name,
+                StructInfo {
+                    fields,
+                    is_opaque: decl.is_opaque,
+                    module: module.name.item.clone(),
+                },
+            );
+        }
+    }
+    Ok(structs)
+}
+
 pub fn type_check(module: &Module) -> Result<(), TypeError> {
     let use_map = UseMap::new(module);
+    let struct_map = collect_structs(module, &use_map)?;
     let mut functions = intrinsic_functions();
     for item in &module.items {
         if let Item::Function(func) = item {
@@ -146,7 +191,7 @@ pub fn type_check(module: &Module) -> Result<(), TypeError> {
 
     for item in &module.items {
         if let Item::Function(func) = item {
-            check_function(func, &functions, &use_map)?;
+            check_function(func, &functions, &use_map, &struct_map, &module.name.item)?;
         }
     }
 
@@ -157,6 +202,8 @@ fn check_function(
     func: &Function,
     functions: &HashMap<String, FunctionSig>,
     use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
+    module_name: &str,
 ) -> Result<(), TypeError> {
     let mut locals = HashMap::new();
     for param in &func.params {
@@ -174,6 +221,8 @@ fn check_function(
             functions,
             &mut locals,
             use_map,
+            struct_map,
+            module_name,
             &mut has_return,
         )?;
     }
@@ -194,11 +243,21 @@ fn check_stmt(
     functions: &HashMap<String, FunctionSig>,
     locals: &mut HashMap<String, Ty>,
     use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
+    module_name: &str,
     has_return: &mut bool,
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
-            let expr_ty = check_expr(&let_stmt.expr, functions, locals, use_map, ret_ty)?;
+            let expr_ty = check_expr(
+                &let_stmt.expr,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                ret_ty,
+                module_name,
+            )?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
                 let annot_ty = lower_type(annot, use_map)?;
                 if annot_ty != expr_ty {
@@ -215,7 +274,7 @@ fn check_stmt(
         }
         Stmt::Return(ret_stmt) => {
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
-                check_expr(expr, functions, locals, use_map, ret_ty)?
+                check_expr(expr, functions, locals, use_map, struct_map, ret_ty, module_name)?
             } else {
                 Ty::Builtin(BuiltinType::Unit)
             };
@@ -228,7 +287,8 @@ fn check_stmt(
             *has_return = true;
         }
         Stmt::If(if_stmt) => {
-            let cond_ty = check_expr(&if_stmt.cond, functions, locals, use_map, ret_ty)?;
+            let cond_ty =
+                check_expr(&if_stmt.cond, functions, locals, use_map, struct_map, ret_ty, module_name)?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
                     "if condition must be bool".to_string(),
@@ -241,14 +301,26 @@ fn check_stmt(
                 functions,
                 locals,
                 use_map,
+                struct_map,
+                module_name,
                 has_return,
             )?;
             if let Some(block) = &if_stmt.else_block {
-                check_block(block, ret_ty, functions, locals, use_map, has_return)?;
+                check_block(
+                    block,
+                    ret_ty,
+                    functions,
+                    locals,
+                    use_map,
+                    struct_map,
+                    module_name,
+                    has_return,
+                )?;
             }
         }
         Stmt::While(while_stmt) => {
-            let cond_ty = check_expr(&while_stmt.cond, functions, locals, use_map, ret_ty)?;
+            let cond_ty =
+                check_expr(&while_stmt.cond, functions, locals, use_map, struct_map, ret_ty, module_name)?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
                     "while condition must be bool".to_string(),
@@ -261,6 +333,8 @@ fn check_stmt(
                 functions,
                 locals,
                 use_map,
+                struct_map,
+                module_name,
                 has_return,
             )?;
         }
@@ -272,14 +346,24 @@ fn check_stmt(
                     functions,
                     locals,
                     use_map,
+                    struct_map,
                     ret_ty,
+                    module_name,
                     Some(&mut any_return),
                 )?;
                 if any_return {
                     *has_return = true;
                 }
             } else {
-                check_expr(&expr_stmt.expr, functions, locals, use_map, ret_ty)?;
+                check_expr(
+                    &expr_stmt.expr,
+                    functions,
+                    locals,
+                    use_map,
+                    struct_map,
+                    ret_ty,
+                    module_name,
+                )?;
             }
         }
     }
@@ -293,10 +377,21 @@ fn check_block(
     functions: &HashMap<String, FunctionSig>,
     locals: &mut HashMap<String, Ty>,
     use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
+    module_name: &str,
     has_return: &mut bool,
 ) -> Result<(), TypeError> {
     for stmt in &block.stmts {
-        check_stmt(stmt, ret_ty, functions, locals, use_map, has_return)?;
+        check_stmt(
+            stmt,
+            ret_ty,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            module_name,
+            has_return,
+        )?;
     }
     Ok(())
 }
@@ -306,7 +401,9 @@ fn check_expr(
     functions: &HashMap<String, FunctionSig>,
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
     ret_ty: &Ty,
+    module_name: &str,
 ) -> Result<Ty, TypeError> {
     match expr {
         Expr::Literal(lit) => match &lit.value {
@@ -345,7 +442,8 @@ fn check_expr(
                     ));
                 }
                 for (arg, expected) in call.args.iter().zip(&sig.params) {
-                    let arg_ty = check_expr(arg, functions, locals, use_map, ret_ty)?;
+                    let arg_ty =
+                        check_expr(arg, functions, locals, use_map, struct_map, ret_ty, module_name)?;
                     if &arg_ty != expected {
                         return Err(TypeError::new(
                             format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
@@ -360,8 +458,18 @@ fn check_expr(
                 call.callee.span(),
             )),
         },
+        Expr::StructLiteral(lit) => check_struct_literal(
+            lit,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            ret_ty,
+            module_name,
+        ),
         Expr::Unary(unary) => {
-            let expr_ty = check_expr(&unary.expr, functions, locals, use_map, ret_ty)?;
+            let expr_ty =
+                check_expr(&unary.expr, functions, locals, use_map, struct_map, ret_ty, module_name)?;
             match unary.op {
                 UnaryOp::Neg => {
                     if expr_ty == Ty::Builtin(BuiltinType::I32)
@@ -388,8 +496,10 @@ fn check_expr(
             }
         }
         Expr::Binary(binary) => {
-            let left = check_expr(&binary.left, functions, locals, use_map, ret_ty)?;
-            let right = check_expr(&binary.right, functions, locals, use_map, ret_ty)?;
+            let left =
+                check_expr(&binary.left, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+            let right =
+                check_expr(&binary.right, functions, locals, use_map, struct_map, ret_ty, module_name)?;
             match binary.op {
                 BinaryOp::Add
                 | BinaryOp::Sub
@@ -436,9 +546,26 @@ fn check_expr(
             }
         }
         Expr::Match(match_expr) => {
-            check_match_expr(match_expr, functions, locals, use_map, ret_ty, None)
+            check_match_expr(
+                match_expr,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                ret_ty,
+                module_name,
+                None,
+            )
         }
-        Expr::Grouping(group) => check_expr(&group.expr, functions, locals, use_map, ret_ty),
+        Expr::Grouping(group) => check_expr(
+            &group.expr,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            ret_ty,
+            module_name,
+        ),
     }
 }
 
@@ -447,10 +574,13 @@ fn check_match_expr(
     functions: &HashMap<String, FunctionSig>,
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
     ret_ty: &Ty,
+    module_name: &str,
     any_return: Option<&mut bool>,
 ) -> Result<Ty, TypeError> {
-    let match_ty = check_expr(&match_expr.expr, functions, locals, use_map, ret_ty)?;
+    let match_ty =
+        check_expr(&match_expr.expr, functions, locals, use_map, struct_map, ret_ty, module_name)?;
     let mut saw_return = false;
     for arm in &match_expr.arms {
         let mut arm_locals = locals.clone();
@@ -462,6 +592,8 @@ fn check_match_expr(
             functions,
             &mut arm_locals,
             use_map,
+            struct_map,
+            module_name,
             &mut arm_return,
         )?;
         if arm_return {
@@ -472,6 +604,77 @@ fn check_match_expr(
         *flag = saw_return;
     }
     Ok(Ty::Builtin(BuiltinType::Unit))
+}
+
+fn check_struct_literal(
+    lit: &StructLiteralExpr,
+    functions: &HashMap<String, FunctionSig>,
+    locals: &HashMap<String, Ty>,
+    use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
+    ret_ty: &Ty,
+    module_name: &str,
+) -> Result<Ty, TypeError> {
+    let type_name = resolve_type_name(&lit.path, use_map);
+    if let Some(opaque_module) = opaque_type_module(&type_name) {
+        if opaque_module != module_name {
+            let display = lit
+                .path
+                .segments
+                .last()
+                .map(|seg| seg.item.clone())
+                .unwrap_or(type_name.clone());
+            return Err(TypeError::new(
+                format!(
+                    "cannot construct opaque type `{display}` outside module `{opaque_module}`"
+                ),
+                lit.span,
+            ));
+        }
+    }
+    let key = if lit.path.segments.len() == 1 {
+        lit.path.segments[0].item.clone()
+    } else {
+        type_name.clone()
+    };
+    let info = struct_map.get(&key).ok_or_else(|| {
+        TypeError::new(format!("unknown struct `{}`", key), lit.span)
+    })?;
+    if info.is_opaque && info.module != module_name {
+        return Err(TypeError::new(
+            format!(
+                "cannot construct opaque type `{}` outside module `{}`",
+                key, info.module
+            ),
+            lit.span,
+        ));
+    }
+
+    let mut remaining = info.fields.clone();
+    for field in &lit.fields {
+        let expected = remaining.remove(&field.name.item).ok_or_else(|| {
+            TypeError::new(
+                format!("unknown field `{}`", field.name.item),
+                field.span,
+            )
+        })?;
+        let actual =
+            check_expr(&field.expr, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+        if actual != expected {
+            return Err(TypeError::new(
+                format!("field `{}` expects {expected:?}, found {actual:?}", field.name.item),
+                field.span,
+            ));
+        }
+    }
+    if let Some((missing, _)) = remaining.into_iter().next() {
+        return Err(TypeError::new(
+            format!("missing field `{missing}`"),
+            lit.span,
+        ));
+    }
+
+    Ok(Ty::Path(type_name, Vec::new()))
 }
 
 fn bind_pattern(
@@ -516,6 +719,30 @@ fn bind_pattern(
     }
 }
 
+fn resolve_type_name(path: &Path, use_map: &UseMap) -> String {
+    let resolved = resolve_path(path, use_map);
+    if resolved.len() == 1 {
+        match resolved[0].as_str() {
+            "System" => return "sys.system.System".to_string(),
+            "Console" => return "sys.console.Console".to_string(),
+            "ReadFS" => return "sys.fs.ReadFS".to_string(),
+            "FsErr" => return "sys.fs.FsErr".to_string(),
+            _ => {}
+        }
+    }
+    resolved.join(".")
+}
+
+fn opaque_type_module(type_name: &str) -> Option<String> {
+    match type_name {
+        "sys.system.System" => Some("sys.system".to_string()),
+        "sys.console.Console" => Some("sys.console".to_string()),
+        "sys.fs.ReadFS" => Some("sys.fs".to_string()),
+        "sys.fs.FsErr" => Some("sys.fs".to_string()),
+        _ => None,
+    }
+}
+
 fn lower_type(ty: &Type, use_map: &UseMap) -> Result<Ty, TypeError> {
     let resolved = resolve_path(&ty.path, use_map);
     let path = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
@@ -532,15 +759,9 @@ fn lower_type(ty: &Type, use_map: &UseMap) -> Result<Ty, TypeError> {
         if let Some(builtin) = builtin {
             return Ok(Ty::Builtin(builtin));
         }
-        let alias = match path[0] {
-            "System" => Some("sys.system.System"),
-            "Console" => Some("sys.console.Console"),
-            "ReadFS" => Some("sys.fs.ReadFS"),
-            "FsErr" => Some("sys.fs.FsErr"),
-            _ => None,
-        };
-        if let Some(name) = alias {
-            return Ok(Ty::Path(name.to_string(), Vec::new()));
+        let alias = resolve_type_name(&ty.path, use_map);
+        if alias != resolved.join(".") {
+            return Ok(Ty::Path(alias, Vec::new()));
         }
     }
     let joined = path.join(".");
@@ -562,6 +783,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,
             Expr::Match(m) => m.span,

@@ -80,9 +80,25 @@ impl Parser {
 
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         let is_pub = self.maybe_consume(TokenKind::Pub).is_some();
+        let is_opaque = self.maybe_consume(TokenKind::Opaque).is_some();
         match self.peek_kind() {
-            Some(TokenKind::Fn) => Ok(Item::Function(self.parse_function(is_pub)?)),
-            Some(TokenKind::Struct) => Ok(Item::Struct(self.parse_struct(is_pub)?)),
+            Some(TokenKind::Fn) => {
+                if is_opaque {
+                    return Err(self.error_current(
+                        "opaque applies only to struct declarations".to_string(),
+                    ));
+                }
+                Ok(Item::Function(self.parse_function(is_pub)?))
+            }
+            Some(TokenKind::Struct) => Ok(Item::Struct(self.parse_struct(is_pub, is_opaque)?)),
+            Some(TokenKind::Enum) => {
+                if is_opaque {
+                    return Err(self.error_current(
+                        "opaque applies only to struct declarations".to_string(),
+                    ));
+                }
+                Ok(Item::Enum(self.parse_enum(is_pub)?))
+            }
             Some(other) => Err(self.error_current(format!(
                 "expected item, found {other:?}"
             ))),
@@ -124,19 +140,70 @@ impl Parser {
         })
     }
 
-    fn parse_struct(&mut self, is_pub: bool) -> Result<StructDecl, ParseError> {
+    fn parse_struct(&mut self, is_pub: bool, is_opaque: bool) -> Result<StructDecl, ParseError> {
         let start = self.expect(TokenKind::Struct)?.span.start;
         let name = self.expect_ident()?;
-        self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
+        let end = if self.peek_kind() == Some(TokenKind::LBrace) {
+            self.bump();
+            if self.peek_kind() != Some(TokenKind::RBrace) {
+                loop {
+                    let field_name = self.expect_ident()?;
+                    self.expect(TokenKind::Colon)?;
+                    let ty = self.parse_type()?;
+                    fields.push(Field {
+                        name: field_name,
+                        ty,
+                    });
+                    if self.maybe_consume(TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+            }
+            let end = self.expect(TokenKind::RBrace)?.span.end;
+            if is_opaque && !fields.is_empty() {
+                return Err(self.error_at(
+                    Span::new(start, end),
+                    "opaque struct cannot declare fields".to_string(),
+                ));
+            }
+            end
+        } else {
+            name.span.end
+        };
+        Ok(StructDecl {
+            name,
+            fields,
+            is_pub,
+            is_opaque,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_enum(&mut self, is_pub: bool) -> Result<EnumDecl, ParseError> {
+        let start = self.expect(TokenKind::Enum)?.span.start;
+        let name = self.expect_ident()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut variants = Vec::new();
         if self.peek_kind() != Some(TokenKind::RBrace) {
             loop {
-                let field_name = self.expect_ident()?;
-                self.expect(TokenKind::Colon)?;
-                let ty = self.parse_type()?;
-                fields.push(Field {
-                    name: field_name,
-                    ty,
+                let variant_name = self.expect_ident()?;
+                let variant_start = variant_name.span.start;
+                let payload = if self.peek_kind() == Some(TokenKind::LParen) {
+                    self.bump();
+                    let ty = self.parse_type()?;
+                    self.expect(TokenKind::RParen)?;
+                    Some(ty)
+                } else {
+                    None
+                };
+                let end = payload
+                    .as_ref()
+                    .map_or(variant_name.span.end, |ty| ty.span.end);
+                variants.push(EnumVariant {
+                    name: variant_name,
+                    payload,
+                    span: Span::new(variant_start, end),
                 });
                 if self.maybe_consume(TokenKind::Comma).is_none() {
                     break;
@@ -144,9 +211,9 @@ impl Parser {
             }
         }
         let end = self.expect(TokenKind::RBrace)?.span.end;
-        Ok(StructDecl {
+        Ok(EnumDecl {
             name,
-            fields,
+            variants,
             is_pub,
             span: Span::new(start, end),
         })
@@ -385,7 +452,11 @@ impl Parser {
             }
             Some(TokenKind::Ident) => {
                 let path = self.parse_path()?;
-                Ok(Expr::Path(path))
+                if self.peek_kind() == Some(TokenKind::LBrace) {
+                    self.parse_struct_literal(path)
+                } else {
+                    Ok(Expr::Path(path))
+                }
             }
             Some(other) => Err(self.error_current(format!(
                 "unexpected token in expression: {other:?}"
@@ -487,6 +558,38 @@ impl Parser {
         }
         let span = Span::new(path.span.start, end);
         Ok(Type { path, args, span })
+    }
+
+    fn parse_struct_literal(&mut self, path: Path) -> Result<Expr, ParseError> {
+        let start = path.span.start;
+        self.expect(TokenKind::LBrace)?;
+        let mut fields = Vec::new();
+        if self.peek_kind() != Some(TokenKind::RBrace) {
+            loop {
+                let name = self.expect_ident()?;
+                self.expect(TokenKind::Colon)?;
+                let expr = self.parse_expr()?;
+                let end = expr.span().end;
+                fields.push(StructLiteralField {
+                    name,
+                    expr,
+                    span: Span::new(start, end),
+                });
+                if self.maybe_consume(TokenKind::Comma).is_some() {
+                    if self.peek_kind() == Some(TokenKind::RBrace) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        let end = self.expect(TokenKind::RBrace)?.span.end;
+        Ok(Expr::StructLiteral(StructLiteralExpr {
+            path,
+            fields,
+            span: Span::new(start, end),
+        }))
     }
 
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
@@ -625,6 +728,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,
             Expr::Match(m) => m.span,

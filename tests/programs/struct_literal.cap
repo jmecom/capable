@@ -1,0 +1,7 @@
+module demo
+
+struct Pair { left: i32, right: i32 }
+
+fn make() -> Pair {
+  return Pair { left: 1, right: 2 }
+}

@@ -24,6 +24,13 @@ fn typecheck_fs_read_ok() {
 }
 
 #[test]
+fn typecheck_struct_literal_ok() {
+    let source = load_program("struct_literal.cap");
+    let module = parse_module(&source).expect("parse module");
+    type_check(&module).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_missing_console_cap() {
     let source = load_program("should_fail_no_console.cap");
     let module = parse_module(&source).expect("parse module");

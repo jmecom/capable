@@ -39,6 +39,10 @@ pub enum TokenKind {
     Return,
     #[token("struct")]
     Struct,
+    #[token("enum")]
+    Enum,
+    #[token("opaque")]
+    Opaque,
     #[token("match")]
     Match,
     #[token("true")]

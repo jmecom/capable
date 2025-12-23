@@ -22,3 +22,10 @@ fn snapshot_struct_and_match() {
     let module = parse_module(&source).expect("parse module");
     insta::assert_debug_snapshot!(module);
 }
+
+#[test]
+fn snapshot_struct_literal() {
+    let source = load_program("struct_literal.cap");
+    let module = parse_module(&source).expect("parse module");
+    insta::assert_debug_snapshot!(module);
+}

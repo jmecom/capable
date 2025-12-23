@@ -51,6 +51,7 @@ pub struct UseDecl {
 pub enum Item {
     Function(Function),
     Struct(StructDecl),
+    Enum(EnumDecl),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +75,22 @@ pub struct StructDecl {
     pub name: Ident,
     pub fields: Vec<Field>,
     pub is_pub: bool,
+    pub is_opaque: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumDecl {
+    pub name: Ident,
+    pub variants: Vec<EnumVariant>,
+    pub is_pub: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub name: Ident,
+    pub payload: Option<Type>,
     pub span: Span,
 }
 
@@ -138,10 +155,25 @@ pub enum Expr {
     Literal(LiteralExpr),
     Path(Path),
     Call(CallExpr),
+    StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
     Match(MatchExpr),
     Grouping(GroupingExpr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructLiteralExpr {
+    pub path: Path,
+    pub fields: Vec<StructLiteralField>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructLiteralField {
+    pub name: Ident,
+    pub expr: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
