@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use capc::{load_stdlib, parse_module, type_check_program};
+use capc::{load_stdlib, load_user_modules_transitive, parse_module, type_check_program};
 
 fn load_program(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,8 +38,10 @@ fn typecheck_with_helper_module() {
     let source = load_program("with_helper.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
-    let helper = parse_module(&load_program("helper.cap")).expect("parse helper");
-    type_check_program(&module, &stdlib, &[helper]).expect("typecheck module");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/with_helper.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    type_check_program(&module, &stdlib, &user_modules).expect("typecheck module");
 }
 
 #[test]

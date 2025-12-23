@@ -1,3 +1,4 @@
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -42,7 +43,17 @@ pub fn load_module_from_path(path: &Path) -> Result<Module, ParseError> {
     parse_module(&source)
 }
 
-pub fn load_user_modules(entry_path: &Path, entry_module: &Module) -> Result<Vec<Module>, ParseError> {
+pub fn load_user_modules(
+    entry_path: &Path,
+    entry_module: &Module,
+) -> Result<Vec<Module>, ParseError> {
+    load_user_modules_transitive(entry_path, entry_module)
+}
+
+pub fn load_user_modules_transitive(
+    entry_path: &Path,
+    entry_module: &Module,
+) -> Result<Vec<Module>, ParseError> {
     let dir = entry_path
         .parent()
         .ok_or_else(|| {
@@ -53,27 +64,51 @@ pub fn load_user_modules(entry_path: &Path, entry_module: &Module) -> Result<Vec
         })?
         .to_path_buf();
     let mut modules = Vec::new();
+    let mut cache: HashMap<PathBuf, Module> = HashMap::new();
+    let mut queue: VecDeque<(PathBuf, PathBuf)> = VecDeque::new();
+
     for use_decl in &entry_module.uses {
-        let segments = &use_decl.path.segments;
-        if segments.first().map(|s| s.item.as_str()) == Some("sys") {
+        if let Some(path) = resolve_use_path(&dir, use_decl)? {
+            queue.push_back((path, dir.clone()));
+        }
+    }
+
+    while let Some((path, base_dir)) = queue.pop_front() {
+        if cache.contains_key(&path) {
             continue;
         }
-        let mut path = dir.clone();
-        if segments.len() == 1 {
-            path.push(format!("{}.cap", segments[0].item));
-        } else {
-            for seg in segments.iter().take(segments.len() - 1) {
-                path.push(&seg.item);
+        let module = load_module_from_path(&path)?;
+        for use_decl in &module.uses {
+            if let Some(dep_path) = resolve_use_path(&base_dir, use_decl)? {
+                queue.push_back((dep_path, base_dir.clone()));
             }
-            path.push(format!("{}.cap", segments.last().unwrap().item));
         }
-        if !path.exists() {
-            return Err(ParseError::new(
-                format!("module file not found for `{}`", use_decl.path),
-                use_decl.span,
-            ));
-        }
-        modules.push(load_module_from_path(&path)?);
+        cache.insert(path, module.clone());
+        modules.push(module);
     }
+
     Ok(modules)
+}
+
+fn resolve_use_path(base_dir: &Path, use_decl: &crate::ast::UseDecl) -> Result<Option<PathBuf>, ParseError> {
+    let segments = &use_decl.path.segments;
+    if segments.first().map(|s| s.item.as_str()) == Some("sys") {
+        return Ok(None);
+    }
+    let mut path = base_dir.to_path_buf();
+    if segments.len() == 1 {
+        path.push(format!("{}.cap", segments[0].item));
+    } else {
+        for seg in segments.iter().take(segments.len() - 1) {
+            path.push(&seg.item);
+        }
+        path.push(format!("{}.cap", segments.last().unwrap().item));
+    }
+    if !path.exists() {
+        return Err(ParseError::new(
+            format!("module file not found for `{}`", use_decl.path),
+            use_decl.span,
+        ));
+    }
+    Ok(Some(path))
 }
