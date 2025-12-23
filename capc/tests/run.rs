@@ -231,3 +231,17 @@ fn run_wc_file() {
     assert_eq!(code, 0);
     assert!(stdout.contains("9 22 152"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_bytes_helpers() {
+    let out_dir = make_out_dir("bytes_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/bytes_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("bytes ok"), "stdout was: {stdout:?}");
+}

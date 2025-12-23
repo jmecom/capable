@@ -244,6 +244,14 @@ fn typecheck_wc_file_ok() {
 }
 
 #[test]
+fn typecheck_bytes_helpers_ok() {
+    let source = load_program("bytes_helpers.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app
