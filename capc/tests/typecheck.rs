@@ -188,6 +188,22 @@ fn typecheck_buffer_safe_ok() {
 }
 
 #[test]
+fn typecheck_slice_safe_read_ok() {
+    let source = load_program("slice_safe_read.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_buffer_push_safe_ok() {
+    let source = load_program("buffer_push_safe.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app

@@ -1,0 +1,36 @@
+package safe
+module buffer_push_safe
+use sys.system
+use sys.console
+use sys.buffer
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  let alloc = buffer.alloc_default()
+  match buffer.buffer_new(alloc, 1) {
+    Ok(b) => {
+      let seed_slice = buffer.buffer_as_slice(b)
+      let v = buffer.slice_at(seed_slice, 0)
+      match buffer.buffer_push(b, v) {
+        Ok(u) => { u }
+        Err(e) => {
+          console.println(c, "push err")
+          buffer.buffer_free(alloc, b)
+          return 1
+        }
+      }
+      let len = buffer.buffer_len(b)
+      if (len == 2) {
+        console.println(c, "push ok")
+      } else {
+        console.println(c, "push bad")
+      }
+      buffer.buffer_free(alloc, b)
+      return 0
+    }
+    Err(e) => {
+      console.println(c, "buffer err")
+      return 1
+    }
+  }
+}
