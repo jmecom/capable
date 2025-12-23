@@ -11,10 +11,19 @@ pub type Handle = u64;
 
 static READ_FS: LazyLock<Mutex<HashMap<Handle, ReadFsState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone)]
 struct ReadFsState {
     root: PathBuf,
+}
+
+#[derive(Copy, Clone, Debug)]
+struct SliceState {
+    ptr: usize,
+    len: usize,
+    mutable: bool,
 }
 
 fn new_handle() -> Handle {
@@ -134,6 +143,86 @@ pub extern "C" fn capable_rt_cast_u8_to_u32(ptr: *mut u8) -> *mut u32 {
 #[no_mangle]
 pub extern "C" fn capable_rt_cast_u32_to_u8(ptr: *mut u32) -> *mut u8 {
     ptr as *mut u8
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_alloc_default() -> Handle {
+    new_handle()
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_from_ptr(ptr: *mut u8, len: i32) -> Handle {
+    let len = len.max(0) as usize;
+    let handle = new_handle();
+    let mut table = SLICES.lock().expect("slice table");
+    table.insert(
+        handle,
+        SliceState {
+            ptr: ptr as usize,
+            len,
+            mutable: false,
+        },
+    );
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_mut_slice_from_ptr(ptr: *mut u8, len: i32) -> Handle {
+    let len = len.max(0) as usize;
+    let handle = new_handle();
+    let mut table = SLICES.lock().expect("slice table");
+    table.insert(
+        handle,
+        SliceState {
+            ptr: ptr as usize,
+            len,
+            mutable: true,
+        },
+    );
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_len(slice: Handle) -> i32 {
+    let table = SLICES.lock().expect("slice table");
+    table
+        .get(&slice)
+        .map(|state| state.len.min(i32::MAX as usize) as i32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_at(slice: Handle, index: i32) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => return 0,
+    };
+    let table = SLICES.lock().expect("slice table");
+    let Some(state) = table.get(&slice) else {
+        return 0;
+    };
+    if state.ptr == 0 || idx >= state.len {
+        return 0;
+    }
+    let ptr = state.ptr as *mut u8;
+    unsafe { *ptr.add(idx) }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_mut_slice_at(slice: Handle, index: i32) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => return 0,
+    };
+    let table = SLICES.lock().expect("slice table");
+    let Some(state) = table.get(&slice) else {
+        return 0;
+    };
+    if state.ptr == 0 || idx >= state.len {
+        return 0;
+    }
+    let ptr = state.ptr as *mut u8;
+    unsafe { *ptr.add(idx) }
 }
 
 unsafe fn write_bytes(ptr: *const u8, len: usize, newline: bool) {

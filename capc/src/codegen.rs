@@ -335,6 +335,22 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         params: vec![TyKind::Ptr],
         ret: TyKind::Ptr,
     };
+    let mem_alloc_default = FnSig {
+        params: vec![],
+        ret: TyKind::Handle,
+    };
+    let mem_slice_from_ptr = FnSig {
+        params: vec![TyKind::Ptr, TyKind::I32],
+        ret: TyKind::Handle,
+    };
+    let mem_slice_len = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::I32,
+    };
+    let mem_slice_at = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::U8,
+    };
 
     map.insert(
         "sys.system.console".to_string(),
@@ -414,6 +430,60 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_cast,
             abi_sig: None,
             symbol: "capable_rt_cast_u32_to_u8".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.alloc_default".to_string(),
+        FnInfo {
+            sig: mem_alloc_default,
+            abi_sig: None,
+            symbol: "capable_rt_alloc_default".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.slice_from_ptr".to_string(),
+        FnInfo {
+            sig: mem_slice_from_ptr.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_from_ptr".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.mut_slice_from_ptr".to_string(),
+        FnInfo {
+            sig: mem_slice_from_ptr,
+            abi_sig: None,
+            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.slice_len".to_string(),
+        FnInfo {
+            sig: mem_slice_len,
+            abi_sig: None,
+            symbol: "capable_rt_slice_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.slice_at".to_string(),
+        FnInfo {
+            sig: mem_slice_at.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.mut_slice_at".to_string(),
+        FnInfo {
+            sig: mem_slice_at,
+            abi_sig: None,
+            symbol: "capable_rt_mut_slice_at".to_string(),
             is_runtime: true,
         },
     );
@@ -1625,6 +1695,10 @@ fn lower_ty(
     if resolved == "sys.system.System"
         || resolved == "sys.console.Console"
         || resolved == "sys.fs.ReadFS"
+        || resolved == "sys.buffer.Alloc"
+        || resolved == "sys.buffer.Buffer"
+        || resolved == "sys.buffer.Slice"
+        || resolved == "sys.buffer.MutSlice"
     {
         return TyKind::Handle;
     }
