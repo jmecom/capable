@@ -1,0 +1,255 @@
+---
+source: capc/tests/parser.rs
+assertion_line: 31
+expression: module
+---
+Module {
+    package: Safe,
+    name: Spanned {
+        item: "demo",
+        span: Span {
+            start: 8,
+            end: 12,
+        },
+    },
+    uses: [],
+    items: [
+        Struct(
+            StructDecl {
+                name: Spanned {
+                    item: "Pair",
+                    span: Span {
+                        start: 21,
+                        end: 25,
+                    },
+                },
+                fields: [
+                    Field {
+                        name: Spanned {
+                            item: "left",
+                            span: Span {
+                                start: 28,
+                                end: 32,
+                            },
+                        },
+                        ty: Type {
+                            path: Path {
+                                segments: [
+                                    Spanned {
+                                        item: "i32",
+                                        span: Span {
+                                            start: 34,
+                                            end: 37,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 34,
+                                    end: 37,
+                                },
+                            },
+                            args: [],
+                            span: Span {
+                                start: 34,
+                                end: 37,
+                            },
+                        },
+                    },
+                    Field {
+                        name: Spanned {
+                            item: "right",
+                            span: Span {
+                                start: 39,
+                                end: 44,
+                            },
+                        },
+                        ty: Type {
+                            path: Path {
+                                segments: [
+                                    Spanned {
+                                        item: "i32",
+                                        span: Span {
+                                            start: 46,
+                                            end: 49,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 46,
+                                    end: 49,
+                                },
+                            },
+                            args: [],
+                            span: Span {
+                                start: 46,
+                                end: 49,
+                            },
+                        },
+                    },
+                ],
+                is_pub: false,
+                span: Span {
+                    start: 14,
+                    end: 51,
+                },
+            },
+        ),
+        Function(
+            Function {
+                name: Spanned {
+                    item: "test",
+                    span: Span {
+                        start: 56,
+                        end: 60,
+                    },
+                },
+                params: [
+                    Param {
+                        name: Spanned {
+                            item: "flag",
+                            span: Span {
+                                start: 61,
+                                end: 65,
+                            },
+                        },
+                        ty: Type {
+                            path: Path {
+                                segments: [
+                                    Spanned {
+                                        item: "bool",
+                                        span: Span {
+                                            start: 67,
+                                            end: 71,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 67,
+                                    end: 71,
+                                },
+                            },
+                            args: [],
+                            span: Span {
+                                start: 67,
+                                end: 71,
+                            },
+                        },
+                    },
+                ],
+                ret: Type {
+                    path: Path {
+                        segments: [
+                            Spanned {
+                                item: "unit",
+                                span: Span {
+                                    start: 76,
+                                    end: 80,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 76,
+                            end: 80,
+                        },
+                    },
+                    args: [],
+                    span: Span {
+                        start: 76,
+                        end: 80,
+                    },
+                },
+                body: Block {
+                    stmts: [
+                        Expr(
+                            ExprStmt {
+                                expr: Match(
+                                    MatchExpr {
+                                        expr: Path(
+                                            Path {
+                                                segments: [
+                                                    Spanned {
+                                                        item: "flag",
+                                                        span: Span {
+                                                            start: 91,
+                                                            end: 95,
+                                                        },
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 91,
+                                                    end: 95,
+                                                },
+                                            },
+                                        ),
+                                        arms: [
+                                            MatchArm {
+                                                pattern: Wildcard(
+                                                    Span {
+                                                        start: 102,
+                                                        end: 103,
+                                                    },
+                                                ),
+                                                body: Block {
+                                                    stmts: [
+                                                        Return(
+                                                            ReturnStmt {
+                                                                expr: Some(
+                                                                    Literal(
+                                                                        LiteralExpr {
+                                                                            value: Unit,
+                                                                            span: Span {
+                                                                                start: 116,
+                                                                                end: 118,
+                                                                            },
+                                                                        },
+                                                                    ),
+                                                                ),
+                                                                span: Span {
+                                                                    start: 109,
+                                                                    end: 120,
+                                                                },
+                                                            },
+                                                        ),
+                                                    ],
+                                                    span: Span {
+                                                        start: 107,
+                                                        end: 120,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    start: 85,
+                                                    end: 120,
+                                                },
+                                            },
+                                        ],
+                                        span: Span {
+                                            start: 85,
+                                            end: 124,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 85,
+                                    end: 124,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 81,
+                        end: 126,
+                    },
+                },
+                is_pub: false,
+                span: Span {
+                    start: 53,
+                    end: 126,
+                },
+            },
+        ),
+    ],
+    span: Span {
+        start: 1,
+        end: 126,
+    },
+}

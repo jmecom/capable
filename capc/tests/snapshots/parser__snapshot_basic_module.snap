@@ -1,0 +1,218 @@
+---
+source: capc/tests/parser.rs
+assertion_line: 14
+expression: module
+---
+Module {
+    package: Safe,
+    name: Spanned {
+        item: "app",
+        span: Span {
+            start: 8,
+            end: 11,
+        },
+    },
+    uses: [],
+    items: [
+        Function(
+            Function {
+                name: Spanned {
+                    item: "add",
+                    span: Span {
+                        start: 20,
+                        end: 23,
+                    },
+                },
+                params: [
+                    Param {
+                        name: Spanned {
+                            item: "a",
+                            span: Span {
+                                start: 24,
+                                end: 25,
+                            },
+                        },
+                        ty: Type {
+                            path: Path {
+                                segments: [
+                                    Spanned {
+                                        item: "i32",
+                                        span: Span {
+                                            start: 27,
+                                            end: 30,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 27,
+                                    end: 30,
+                                },
+                            },
+                            args: [],
+                            span: Span {
+                                start: 27,
+                                end: 30,
+                            },
+                        },
+                    },
+                    Param {
+                        name: Spanned {
+                            item: "b",
+                            span: Span {
+                                start: 32,
+                                end: 33,
+                            },
+                        },
+                        ty: Type {
+                            path: Path {
+                                segments: [
+                                    Spanned {
+                                        item: "i32",
+                                        span: Span {
+                                            start: 35,
+                                            end: 38,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 35,
+                                    end: 38,
+                                },
+                            },
+                            args: [],
+                            span: Span {
+                                start: 35,
+                                end: 38,
+                            },
+                        },
+                    },
+                ],
+                ret: Type {
+                    path: Path {
+                        segments: [
+                            Spanned {
+                                item: "i32",
+                                span: Span {
+                                    start: 43,
+                                    end: 46,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 43,
+                            end: 46,
+                        },
+                    },
+                    args: [],
+                    span: Span {
+                        start: 43,
+                        end: 46,
+                    },
+                },
+                body: Block {
+                    stmts: [
+                        Let(
+                            LetStmt {
+                                name: Spanned {
+                                    item: "c",
+                                    span: Span {
+                                        start: 55,
+                                        end: 56,
+                                    },
+                                },
+                                ty: None,
+                                expr: Binary(
+                                    BinaryExpr {
+                                        op: Add,
+                                        left: Path(
+                                            Path {
+                                                segments: [
+                                                    Spanned {
+                                                        item: "a",
+                                                        span: Span {
+                                                            start: 59,
+                                                            end: 60,
+                                                        },
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 59,
+                                                    end: 60,
+                                                },
+                                            },
+                                        ),
+                                        right: Path(
+                                            Path {
+                                                segments: [
+                                                    Spanned {
+                                                        item: "b",
+                                                        span: Span {
+                                                            start: 63,
+                                                            end: 64,
+                                                        },
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 63,
+                                                    end: 64,
+                                                },
+                                            },
+                                        ),
+                                        span: Span {
+                                            start: 59,
+                                            end: 64,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 51,
+                                    end: 64,
+                                },
+                            },
+                        ),
+                        Return(
+                            ReturnStmt {
+                                expr: Some(
+                                    Path(
+                                        Path {
+                                            segments: [
+                                                Spanned {
+                                                    item: "c",
+                                                    span: Span {
+                                                        start: 74,
+                                                        end: 75,
+                                                    },
+                                                },
+                                            ],
+                                            span: Span {
+                                                start: 74,
+                                                end: 75,
+                                            },
+                                        },
+                                    ),
+                                ),
+                                span: Span {
+                                    start: 67,
+                                    end: 77,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 47,
+                        end: 77,
+                    },
+                },
+                is_pub: true,
+                span: Span {
+                    start: 17,
+                    end: 77,
+                },
+            },
+        ),
+    ],
+    span: Span {
+        start: 1,
+        end: 77,
+    },
+}

@@ -1,0 +1,22 @@
+set shell := ["bash", "-uc"]
+
+default:
+  @just --list
+
+fmt:
+  cargo fmt
+
+check:
+  cargo check
+
+test:
+  cargo test
+
+snap:
+  cargo insta test
+
+parse file:
+  cargo run -p capc -- parse {{file}}
+
+check-file file:
+  cargo run -p capc -- check {{file}}
