@@ -24,6 +24,14 @@ fn typecheck_fs_read_ok() {
 }
 
 #[test]
+fn typecheck_missing_console_cap() {
+    let source = load_program("should_fail_no_console.cap");
+    let module = parse_module(&source).expect("parse module");
+    let err = type_check(&module).expect_err("expected type error");
+    assert!(err.to_string().contains("unknown value `c`"));
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app

@@ -2,6 +2,7 @@ module app
 use sys.console
 
 pub fn main(sys: System) -> i32 {
-  console.println(???, "nope")
+  // Intentionally do NOT call system.console(sys)
+  console.println(c, "nope")
   return 0
 }
