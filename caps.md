@@ -1,0 +1,168 @@
+# Capability Model Design
+
+This repo implements a **capability-secure systems language** where **safe code has no ambient authority**.
+
+The core idea: **authority is a value**. If code doesn’t receive a capability value, it cannot perform the corresponding privileged action (filesystem, network, console, process, etc.).
+
+---
+
+## Goals
+
+- Prevent “ambient authority” in libraries: third-party safe code should not be able to touch the OS unless explicitly granted.
+- Make authority flow visible in function signatures and call sites.
+- Keep the model practical for systems work by drawing an explicit boundary: `unsafe` / FFI can bypass the model and must be auditable.
+
+---
+
+## Mental model
+
+A capability is an **unforgeable token of permission** (think: keycard).
+
+- `Console` capability → permission to print
+- `ReadFS` capability → permission to read files (scoped/attenuated)
+- `System` capability → root authority that can mint sub-capabilities
+
+No global “OS object” exists in safe code. Authority flows only via:
+- function parameters
+- return values
+- struct fields that explicitly contain capabilities
+
+---
+
+## The three moving parts
+
+### 1) Opaque capability types (unforgeable tokens)
+Capabilities are **opaque structs** defined in `sys.*`:
+
+- user code can hold/pass/store them
+- user code cannot construct them (`Console{}` is illegal outside `sys.console`)
+- user code cannot inspect internals (no field access)
+
+This prevents forging authority “out of nowhere.”
+
+### 2) Privileged APIs require the capability value
+All privileged operations live under `sys.*` and require the relevant capability:
+
+- `sys.console.println(c: Console, s: string)`
+- `sys.fs.read_to_string(fs: ReadFS, path: string)`
+
+So if you don’t have a `Console`, you cannot call `println`. The compiler will reject it.
+
+### 3) Root authority comes from `System`
+The entrypoint receives a root capability:
+
+```cap
+pub fn main(sys: System) -> i32
+````
+
+`System` can mint attenuated capabilities:
+
+* `system.console(sys) -> Console`
+* `system.fs_read(sys, root: string) -> ReadFS`
+
+This is the only “source” of capability tokens in safe code.
+
+---
+
+## Enforcement model: A + B
+
+We use two layers of enforcement.
+
+### A) Static enforcement (compiler / typechecker)
+
+**A enforces: “you can’t call privileged operations without the right capability value.”**
+
+Mechanically:
+
+* there is no `core` API that does I/O
+* privileged functions exist only in `sys.*`
+* those functions require capability arguments
+* capability types are opaque and unconstructible in safe user code
+
+Result:
+
+* safe code cannot reach I/O without explicitly receiving a capability value
+* authority flow is visible in function signatures and call sites
+
+Example:
+
+```cap
+fn add(a: i32, b: i32) -> i32 { a + b } // cannot print/read/net: no caps in scope
+```
+
+### B) Dynamic enforcement (runtime / sys layer)
+
+**B enforces: “even with a capability, you only get what it grants.”**
+
+Capabilities can encode *attenuation* (scoping / rights). Example: `ReadFS` is not “the whole filesystem,” but “read-only access rooted at ./config”.
+
+So `sys.fs.read_to_string(fs, path)` performs runtime checks:
+
+* reject absolute paths
+* normalize `.` / `..`
+* ensure the resolved path stays under the capability’s root
+* enforce rights (read-only vs write, etc.)
+
+Result:
+
+* code with a `ReadFS("./config")` cannot read `../secrets.txt`
+* policies live in capabilities; sys calls must validate them
+
+---
+
+## Why this blocks ambient authority in libraries
+
+In typical systems languages, the OS is “ambiently” available: any code can call `open()`, `connect()`, etc.
+
+In this model, safe code can only do OS actions by calling `sys.*` functions, and those require capability arguments. Libraries can’t “decide” to read your disk unless you passed them a `ReadFS`. They can’t “phone home” unless you passed them a network capability.
+
+Authority becomes explicit and reviewable.
+
+---
+
+## Safe vs Unsafe boundary
+
+This model provides strong guarantees for **safe code** only.
+
+* `unsafe` / FFI / inline asm can bypass `sys.*` and talk to the OS directly.
+* Therefore:
+
+  * `package safe` is the default
+  * `package unsafe` is required for FFI/asm/raw syscalls
+  * tooling supports `--safe-only` builds and `audit` output
+
+Guarantee statement (what we actually promise):
+
+> Any code that is transitively **safe** cannot perform privileged operations unless explicitly given the corresponding capability value.
+
+---
+
+## Practical tests (what we rely on)
+
+Negative tests should not use placeholders like `???`.
+Instead, they should fail due to missing capabilities or inability to forge them.
+
+Examples:
+
+1. Missing cap in scope:
+
+* calling `console.println(c, ...)` without any `c` bound from `system.console(sys)` should fail.
+
+2. Forging opaque cap:
+
+* `let c = Console{}` should fail: “cannot construct opaque type.”
+
+These tests validate the unforgeability + explicit passing model.
+
+---
+
+## Summary
+
+* **A (static)**: no capability value ⇒ cannot compile privileged calls
+* **B (dynamic)**: capability value still enforces scope/rights at runtime
+* Capability types are **opaque tokens** minted only from `System`
+* `unsafe` is the explicit escape hatch and must be auditable
+
+```
+::contentReference[oaicite:0]{index=0}
+```

@@ -1,4 +1,4 @@
-module app
+module fs_read
 use sys.system
 use sys.fs
 use sys.console

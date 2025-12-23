@@ -1,4 +1,4 @@
-module app
+module hello
 use sys.system
 use sys.console
 

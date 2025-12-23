@@ -1,4 +1,4 @@
-module app
+module with_helper
 use helper
 use sys.system
 use sys.console

@@ -1,4 +1,4 @@
-module demo
+module struct_literal
 
 struct Pair { left: i32, right: i32 }
 

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use miette::{miette, NamedSource, Result};
 
-use capc::{load_stdlib, load_user_modules, parse_module, type_check_program};
+use capc::{parse_module, type_check_program, validate_module_path, ModuleGraph};
 
 #[derive(Debug, Parser)]
 #[command(name = "capc", version, about = "Capable compiler (milestone 0/1)")]
@@ -38,10 +38,17 @@ fn main() -> Result<()> {
                 let named = NamedSource::new(path.display().to_string(), source.clone());
                 miette::Report::new(err).with_source_code(named)
             })?;
-            let stdlib = load_stdlib().map_err(|err| {
+            let root = path.parent().ok_or_else(|| {
+                miette!("entry path has no parent directory")
+            })?;
+            validate_module_path(&module, &path, root).map_err(|err| {
                 miette::Report::new(err)
             })?;
-            let user_modules = load_user_modules(&path, &module).map_err(|err| {
+            let mut graph = ModuleGraph::new();
+            let stdlib = graph.load_stdlib().map_err(|err| {
+                miette::Report::new(err)
+            })?;
+            let user_modules = graph.load_user_modules_transitive(&path, &module).map_err(|err| {
                 miette::Report::new(err)
             })?;
             type_check_program(&module, &stdlib, &user_modules).map_err(|err| {

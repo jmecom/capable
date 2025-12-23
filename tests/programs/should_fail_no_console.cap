@@ -1,4 +1,4 @@
-module app
+module should_fail_no_console
 use sys.console
 
 pub fn main(sys: System) -> i32 {
