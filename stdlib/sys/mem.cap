@@ -1,0 +1,5 @@
+package unsafe
+module sys.mem
+
+pub extern fn malloc(size: i64) -> *u32
+pub extern fn free(ptr: *u32) -> unit

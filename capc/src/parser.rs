@@ -140,7 +140,7 @@ impl Parser {
         let ret = self.parse_type()?;
         let end = self
             .maybe_consume(TokenKind::Semi)
-            .map_or(ret.span.end, |t| t.span.end);
+            .map_or(ret.span().end, |t| t.span.end);
         Ok(ExternFunction {
             name,
             params,
@@ -243,7 +243,7 @@ impl Parser {
                 };
                 let end = payload
                     .as_ref()
-                    .map_or(variant_name.span.end, |ty| ty.span.end);
+                    .map_or(variant_name.span.end, |ty| ty.span().end);
                 variants.push(EnumVariant {
                     name: variant_name,
                     payload,
@@ -600,6 +600,16 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        if self.peek_kind() == Some(TokenKind::Star) {
+            let start = self.bump().unwrap().span.start;
+            let target = self.parse_type()?;
+            let span = Span::new(start, target.span().end);
+            return Ok(Type::Ptr {
+                target: Box::new(target),
+                span,
+            });
+        }
+
         let path = self.parse_path()?;
         let mut args = Vec::new();
         let mut end = path.span.end;
@@ -616,7 +626,7 @@ impl Parser {
             end = self.expect(TokenKind::RBracket)?.span.end;
         }
         let span = Span::new(path.span.start, end);
-        Ok(Type { path, args, span })
+        Ok(Type::Path { path, args, span })
     }
 
     fn parse_struct_literal(&mut self, path: Path) -> Result<Expr, ParseError> {

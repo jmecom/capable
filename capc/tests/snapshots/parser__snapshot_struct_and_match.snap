@@ -1,5 +1,6 @@
 ---
 source: capc/tests/parser.rs
+assertion_line: 23
 expression: module
 ---
 Module {
@@ -124,7 +125,7 @@ Module {
                                 end: 73,
                             },
                         },
-                        ty: Type {
+                        ty: Path {
                             path: Path {
                                 segments: [
                                     Spanned {
@@ -148,7 +149,7 @@ Module {
                         },
                     },
                 ],
-                ret: Type {
+                ret: Path {
                     path: Path {
                         segments: [
                             Spanned {

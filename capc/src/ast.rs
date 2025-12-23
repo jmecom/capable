@@ -298,8 +298,16 @@ pub enum Pattern {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Type {
-    pub path: Path,
-    pub args: Vec<Type>,
-    pub span: Span,
+pub enum Type {
+    Path { path: Path, args: Vec<Type>, span: Span },
+    Ptr { target: Box<Type>, span: Span },
+}
+
+impl Type {
+    pub fn span(&self) -> Span {
+        match self {
+            Type::Path { span, .. } => *span,
+            Type::Ptr { span, .. } => *span,
+        }
+    }
 }

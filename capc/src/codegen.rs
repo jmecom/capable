@@ -38,6 +38,7 @@ enum TyKind {
     Unit,
     String,
     Handle,
+    Ptr,
     Result(Box<TyKind>, Box<TyKind>),
     ResultString,
 }
@@ -253,6 +254,7 @@ fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
             signature.params.push(AbiParam::new(ir::types::I64));
         }
         TyKind::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
+        TyKind::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
         TyKind::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
         TyKind::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
         TyKind::Result(ok, err) => {
@@ -274,6 +276,7 @@ fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
         TyKind::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
         TyKind::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
         TyKind::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
+        TyKind::Ptr => signature.returns.push(AbiParam::new(ptr_ty)),
         TyKind::String => {
             signature.returns.push(AbiParam::new(ptr_ty));
             signature.returns.push(AbiParam::new(ir::types::I64));
@@ -1365,7 +1368,7 @@ fn value_from_params(
 ) -> ValueRepr {
     match ty {
         TyKind::Unit => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
-        TyKind::I32 | TyKind::Bool | TyKind::Handle => {
+        TyKind::I32 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
             let val = params[*idx];
             *idx += 1;
             ValueRepr::Single(val)
@@ -1399,7 +1402,7 @@ fn value_from_results(
 ) -> Result<ValueRepr, CodegenError> {
     match ty {
         TyKind::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
-        TyKind::I32 | TyKind::Bool | TyKind::Handle => {
+        TyKind::I32 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
             let val = results
                 .get(*idx)
                 .ok_or_else(|| CodegenError::Codegen("missing return value".to_string()))?;
@@ -1522,7 +1525,12 @@ fn lower_ty(
     stdlib: &StdlibIndex,
     enum_index: &EnumIndex,
 ) -> TyKind {
-    let resolved = resolve_type_name(&ty.path, use_map, stdlib);
+    let resolved = match ty {
+        AstType::Ptr { .. } => {
+            return TyKind::Ptr;
+        }
+        AstType::Path { path, .. } => resolve_type_name(path, use_map, stdlib),
+    };
     if resolved == "i32" {
         return TyKind::I32;
     }
@@ -1535,10 +1543,14 @@ fn lower_ty(
     if resolved == "string" {
         return TyKind::String;
     }
-    if resolved == "Result" && ty.args.len() == 2 {
-        let ok = lower_ty(&ty.args[0], use_map, stdlib, enum_index);
-        let err = lower_ty(&ty.args[1], use_map, stdlib, enum_index);
-        return TyKind::Result(Box::new(ok), Box::new(err));
+    if resolved == "Result" {
+        if let AstType::Path { args, .. } = ty {
+            if args.len() == 2 {
+                let ok = lower_ty(&args[0], use_map, stdlib, enum_index);
+                let err = lower_ty(&args[1], use_map, stdlib, enum_index);
+                return TyKind::Result(Box::new(ok), Box::new(err));
+            }
+        }
     }
     if resolved == "sys.system.System"
         || resolved == "sys.console.Console"

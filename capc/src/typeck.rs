@@ -7,6 +7,7 @@ use crate::error::TypeError;
 pub enum Ty {
     Builtin(BuiltinType),
     Path(String, Vec<Ty>),
+    Ptr(Box<Ty>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,14 +294,126 @@ fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
         return Ok(());
     }
     for item in &module.items {
-        if let Item::ExternFunction(func) = item {
-            return Err(TypeError::new(
-                "extern declarations require `package unsafe`".to_string(),
-                func.span,
-            ));
+        match item {
+            Item::ExternFunction(func) => {
+                return Err(TypeError::new(
+                    "extern declarations require `package unsafe`".to_string(),
+                    func.span,
+                ));
+            }
+            Item::Function(func) => {
+                if let Some(span) = type_contains_ptr_fn(func) {
+                    return Err(TypeError::new(
+                        "raw pointer types require `package unsafe`".to_string(),
+                        span,
+                    ));
+                }
+            }
+            Item::Struct(decl) => {
+                if let Some(span) = type_contains_ptr_struct(decl) {
+                    return Err(TypeError::new(
+                        "raw pointer types require `package unsafe`".to_string(),
+                        span,
+                    ));
+                }
+            }
+            Item::Enum(decl) => {
+                if let Some(span) = type_contains_ptr_enum(decl) {
+                    return Err(TypeError::new(
+                        "raw pointer types require `package unsafe`".to_string(),
+                        span,
+                    ));
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn type_contains_ptr(ty: &Type) -> Option<Span> {
+    match ty {
+        Type::Ptr { span, .. } => Some(*span),
+        Type::Path { args, .. } => {
+            for arg in args {
+                if let Some(span) = type_contains_ptr(arg) {
+                    return Some(span);
+                }
+            }
+            None
+        }
+    }
+}
+
+fn type_contains_ptr_fn(func: &Function) -> Option<Span> {
+    for param in &func.params {
+        if let Some(span) = type_contains_ptr(&param.ty) {
+            return Some(span);
+        }
+    }
+    if let Some(span) = type_contains_ptr(&func.ret) {
+        return Some(span);
+    }
+    block_contains_ptr(&func.body)
+}
+
+fn type_contains_ptr_struct(decl: &StructDecl) -> Option<Span> {
+    for field in &decl.fields {
+        if let Some(span) = type_contains_ptr(&field.ty) {
+            return Some(span);
+        }
+    }
+    None
+}
+
+fn type_contains_ptr_enum(decl: &EnumDecl) -> Option<Span> {
+    for variant in &decl.variants {
+        if let Some(payload) = &variant.payload {
+            if let Some(span) = type_contains_ptr(payload) {
+                return Some(span);
+            }
+        }
+    }
+    None
+}
+
+fn block_contains_ptr(block: &Block) -> Option<Span> {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let(let_stmt) => {
+                if let Some(ty) = &let_stmt.ty {
+                    if let Some(span) = type_contains_ptr(ty) {
+                        return Some(span);
+                    }
+                }
+            }
+            Stmt::If(if_stmt) => {
+                if let Some(span) = block_contains_ptr(&if_stmt.then_block) {
+                    return Some(span);
+                }
+                if let Some(else_block) = &if_stmt.else_block {
+                    if let Some(span) = block_contains_ptr(else_block) {
+                        return Some(span);
+                    }
+                }
+            }
+            Stmt::While(while_stmt) => {
+                if let Some(span) = block_contains_ptr(&while_stmt.body) {
+                    return Some(span);
+                }
+            }
+            Stmt::Expr(expr_stmt) => {
+                if let Expr::Match(match_expr) = &expr_stmt.expr {
+                    for arm in &match_expr.arms {
+                        if let Some(span) = block_contains_ptr(&arm.body) {
+                            return Some(span);
+                        }
+                    }
+                }
+            }
+            Stmt::Return(_) => {}
+        }
+    }
+    None
 }
 
 fn check_function(
@@ -1080,33 +1193,37 @@ fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> Str
 }
 
 fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, TypeError> {
-    let resolved = resolve_path(&ty.path, use_map);
-    let path = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
-    if path.len() == 1 {
-        let builtin = match path[0] {
-            "i32" => Some(BuiltinType::I32),
-            "i64" => Some(BuiltinType::I64),
-            "u32" => Some(BuiltinType::U32),
-            "bool" => Some(BuiltinType::Bool),
-            "string" => Some(BuiltinType::String),
-            "unit" => Some(BuiltinType::Unit),
-            _ => None,
-        };
-        if let Some(builtin) = builtin {
-            return Ok(Ty::Builtin(builtin));
-        }
-        let alias = resolve_type_name(&ty.path, use_map, stdlib);
-        if alias != resolved.join(".") {
-            return Ok(Ty::Path(alias, Vec::new()));
+    match ty {
+        Type::Ptr { target, .. } => Ok(Ty::Ptr(Box::new(lower_type(target, use_map, stdlib)?))),
+        Type::Path { path, args, .. } => {
+            let resolved = resolve_path(path, use_map);
+            let path_segments = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
+            if path_segments.len() == 1 {
+                let builtin = match path_segments[0] {
+                    "i32" => Some(BuiltinType::I32),
+                    "i64" => Some(BuiltinType::I64),
+                    "u32" => Some(BuiltinType::U32),
+                    "bool" => Some(BuiltinType::Bool),
+                    "string" => Some(BuiltinType::String),
+                    "unit" => Some(BuiltinType::Unit),
+                    _ => None,
+                };
+                if let Some(builtin) = builtin {
+                    return Ok(Ty::Builtin(builtin));
+                }
+                let alias = resolve_type_name(path, use_map, stdlib);
+                if alias != resolved.join(".") {
+                    return Ok(Ty::Path(alias, Vec::new()));
+                }
+            }
+            let joined = path_segments.join(".");
+            let args = args
+                .iter()
+                .map(|arg| lower_type(arg, use_map, stdlib))
+                .collect::<Result<_, _>>()?;
+            Ok(Ty::Path(joined, args))
         }
     }
-    let joined = path.join(".");
-    let args = ty
-        .args
-        .iter()
-        .map(|arg| lower_type(arg, use_map, stdlib))
-        .collect::<Result<_, _>>()?;
-    Ok(Ty::Path(joined, args))
 }
 
 trait SpanExt {

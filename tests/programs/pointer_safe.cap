@@ -1,0 +1,10 @@
+package safe
+module pointer_safe
+
+struct Holder {
+  ptr: *u32
+}
+
+pub fn main(sys: System) -> i32 {
+  return 0
+}

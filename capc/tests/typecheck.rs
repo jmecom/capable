@@ -147,6 +147,23 @@ fn typecheck_extern_call_ok() {
 }
 
 #[test]
+fn typecheck_pointer_requires_unsafe_package() {
+    let source = load_program("pointer_safe.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("raw pointer types require `package unsafe`"));
+}
+
+#[test]
+fn typecheck_pointer_unsafe_ok() {
+    let source = load_program("pointer_unsafe.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app
