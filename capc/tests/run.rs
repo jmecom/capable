@@ -215,3 +215,19 @@ fn run_wc_stdin() {
     assert_eq!(code, 0);
     assert!(stdout.contains("0 0 0"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_wc_file() {
+    let out_dir = make_out_dir("wc_file");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/wc_file.cap",
+        "--",
+        "tests/programs/hello.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("9 22 152"), "stdout was: {stdout:?}");
+}

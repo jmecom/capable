@@ -43,6 +43,8 @@ enum Command {
         link_libs: Vec<String>,
         #[arg(long = "link-search")]
         link_search: Vec<PathBuf>,
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
     },
     Audit { path: PathBuf },
 }
@@ -108,9 +110,11 @@ fn main() -> Result<()> {
             safe_only,
             link_libs,
             link_search,
+            args,
         } => {
             let out_path = build_binary(&path, None, out_dir, safe_only, &link_libs, &link_search)?;
             let status = std::process::Command::new(&out_path)
+                .args(&args)
                 .status()
                 .map_err(|err| miette!("failed to run {}: {err}", out_path.display()))?;
             if !status.success() {
