@@ -29,9 +29,14 @@ and copy the helper module to `~/.config/nvim/lua/capable`. That script also run
 Then add this snippet:
 
 ```lua
-require("nvim-treesitter.parsers").get_parser_configs()
 require("capable").setup()
 ```
 
 `caplsp` publishes `textDocument/publishDiagnostics`, so errors from `capc check`
 show up as squiggles automatically.
+
+If you need a custom tree-sitter path, set:
+
+```lua
+vim.g.capable_treesitter_dir = "/path/to/tree-sitter-capable"
+```

@@ -29,8 +29,6 @@ cat <<'EOF'
 
 Done! Add the following to your Neovim config:
 
-require("nvim-treesitter.parsers").get_parser_configs().capable.install_info.url =
-  vim.fn.expand("~/.config/nvim/tree-sitter-capable")
 require("capable").setup()
 
 Build the Caplsp binary (`just lsp` or `cargo run -p caplsp`) and ensure it's on your PATH;

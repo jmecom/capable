@@ -1,12 +1,21 @@
-local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
-parser_config.capable = {
-  install_info = {
-    url = vim.fn.expand("~/Development/capable/tree-sitter-capable"),
-    files = { "src/parser.c" },
-    branch = "main",
-  },
-  filetype = "cap",
-}
+local function treesitter_dir()
+  if vim.g.capable_treesitter_dir ~= nil and vim.g.capable_treesitter_dir ~= "" then
+    return vim.g.capable_treesitter_dir
+  end
+  return vim.fn.stdpath("config") .. "/tree-sitter-capable"
+end
+
+local function register_parser()
+  local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
+  parser_config.capable = {
+    install_info = {
+      url = treesitter_dir(),
+      files = { "src/parser.c" },
+      branch = "main",
+    },
+    filetype = "cap",
+  }
+end
 
 local lspconfig = require("lspconfig")
 local root_files = {
@@ -22,6 +31,7 @@ lspconfig.caplsp = {
 
 return {
   setup = function()
+    register_parser()
     require("lspconfig").caplsp.setup({})
   end,
 }
