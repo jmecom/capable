@@ -25,17 +25,114 @@ struct FunctionSig {
     ret: Ty,
 }
 
+struct UseMap {
+    aliases: HashMap<String, Vec<String>>,
+}
+
+impl UseMap {
+    fn new(module: &Module) -> Self {
+        let mut aliases = HashMap::new();
+        for use_decl in &module.uses {
+            let segments = use_decl
+                .path
+                .segments
+                .iter()
+                .map(|seg| seg.item.clone())
+                .collect::<Vec<_>>();
+            if let Some(alias) = segments.last() {
+                aliases.insert(alias.clone(), segments);
+            }
+        }
+        Self { aliases }
+    }
+}
+
+fn intrinsic_functions() -> HashMap<String, FunctionSig> {
+    let mut map = HashMap::new();
+
+    map.insert(
+        "sys.system.console".to_string(),
+        FunctionSig {
+            params: vec![Ty::Path("sys.system.System".to_string(), Vec::new())],
+            ret: Ty::Path("sys.console.Console".to_string(), Vec::new()),
+        },
+    );
+    map.insert(
+        "sys.system.fs_read".to_string(),
+        FunctionSig {
+            params: vec![
+                Ty::Path("sys.system.System".to_string(), Vec::new()),
+                Ty::Builtin(BuiltinType::String),
+            ],
+            ret: Ty::Path("sys.fs.ReadFS".to_string(), Vec::new()),
+        },
+    );
+    map.insert(
+        "sys.console.print".to_string(),
+        FunctionSig {
+            params: vec![
+                Ty::Path("sys.console.Console".to_string(), Vec::new()),
+                Ty::Builtin(BuiltinType::String),
+            ],
+            ret: Ty::Builtin(BuiltinType::Unit),
+        },
+    );
+    map.insert(
+        "sys.console.println".to_string(),
+        FunctionSig {
+            params: vec![
+                Ty::Path("sys.console.Console".to_string(), Vec::new()),
+                Ty::Builtin(BuiltinType::String),
+            ],
+            ret: Ty::Builtin(BuiltinType::Unit),
+        },
+    );
+    map.insert(
+        "sys.fs.read_to_string".to_string(),
+        FunctionSig {
+            params: vec![
+                Ty::Path("sys.fs.ReadFS".to_string(), Vec::new()),
+                Ty::Builtin(BuiltinType::String),
+            ],
+            ret: Ty::Path(
+                "Result".to_string(),
+                vec![
+                    Ty::Builtin(BuiltinType::String),
+                    Ty::Path("sys.fs.FsErr".to_string(), Vec::new()),
+                ],
+            ),
+        },
+    );
+
+    map
+}
+
+fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
+    if path.segments.len() > 1 {
+        let first = &path.segments[0].item;
+        if let Some(prefix) = use_map.aliases.get(first) {
+            let mut resolved = prefix.clone();
+            for seg in path.segments.iter().skip(1) {
+                resolved.push(seg.item.clone());
+            }
+            return resolved;
+        }
+    }
+    path.segments.iter().map(|seg| seg.item.clone()).collect()
+}
+
 pub fn type_check(module: &Module) -> Result<(), TypeError> {
-    let mut functions = HashMap::new();
+    let use_map = UseMap::new(module);
+    let mut functions = intrinsic_functions();
     for item in &module.items {
         if let Item::Function(func) = item {
             let sig = FunctionSig {
                 params: func
                     .params
                     .iter()
-                    .map(|p| lower_type(&p.ty))
+                    .map(|p| lower_type(&p.ty, &use_map))
                     .collect::<Result<_, _>>()?,
-                ret: lower_type(&func.ret)?,
+                ret: lower_type(&func.ret, &use_map)?,
             };
             let name = func.name.item.clone();
             if functions.insert(name.clone(), sig).is_some() {
@@ -49,25 +146,36 @@ pub fn type_check(module: &Module) -> Result<(), TypeError> {
 
     for item in &module.items {
         if let Item::Function(func) = item {
-            check_function(func, &functions)?;
+            check_function(func, &functions, &use_map)?;
         }
     }
 
     Ok(())
 }
 
-fn check_function(func: &Function, functions: &HashMap<String, FunctionSig>) -> Result<(), TypeError> {
+fn check_function(
+    func: &Function,
+    functions: &HashMap<String, FunctionSig>,
+    use_map: &UseMap,
+) -> Result<(), TypeError> {
     let mut locals = HashMap::new();
     for param in &func.params {
-        let ty = lower_type(&param.ty)?;
+        let ty = lower_type(&param.ty, use_map)?;
         locals.insert(param.name.item.clone(), ty);
     }
 
-    let ret_ty = lower_type(&func.ret)?;
+    let ret_ty = lower_type(&func.ret, use_map)?;
     let mut has_return = false;
 
     for stmt in &func.body.stmts {
-        check_stmt(stmt, &ret_ty, functions, &mut locals, &mut has_return)?;
+        check_stmt(
+            stmt,
+            &ret_ty,
+            functions,
+            &mut locals,
+            use_map,
+            &mut has_return,
+        )?;
     }
 
     if ret_ty != Ty::Builtin(BuiltinType::Unit) && !has_return {
@@ -85,13 +193,14 @@ fn check_stmt(
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
     locals: &mut HashMap<String, Ty>,
+    use_map: &UseMap,
     has_return: &mut bool,
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
-            let expr_ty = check_expr(&let_stmt.expr, functions, locals)?;
+            let expr_ty = check_expr(&let_stmt.expr, functions, locals, use_map, ret_ty)?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
-                let annot_ty = lower_type(annot)?;
+                let annot_ty = lower_type(annot, use_map)?;
                 if annot_ty != expr_ty {
                     return Err(TypeError::new(
                         format!("type mismatch: expected {annot_ty:?}, found {expr_ty:?}"),
@@ -106,7 +215,7 @@ fn check_stmt(
         }
         Stmt::Return(ret_stmt) => {
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
-                check_expr(expr, functions, locals)?
+                check_expr(expr, functions, locals, use_map, ret_ty)?
             } else {
                 Ty::Builtin(BuiltinType::Unit)
             };
@@ -119,30 +228,59 @@ fn check_stmt(
             *has_return = true;
         }
         Stmt::If(if_stmt) => {
-            let cond_ty = check_expr(&if_stmt.cond, functions, locals)?;
+            let cond_ty = check_expr(&if_stmt.cond, functions, locals, use_map, ret_ty)?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
                     "if condition must be bool".to_string(),
                     if_stmt.cond.span(),
                 ));
             }
-            check_block(&if_stmt.then_block, ret_ty, functions, locals, has_return)?;
+            check_block(
+                &if_stmt.then_block,
+                ret_ty,
+                functions,
+                locals,
+                use_map,
+                has_return,
+            )?;
             if let Some(block) = &if_stmt.else_block {
-                check_block(block, ret_ty, functions, locals, has_return)?;
+                check_block(block, ret_ty, functions, locals, use_map, has_return)?;
             }
         }
         Stmt::While(while_stmt) => {
-            let cond_ty = check_expr(&while_stmt.cond, functions, locals)?;
+            let cond_ty = check_expr(&while_stmt.cond, functions, locals, use_map, ret_ty)?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
                     "while condition must be bool".to_string(),
                     while_stmt.cond.span(),
                 ));
             }
-            check_block(&while_stmt.body, ret_ty, functions, locals, has_return)?;
+            check_block(
+                &while_stmt.body,
+                ret_ty,
+                functions,
+                locals,
+                use_map,
+                has_return,
+            )?;
         }
         Stmt::Expr(expr_stmt) => {
-            check_expr(&expr_stmt.expr, functions, locals)?;
+            if let Expr::Match(match_expr) = &expr_stmt.expr {
+                let mut any_return = false;
+                let _ = check_match_expr(
+                    match_expr,
+                    functions,
+                    locals,
+                    use_map,
+                    ret_ty,
+                    Some(&mut any_return),
+                )?;
+                if any_return {
+                    *has_return = true;
+                }
+            } else {
+                check_expr(&expr_stmt.expr, functions, locals, use_map, ret_ty)?;
+            }
         }
     }
 
@@ -154,10 +292,11 @@ fn check_block(
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
     locals: &mut HashMap<String, Ty>,
+    use_map: &UseMap,
     has_return: &mut bool,
 ) -> Result<(), TypeError> {
     for stmt in &block.stmts {
-        check_stmt(stmt, ret_ty, functions, locals, has_return)?;
+        check_stmt(stmt, ret_ty, functions, locals, use_map, has_return)?;
     }
     Ok(())
 }
@@ -166,6 +305,8 @@ fn check_expr(
     expr: &Expr,
     functions: &HashMap<String, FunctionSig>,
     locals: &HashMap<String, Ty>,
+    use_map: &UseMap,
+    ret_ty: &Ty,
 ) -> Result<Ty, TypeError> {
     match expr {
         Expr::Literal(lit) => match &lit.value {
@@ -188,15 +329,10 @@ fn check_expr(
         }
         Expr::Call(call) => match &*call.callee {
             Expr::Path(path) => {
-                if path.segments.len() != 1 {
-                    return Err(TypeError::new(
-                        "only local function calls are supported".to_string(),
-                        path.span,
-                    ));
-                }
-                let name = &path.segments[0].item;
-                let sig = functions.get(name).ok_or_else(|| {
-                    TypeError::new(format!("unknown function `{name}`"), path.span)
+                let resolved = resolve_path(path, use_map);
+                let key = resolved.join(".");
+                let sig = functions.get(&key).ok_or_else(|| {
+                    TypeError::new(format!("unknown function `{key}`"), path.span)
                 })?;
                 if sig.params.len() != call.args.len() {
                     return Err(TypeError::new(
@@ -209,7 +345,7 @@ fn check_expr(
                     ));
                 }
                 for (arg, expected) in call.args.iter().zip(&sig.params) {
-                    let arg_ty = check_expr(arg, functions, locals)?;
+                    let arg_ty = check_expr(arg, functions, locals, use_map, ret_ty)?;
                     if &arg_ty != expected {
                         return Err(TypeError::new(
                             format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
@@ -225,7 +361,7 @@ fn check_expr(
             )),
         },
         Expr::Unary(unary) => {
-            let expr_ty = check_expr(&unary.expr, functions, locals)?;
+            let expr_ty = check_expr(&unary.expr, functions, locals, use_map, ret_ty)?;
             match unary.op {
                 UnaryOp::Neg => {
                     if expr_ty == Ty::Builtin(BuiltinType::I32)
@@ -252,8 +388,8 @@ fn check_expr(
             }
         }
         Expr::Binary(binary) => {
-            let left = check_expr(&binary.left, functions, locals)?;
-            let right = check_expr(&binary.right, functions, locals)?;
+            let left = check_expr(&binary.left, functions, locals, use_map, ret_ty)?;
+            let right = check_expr(&binary.right, functions, locals, use_map, ret_ty)?;
             match binary.op {
                 BinaryOp::Add
                 | BinaryOp::Sub
@@ -300,31 +436,89 @@ fn check_expr(
             }
         }
         Expr::Match(match_expr) => {
-            let _ = check_expr(&match_expr.expr, functions, locals)?;
-            for arm in &match_expr.arms {
-                let mut arm_locals = locals.clone();
-                let mut arm_return = false;
-                check_block(
-                    &arm.body,
-                    ret_ty_placeholder(),
-                    functions,
-                    &mut arm_locals,
-                    &mut arm_return,
-                )?;
-            }
-            Ok(Ty::Builtin(BuiltinType::Unit))
+            check_match_expr(match_expr, functions, locals, use_map, ret_ty, None)
         }
-        Expr::Grouping(group) => check_expr(&group.expr, functions, locals),
+        Expr::Grouping(group) => check_expr(&group.expr, functions, locals, use_map, ret_ty),
     }
 }
 
-fn lower_type(ty: &Type) -> Result<Ty, TypeError> {
-    let path = ty
-        .path
-        .segments
-        .iter()
-        .map(|seg| seg.item.as_str())
-        .collect::<Vec<_>>();
+fn check_match_expr(
+    match_expr: &MatchExpr,
+    functions: &HashMap<String, FunctionSig>,
+    locals: &HashMap<String, Ty>,
+    use_map: &UseMap,
+    ret_ty: &Ty,
+    any_return: Option<&mut bool>,
+) -> Result<Ty, TypeError> {
+    let match_ty = check_expr(&match_expr.expr, functions, locals, use_map, ret_ty)?;
+    let mut saw_return = false;
+    for arm in &match_expr.arms {
+        let mut arm_locals = locals.clone();
+        bind_pattern(&arm.pattern, &match_ty, &mut arm_locals)?;
+        let mut arm_return = false;
+        check_block(
+            &arm.body,
+            ret_ty,
+            functions,
+            &mut arm_locals,
+            use_map,
+            &mut arm_return,
+        )?;
+        if arm_return {
+            saw_return = true;
+        }
+    }
+    if let Some(flag) = any_return {
+        *flag = saw_return;
+    }
+    Ok(Ty::Builtin(BuiltinType::Unit))
+}
+
+fn bind_pattern(
+    pattern: &Pattern,
+    match_ty: &Ty,
+    locals: &mut HashMap<String, Ty>,
+) -> Result<(), TypeError> {
+    match pattern {
+        Pattern::Call { path, binding, .. } => {
+            let Some(binding) = binding else {
+                return Ok(());
+            };
+            let name = path
+                .segments
+                .iter()
+                .map(|seg| seg.item.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            if let Ty::Path(ty_name, args) = match_ty {
+                if ty_name == "Result" && args.len() == 2 {
+                    let ty = if name == "Ok" {
+                        args[0].clone()
+                    } else if name == "Err" {
+                        args[1].clone()
+                    } else {
+                        return Ok(());
+                    };
+                    locals.insert(binding.item.clone(), ty);
+                    return Ok(());
+                }
+            }
+            Err(TypeError::new(
+                "pattern binding requires a Result match".to_string(),
+                path.span,
+            ))
+        }
+        Pattern::Binding(ident) => {
+            locals.insert(ident.item.clone(), match_ty.clone());
+            Ok(())
+        }
+        Pattern::Path(_) | Pattern::Wildcard(_) => Ok(()),
+    }
+}
+
+fn lower_type(ty: &Type, use_map: &UseMap) -> Result<Ty, TypeError> {
+    let resolved = resolve_path(&ty.path, use_map);
+    let path = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
     if path.len() == 1 {
         let builtin = match path[0] {
             "i32" => Some(BuiltinType::I32),
@@ -338,19 +532,24 @@ fn lower_type(ty: &Type) -> Result<Ty, TypeError> {
         if let Some(builtin) = builtin {
             return Ok(Ty::Builtin(builtin));
         }
+        let alias = match path[0] {
+            "System" => Some("sys.system.System"),
+            "Console" => Some("sys.console.Console"),
+            "ReadFS" => Some("sys.fs.ReadFS"),
+            "FsErr" => Some("sys.fs.FsErr"),
+            _ => None,
+        };
+        if let Some(name) = alias {
+            return Ok(Ty::Path(name.to_string(), Vec::new()));
+        }
     }
     let joined = path.join(".");
     let args = ty
         .args
         .iter()
-        .map(lower_type)
+        .map(|arg| lower_type(arg, use_map))
         .collect::<Result<_, _>>()?;
     Ok(Ty::Path(joined, args))
-}
-
-fn ret_ty_placeholder() -> &'static Ty {
-    static UNIT: Ty = Ty::Builtin(BuiltinType::Unit);
-    &UNIT
 }
 
 trait SpanExt {

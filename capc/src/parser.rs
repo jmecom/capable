@@ -409,7 +409,10 @@ impl Parser {
                 body,
                 span: Span::new(start, end),
             });
-            if self.maybe_consume(TokenKind::Comma).is_none() {
+            if self.maybe_consume(TokenKind::Comma).is_some() {
+                continue;
+            }
+            if self.peek_kind() == Some(TokenKind::RBrace) {
                 break;
             }
         }

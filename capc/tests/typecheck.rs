@@ -1,16 +1,25 @@
+use std::path::PathBuf;
+
 use capc::{parse_module, type_check};
+
+fn load_program(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs")
+        .join(name);
+    std::fs::read_to_string(path).expect("read program file")
+}
 
 #[test]
 fn typecheck_ok() {
-    let source = r#"
-module app
-
-fn add(a: i32, b: i32) -> i32 {
-  let c = a + b
-  return c
+    let source = load_program("hello.cap");
+    let module = parse_module(&source).expect("parse module");
+    type_check(&module).expect("typecheck module");
 }
-"#;
-    let module = parse_module(source).expect("parse module");
+
+#[test]
+fn typecheck_fs_read_ok() {
+    let source = load_program("fs_read.cap");
+    let module = parse_module(&source).expect("parse module");
     type_check(&module).expect("typecheck module");
 }
 
@@ -23,7 +32,7 @@ fn add(a: i32, b: i32) -> i32 {
   let c = a + b
 }
 "#;
-    let module = parse_module(source).expect("parse module");
+    let module = parse_module(&source).expect("parse module");
     let err = type_check(&module).expect_err("expected type error");
     assert!(err.to_string().contains("missing return"));
 }

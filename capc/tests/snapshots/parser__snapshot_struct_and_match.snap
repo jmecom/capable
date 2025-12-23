@@ -1,137 +1,141 @@
 ---
 source: capc/tests/parser.rs
-assertion_line: 31
 expression: module
 ---
 Module {
     package: Safe,
     name: Spanned {
-        item: "demo",
+        item: "app",
         span: Span {
-            start: 8,
-            end: 12,
+            start: 7,
+            end: 10,
         },
     },
-    uses: [],
-    items: [
-        Struct(
-            StructDecl {
-                name: Spanned {
-                    item: "Pair",
-                    span: Span {
-                        start: 21,
-                        end: 25,
-                    },
-                },
-                fields: [
-                    Field {
-                        name: Spanned {
-                            item: "left",
-                            span: Span {
-                                start: 28,
-                                end: 32,
-                            },
-                        },
-                        ty: Type {
-                            path: Path {
-                                segments: [
-                                    Spanned {
-                                        item: "i32",
-                                        span: Span {
-                                            start: 34,
-                                            end: 37,
-                                        },
-                                    },
-                                ],
-                                span: Span {
-                                    start: 34,
-                                    end: 37,
-                                },
-                            },
-                            args: [],
-                            span: Span {
-                                start: 34,
-                                end: 37,
-                            },
+    uses: [
+        UseDecl {
+            path: Path {
+                segments: [
+                    Spanned {
+                        item: "sys",
+                        span: Span {
+                            start: 15,
+                            end: 18,
                         },
                     },
-                    Field {
-                        name: Spanned {
-                            item: "right",
-                            span: Span {
-                                start: 39,
-                                end: 44,
-                            },
-                        },
-                        ty: Type {
-                            path: Path {
-                                segments: [
-                                    Spanned {
-                                        item: "i32",
-                                        span: Span {
-                                            start: 46,
-                                            end: 49,
-                                        },
-                                    },
-                                ],
-                                span: Span {
-                                    start: 46,
-                                    end: 49,
-                                },
-                            },
-                            args: [],
-                            span: Span {
-                                start: 46,
-                                end: 49,
-                            },
+                    Spanned {
+                        item: "system",
+                        span: Span {
+                            start: 19,
+                            end: 25,
                         },
                     },
                 ],
-                is_pub: false,
                 span: Span {
-                    start: 14,
-                    end: 51,
+                    start: 15,
+                    end: 25,
                 },
             },
-        ),
+            span: Span {
+                start: 11,
+                end: 25,
+            },
+        },
+        UseDecl {
+            path: Path {
+                segments: [
+                    Spanned {
+                        item: "sys",
+                        span: Span {
+                            start: 30,
+                            end: 33,
+                        },
+                    },
+                    Spanned {
+                        item: "fs",
+                        span: Span {
+                            start: 34,
+                            end: 36,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 30,
+                    end: 36,
+                },
+            },
+            span: Span {
+                start: 26,
+                end: 36,
+            },
+        },
+        UseDecl {
+            path: Path {
+                segments: [
+                    Spanned {
+                        item: "sys",
+                        span: Span {
+                            start: 41,
+                            end: 44,
+                        },
+                    },
+                    Spanned {
+                        item: "console",
+                        span: Span {
+                            start: 45,
+                            end: 52,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 41,
+                    end: 52,
+                },
+            },
+            span: Span {
+                start: 37,
+                end: 52,
+            },
+        },
+    ],
+    items: [
         Function(
             Function {
                 name: Spanned {
-                    item: "test",
+                    item: "main",
                     span: Span {
-                        start: 56,
-                        end: 60,
+                        start: 61,
+                        end: 65,
                     },
                 },
                 params: [
                     Param {
                         name: Spanned {
-                            item: "flag",
+                            item: "sys",
                             span: Span {
-                                start: 61,
-                                end: 65,
+                                start: 66,
+                                end: 69,
                             },
                         },
                         ty: Type {
                             path: Path {
                                 segments: [
                                     Spanned {
-                                        item: "bool",
+                                        item: "System",
                                         span: Span {
-                                            start: 67,
-                                            end: 71,
+                                            start: 71,
+                                            end: 77,
                                         },
                                     },
                                 ],
                                 span: Span {
-                                    start: 67,
-                                    end: 71,
+                                    start: 71,
+                                    end: 77,
                                 },
                             },
                             args: [],
                             span: Span {
-                                start: 67,
-                                end: 71,
+                                start: 71,
+                                end: 77,
                             },
                         },
                     },
@@ -140,116 +144,543 @@ Module {
                     path: Path {
                         segments: [
                             Spanned {
-                                item: "unit",
+                                item: "i32",
                                 span: Span {
-                                    start: 76,
-                                    end: 80,
+                                    start: 82,
+                                    end: 85,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 76,
-                            end: 80,
+                            start: 82,
+                            end: 85,
                         },
                     },
                     args: [],
                     span: Span {
-                        start: 76,
-                        end: 80,
+                        start: 82,
+                        end: 85,
                     },
                 },
                 body: Block {
                     stmts: [
-                        Expr(
-                            ExprStmt {
-                                expr: Match(
-                                    MatchExpr {
-                                        expr: Path(
+                        Let(
+                            LetStmt {
+                                name: Spanned {
+                                    item: "c",
+                                    span: Span {
+                                        start: 94,
+                                        end: 95,
+                                    },
+                                },
+                                ty: None,
+                                expr: Call(
+                                    CallExpr {
+                                        callee: Path(
                                             Path {
                                                 segments: [
                                                     Spanned {
-                                                        item: "flag",
+                                                        item: "system",
                                                         span: Span {
-                                                            start: 91,
-                                                            end: 95,
+                                                            start: 98,
+                                                            end: 104,
+                                                        },
+                                                    },
+                                                    Spanned {
+                                                        item: "console",
+                                                        span: Span {
+                                                            start: 105,
+                                                            end: 112,
                                                         },
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 91,
-                                                    end: 95,
+                                                    start: 98,
+                                                    end: 112,
+                                                },
+                                            },
+                                        ),
+                                        args: [
+                                            Path(
+                                                Path {
+                                                    segments: [
+                                                        Spanned {
+                                                            item: "sys",
+                                                            span: Span {
+                                                                start: 113,
+                                                                end: 116,
+                                                            },
+                                                        },
+                                                    ],
+                                                    span: Span {
+                                                        start: 113,
+                                                        end: 116,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 98,
+                                            end: 117,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 90,
+                                    end: 117,
+                                },
+                            },
+                        ),
+                        Let(
+                            LetStmt {
+                                name: Spanned {
+                                    item: "rfs",
+                                    span: Span {
+                                        start: 124,
+                                        end: 127,
+                                    },
+                                },
+                                ty: None,
+                                expr: Call(
+                                    CallExpr {
+                                        callee: Path(
+                                            Path {
+                                                segments: [
+                                                    Spanned {
+                                                        item: "system",
+                                                        span: Span {
+                                                            start: 130,
+                                                            end: 136,
+                                                        },
+                                                    },
+                                                    Spanned {
+                                                        item: "fs_read",
+                                                        span: Span {
+                                                            start: 137,
+                                                            end: 144,
+                                                        },
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 130,
+                                                    end: 144,
+                                                },
+                                            },
+                                        ),
+                                        args: [
+                                            Path(
+                                                Path {
+                                                    segments: [
+                                                        Spanned {
+                                                            item: "sys",
+                                                            span: Span {
+                                                                start: 145,
+                                                                end: 148,
+                                                            },
+                                                        },
+                                                    ],
+                                                    span: Span {
+                                                        start: 145,
+                                                        end: 148,
+                                                    },
+                                                },
+                                            ),
+                                            Literal(
+                                                LiteralExpr {
+                                                    value: String(
+                                                        "./config",
+                                                    ),
+                                                    span: Span {
+                                                        start: 150,
+                                                        end: 160,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 130,
+                                            end: 161,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 120,
+                                    end: 161,
+                                },
+                            },
+                        ),
+                        Expr(
+                            ExprStmt {
+                                expr: Match(
+                                    MatchExpr {
+                                        expr: Call(
+                                            CallExpr {
+                                                callee: Path(
+                                                    Path {
+                                                        segments: [
+                                                            Spanned {
+                                                                item: "fs",
+                                                                span: Span {
+                                                                    start: 171,
+                                                                    end: 173,
+                                                                },
+                                                            },
+                                                            Spanned {
+                                                                item: "read_to_string",
+                                                                span: Span {
+                                                                    start: 174,
+                                                                    end: 188,
+                                                                },
+                                                            },
+                                                        ],
+                                                        span: Span {
+                                                            start: 171,
+                                                            end: 188,
+                                                        },
+                                                    },
+                                                ),
+                                                args: [
+                                                    Path(
+                                                        Path {
+                                                            segments: [
+                                                                Spanned {
+                                                                    item: "rfs",
+                                                                    span: Span {
+                                                                        start: 189,
+                                                                        end: 192,
+                                                                    },
+                                                                },
+                                                            ],
+                                                            span: Span {
+                                                                start: 189,
+                                                                end: 192,
+                                                            },
+                                                        },
+                                                    ),
+                                                    Literal(
+                                                        LiteralExpr {
+                                                            value: String(
+                                                                "app.txt",
+                                                            ),
+                                                            span: Span {
+                                                                start: 194,
+                                                                end: 203,
+                                                            },
+                                                        },
+                                                    ),
+                                                ],
+                                                span: Span {
+                                                    start: 171,
+                                                    end: 204,
                                                 },
                                             },
                                         ),
                                         arms: [
                                             MatchArm {
-                                                pattern: Wildcard(
-                                                    Span {
-                                                        start: 102,
-                                                        end: 103,
+                                                pattern: Call {
+                                                    path: Path {
+                                                        segments: [
+                                                            Spanned {
+                                                                item: "Ok",
+                                                                span: Span {
+                                                                    start: 211,
+                                                                    end: 213,
+                                                                },
+                                                            },
+                                                        ],
+                                                        span: Span {
+                                                            start: 211,
+                                                            end: 213,
+                                                        },
                                                     },
-                                                ),
+                                                    binding: Some(
+                                                        Spanned {
+                                                            item: "s",
+                                                            span: Span {
+                                                                start: 214,
+                                                                end: 215,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: Span {
+                                                        start: 211,
+                                                        end: 216,
+                                                    },
+                                                },
                                                 body: Block {
                                                     stmts: [
+                                                        Expr(
+                                                            ExprStmt {
+                                                                expr: Call(
+                                                                    CallExpr {
+                                                                        callee: Path(
+                                                                            Path {
+                                                                                segments: [
+                                                                                    Spanned {
+                                                                                        item: "console",
+                                                                                        span: Span {
+                                                                                            start: 222,
+                                                                                            end: 229,
+                                                                                        },
+                                                                                    },
+                                                                                    Spanned {
+                                                                                        item: "println",
+                                                                                        span: Span {
+                                                                                            start: 230,
+                                                                                            end: 237,
+                                                                                        },
+                                                                                    },
+                                                                                ],
+                                                                                span: Span {
+                                                                                    start: 222,
+                                                                                    end: 237,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        args: [
+                                                                            Path(
+                                                                                Path {
+                                                                                    segments: [
+                                                                                        Spanned {
+                                                                                            item: "c",
+                                                                                            span: Span {
+                                                                                                start: 238,
+                                                                                                end: 239,
+                                                                                            },
+                                                                                        },
+                                                                                    ],
+                                                                                    span: Span {
+                                                                                        start: 238,
+                                                                                        end: 239,
+                                                                                    },
+                                                                                },
+                                                                            ),
+                                                                            Path(
+                                                                                Path {
+                                                                                    segments: [
+                                                                                        Spanned {
+                                                                                            item: "s",
+                                                                                            span: Span {
+                                                                                                start: 241,
+                                                                                                end: 242,
+                                                                                            },
+                                                                                        },
+                                                                                    ],
+                                                                                    span: Span {
+                                                                                        start: 241,
+                                                                                        end: 242,
+                                                                                    },
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        span: Span {
+                                                                            start: 222,
+                                                                            end: 243,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                                span: Span {
+                                                                    start: 222,
+                                                                    end: 244,
+                                                                },
+                                                            },
+                                                        ),
                                                         Return(
                                                             ReturnStmt {
                                                                 expr: Some(
                                                                     Literal(
                                                                         LiteralExpr {
-                                                                            value: Unit,
+                                                                            value: Int(
+                                                                                0,
+                                                                            ),
                                                                             span: Span {
-                                                                                start: 116,
-                                                                                end: 118,
+                                                                                start: 252,
+                                                                                end: 253,
                                                                             },
                                                                         },
                                                                     ),
                                                                 ),
                                                                 span: Span {
-                                                                    start: 109,
-                                                                    end: 120,
+                                                                    start: 245,
+                                                                    end: 255,
                                                                 },
                                                             },
                                                         ),
                                                     ],
                                                     span: Span {
-                                                        start: 107,
-                                                        end: 120,
+                                                        start: 220,
+                                                        end: 255,
                                                     },
                                                 },
                                                 span: Span {
-                                                    start: 85,
-                                                    end: 120,
+                                                    start: 165,
+                                                    end: 255,
+                                                },
+                                            },
+                                            MatchArm {
+                                                pattern: Call {
+                                                    path: Path {
+                                                        segments: [
+                                                            Spanned {
+                                                                item: "Err",
+                                                                span: Span {
+                                                                    start: 260,
+                                                                    end: 263,
+                                                                },
+                                                            },
+                                                        ],
+                                                        span: Span {
+                                                            start: 260,
+                                                            end: 263,
+                                                        },
+                                                    },
+                                                    binding: Some(
+                                                        Spanned {
+                                                            item: "e",
+                                                            span: Span {
+                                                                start: 264,
+                                                                end: 265,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: Span {
+                                                        start: 260,
+                                                        end: 266,
+                                                    },
+                                                },
+                                                body: Block {
+                                                    stmts: [
+                                                        Expr(
+                                                            ExprStmt {
+                                                                expr: Call(
+                                                                    CallExpr {
+                                                                        callee: Path(
+                                                                            Path {
+                                                                                segments: [
+                                                                                    Spanned {
+                                                                                        item: "console",
+                                                                                        span: Span {
+                                                                                            start: 272,
+                                                                                            end: 279,
+                                                                                        },
+                                                                                    },
+                                                                                    Spanned {
+                                                                                        item: "println",
+                                                                                        span: Span {
+                                                                                            start: 280,
+                                                                                            end: 287,
+                                                                                        },
+                                                                                    },
+                                                                                ],
+                                                                                span: Span {
+                                                                                    start: 272,
+                                                                                    end: 287,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        args: [
+                                                                            Path(
+                                                                                Path {
+                                                                                    segments: [
+                                                                                        Spanned {
+                                                                                            item: "c",
+                                                                                            span: Span {
+                                                                                                start: 288,
+                                                                                                end: 289,
+                                                                                            },
+                                                                                        },
+                                                                                    ],
+                                                                                    span: Span {
+                                                                                        start: 288,
+                                                                                        end: 289,
+                                                                                    },
+                                                                                },
+                                                                            ),
+                                                                            Literal(
+                                                                                LiteralExpr {
+                                                                                    value: String(
+                                                                                        "read failed",
+                                                                                    ),
+                                                                                    span: Span {
+                                                                                        start: 291,
+                                                                                        end: 304,
+                                                                                    },
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        span: Span {
+                                                                            start: 272,
+                                                                            end: 305,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                                span: Span {
+                                                                    start: 272,
+                                                                    end: 306,
+                                                                },
+                                                            },
+                                                        ),
+                                                        Return(
+                                                            ReturnStmt {
+                                                                expr: Some(
+                                                                    Literal(
+                                                                        LiteralExpr {
+                                                                            value: Int(
+                                                                                1,
+                                                                            ),
+                                                                            span: Span {
+                                                                                start: 314,
+                                                                                end: 315,
+                                                                            },
+                                                                        },
+                                                                    ),
+                                                                ),
+                                                                span: Span {
+                                                                    start: 307,
+                                                                    end: 317,
+                                                                },
+                                                            },
+                                                        ),
+                                                    ],
+                                                    span: Span {
+                                                        start: 270,
+                                                        end: 317,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    start: 165,
+                                                    end: 317,
                                                 },
                                             },
                                         ],
                                         span: Span {
-                                            start: 85,
-                                            end: 124,
+                                            start: 165,
+                                            end: 321,
                                         },
                                     },
                                 ),
                                 span: Span {
-                                    start: 85,
-                                    end: 124,
+                                    start: 165,
+                                    end: 321,
                                 },
                             },
                         ),
                     ],
                     span: Span {
-                        start: 81,
-                        end: 126,
+                        start: 86,
+                        end: 323,
                     },
                 },
-                is_pub: false,
+                is_pub: true,
                 span: Span {
-                    start: 53,
-                    end: 126,
+                    start: 58,
+                    end: 323,
                 },
             },
         ),
     ],
     span: Span {
-        start: 1,
-        end: 126,
+        start: 0,
+        end: 323,
     },
 }

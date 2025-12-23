@@ -1,0 +1,7 @@
+module app
+use sys.console
+
+pub fn main(sys: System) -> i32 {
+  console.println(???, "nope")
+  return 0
+}
