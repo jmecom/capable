@@ -26,3 +26,6 @@ build file:
 
 run file:
   cargo run -p capc -- run {{file}}
+
+audit file:
+  cargo run -p capc -- audit {{file}}
