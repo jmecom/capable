@@ -855,6 +855,33 @@ pub extern "C" fn capable_rt_string_split_whitespace(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_string_split(
+    ptr: *const u8,
+    len: usize,
+    delim: u8,
+) -> Handle {
+    let value = unsafe { read_str(ptr, len) };
+    let mut vec = Vec::new();
+    if let Some(value) = value {
+        let bytes = value.as_bytes();
+        let mut start = 0usize;
+        for (idx, byte) in bytes.iter().enumerate() {
+            if *byte == delim {
+                let part = &value[start..idx];
+                vec.push(part.to_string());
+                start = idx + 1;
+            }
+        }
+        let part = &value[start..];
+        vec.push(part.to_string());
+    }
+    let handle = new_handle();
+    let mut table = VECS_STRING.lock().expect("vec string table");
+    table.insert(handle, vec);
+    handle
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_args_len(_sys: Handle) -> i32 {
     ARGS.len().min(i32::MAX as usize) as i32
 }

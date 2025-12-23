@@ -450,6 +450,10 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         params: vec![TyKind::String],
         ret: TyKind::Handle,
     };
+    let string_split_delim = FnSig {
+        params: vec![TyKind::String, TyKind::U8],
+        ret: TyKind::Handle,
+    };
     let vec_new = FnSig {
         params: vec![TyKind::Handle],
         ret: TyKind::Handle,
@@ -999,6 +1003,15 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_split,
             abi_sig: None,
             symbol: "capable_rt_string_split_whitespace".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.split".to_string(),
+        FnInfo {
+            sig: string_split_delim,
+            abi_sig: None,
+            symbol: "capable_rt_string_split".to_string(),
             is_runtime: true,
         },
     );

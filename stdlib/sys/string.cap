@@ -24,3 +24,7 @@ pub fn bytes(s: string) -> Slice[u8] {
 pub fn split_whitespace(s: string) -> VecString {
   return ()
 }
+
+pub fn split(s: string, delim: u8) -> VecString {
+  return ()
+}
