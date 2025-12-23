@@ -1,5 +1,5 @@
 [workspace]
-members = ["capc"]
+members = ["capc", "runtime"]
 resolver = "2"
 
 [workspace.package]
