@@ -53,3 +53,11 @@ fn audit_reports_extern_in_safe_package() {
     assert_eq!(code, 0, "stderr was: {stderr:?}");
     assert!(stdout.contains("extern declarations"));
 }
+
+#[test]
+fn extern_missing_symbol_reports_link_error() {
+    let (code, _stdout, stderr) = run_capc(&["build", "tests/programs/extern_missing.cap"]);
+    assert_ne!(code, 0);
+    assert!(stderr.contains("link failed"));
+    assert!(stderr.contains("missing_symbol"), "stderr was: {stderr:?}");
+}

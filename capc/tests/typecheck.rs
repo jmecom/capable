@@ -139,6 +139,14 @@ fn typecheck_extern_unsafe_ok() {
 }
 
 #[test]
+fn typecheck_extern_call_ok() {
+    let source = load_program("extern_call.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app

@@ -1,0 +1,10 @@
+package unsafe
+module extern_missing
+use sys.system
+
+extern fn missing_symbol() -> unit
+
+pub fn main(sys: System) -> i32 {
+  missing_symbol()
+  return 0
+}
