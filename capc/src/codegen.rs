@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, Signature, Type};
+use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, MemFlags, Signature, Type};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{Configurable, Flags};
 use cranelift_codegen::ir::condcodes::IntCC;
@@ -38,6 +38,7 @@ enum TyKind {
     Unit,
     String,
     Handle,
+    ResultString,
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +86,12 @@ struct StdlibIndex {
 enum ValueRepr {
     Single(ir::Value),
     Pair(ir::Value, ir::Value),
+    ResultString {
+        tag: ir::Value,
+        ok_ptr: ir::Value,
+        ok_len: ir::Value,
+        err: ir::Value,
+    },
 }
 
 pub fn build_object(
@@ -225,6 +232,11 @@ fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
             TyKind::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
             TyKind::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
             TyKind::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
+            TyKind::ResultString => {
+                signature.params.push(AbiParam::new(ir::types::I64)); // out_ptr
+                signature.params.push(AbiParam::new(ir::types::I64)); // out_len
+                signature.params.push(AbiParam::new(ir::types::I64)); // out_err
+            }
             TyKind::Unit => {}
         }
     }
@@ -237,6 +249,9 @@ fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
             signature.returns.push(AbiParam::new(ptr_ty));
             signature.returns.push(AbiParam::new(ir::types::I64));
         }
+        TyKind::ResultString => {
+            signature.returns.push(AbiParam::new(ir::types::I8)); // tag
+        }
     }
     signature
 }
@@ -245,6 +260,14 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     let system_console = FnSig {
         params: vec![TyKind::Handle],
         ret: TyKind::Handle,
+    };
+    let system_fs_read = FnSig {
+        params: vec![TyKind::Handle, TyKind::String],
+        ret: TyKind::Handle,
+    };
+    let fs_read_to_string = FnSig {
+        params: vec![TyKind::Handle, TyKind::String, TyKind::ResultString],
+        ret: TyKind::ResultString,
     };
     let console_println = FnSig {
         params: vec![TyKind::Handle, TyKind::String],
@@ -264,6 +287,14 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
+        "sys.system.fs_read".to_string(),
+        FnInfo {
+            sig: system_fs_read,
+            symbol: "capable_rt_system_fs_read".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.console.println".to_string(),
         FnInfo {
             sig: console_println,
@@ -276,6 +307,14 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         FnInfo {
             sig: console_print,
             symbol: "capable_rt_console_print".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.read_to_string".to_string(),
+        FnInfo {
+            sig: fs_read_to_string,
+            symbol: "capable_rt_fs_read_to_string".to_string(),
             is_runtime: true,
         },
     );
@@ -370,9 +409,9 @@ fn emit_stmt(
                 )?;
                 match value {
                     ValueRepr::Single(val) => builder.ins().return_(&[val]),
-                    ValueRepr::Pair(_, _) => {
+                    ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
                         return Err(CodegenError::Unsupported(
-                            "string return values".to_string(),
+                            "non-scalar return values".to_string(),
                         ))
                     }
                 };
@@ -573,7 +612,32 @@ fn emit_expr(
                         args.push(a);
                         args.push(b);
                     }
+                    ValueRepr::ResultString { .. } => {
+                        return Err(CodegenError::Unsupported("result value arg".to_string()))
+                    }
                 }
+            }
+            let mut out_slots = None;
+            if info.sig.ret == TyKind::ResultString {
+                let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    8,
+                ));
+                let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    8,
+                ));
+                let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    4,
+                ));
+                let ptr_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+                let len_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
+                let err_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
+                args.push(ptr_ptr);
+                args.push(len_ptr);
+                args.push(err_ptr);
+                out_slots = Some((slot_ptr, slot_len, slot_err));
             }
             let sig = sig_to_clif(&info.sig, module.isa().pointer_type());
             let func_id = module
@@ -589,6 +653,31 @@ fn emit_expr(
                         return Err(CodegenError::Codegen("string return count".to_string()));
                     }
                     Ok(ValueRepr::Pair(results[0], results[1]))
+                }
+                TyKind::ResultString => {
+                    let tag = results[0];
+                    let (slot_ptr, slot_len, slot_err) =
+                        out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
+                    let ptr_addr =
+                        builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+                    let len_addr =
+                        builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
+                    let err_addr =
+                        builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
+                    let ptr = builder.ins().load(
+                        module.isa().pointer_type(),
+                        MemFlags::new(),
+                        ptr_addr,
+                        0,
+                    );
+                    let len = builder.ins().load(ir::types::I64, MemFlags::new(), len_addr, 0);
+                    let err = builder.ins().load(ir::types::I32, MemFlags::new(), err_addr, 0);
+                    Ok(ValueRepr::ResultString {
+                        tag,
+                        ok_ptr: ptr,
+                        ok_len: len,
+                        err,
+                    })
                 }
                 _ => Ok(ValueRepr::Single(results[0])),
             }
@@ -608,7 +697,7 @@ fn emit_expr(
             if matches!(binary.op, BinaryOp::And | BinaryOp::Or) {
                 let lhs_val = match lhs {
                     ValueRepr::Single(v) => v,
-                    ValueRepr::Pair(_, _) => {
+                    ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
                         return Err(CodegenError::Unsupported("boolean op on string".to_string()))
                     }
                 };
@@ -737,8 +826,11 @@ fn emit_match_stmt(
         module,
         data_counter,
     )?;
-    let match_val = match value {
-        ValueRepr::Single(v) => v,
+    let (match_val, match_result) = match value.clone() {
+        ValueRepr::Single(v) => (v, None),
+        ValueRepr::ResultString { tag, ok_ptr, ok_len, err } => {
+            (tag, Some((ok_ptr, ok_len, err)))
+        }
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -748,6 +840,14 @@ fn emit_match_stmt(
     let mut current_block = builder.current_block().ok_or_else(|| {
         CodegenError::Codegen("no current block for match".to_string())
     })?;
+
+    let mut all_return = true;
+    for arm in &match_expr.arms {
+        if !matches!(arm.body.stmts.last(), Some(Stmt::Return(_))) {
+            all_return = false;
+            break;
+        }
+    }
 
     for (idx, arm) in match_expr.arms.iter().enumerate() {
         let is_last = idx + 1 == match_expr.arms.len();
@@ -765,6 +865,7 @@ fn emit_match_stmt(
         builder.ins().brif(cond, arm_block, &[], next_block, &[]);
 
         builder.switch_to_block(arm_block);
+        bind_match_pattern_value(&arm.pattern, &value, match_result, locals)?;
         for stmt in &arm.body.stmts {
             emit_stmt(
                 builder,
@@ -778,7 +879,9 @@ fn emit_match_stmt(
                 data_counter,
             )?;
         }
-        builder.ins().jump(merge_block, &[]);
+        if !matches!(arm.body.stmts.last(), Some(Stmt::Return(_))) {
+            builder.ins().jump(merge_block, &[]);
+        }
         builder.seal_block(arm_block);
 
         if is_last {
@@ -787,8 +890,14 @@ fn emit_match_stmt(
         current_block = next_block;
     }
 
-    builder.switch_to_block(merge_block);
-    builder.seal_block(merge_block);
+    if all_return {
+        builder.switch_to_block(merge_block);
+        builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
+        builder.seal_block(merge_block);
+    } else {
+        builder.switch_to_block(merge_block);
+        builder.seal_block(merge_block);
+    }
     Ok(())
 }
 
@@ -813,14 +922,62 @@ fn match_pattern_cond(
             }
             _ => Err(CodegenError::Unsupported("literal pattern".to_string())),
         },
+        Pattern::Call { path, .. } => {
+            let name = path.segments.last().map(|seg| seg.item.as_str()).unwrap_or("");
+            let tag_value = if name == "Ok" { 0 } else if name == "Err" { 1 } else { 2 };
+            if tag_value == 2 {
+                return Err(CodegenError::Unsupported("call pattern".to_string()));
+            }
+            let rhs = builder.ins().iconst(ir::types::I8, tag_value);
+            Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+        }
         _ => Err(CodegenError::Unsupported("pattern".to_string())),
+    }
+}
+
+fn bind_match_pattern_value(
+    pattern: &Pattern,
+    value: &ValueRepr,
+    result: Option<(ir::Value, ir::Value, ir::Value)>,
+    locals: &mut HashMap<String, ValueRepr>,
+) -> Result<(), CodegenError> {
+    match pattern {
+        Pattern::Binding(ident) => match value {
+            ValueRepr::ResultString { .. } => Err(CodegenError::Unsupported(
+                "binding result value".to_string(),
+            )),
+            _ => {
+                locals.insert(ident.item.clone(), value.clone());
+                Ok(())
+            }
+        },
+        Pattern::Call { path, binding, .. } => {
+            let name = path.segments.last().map(|seg| seg.item.as_str()).unwrap_or("");
+            let Some((ok_ptr, ok_len, err)) = result else {
+                return Err(CodegenError::Unsupported("call pattern".to_string()));
+            };
+            if let Some(binding) = binding {
+                if name == "Ok" {
+                    locals.insert(binding.item.clone(), ValueRepr::Pair(ok_ptr, ok_len));
+                    return Ok(());
+                }
+                if name == "Err" {
+                    locals.insert(binding.item.clone(), ValueRepr::Single(err));
+                    return Ok(());
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 
 fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, CodegenError> {
     match value {
         ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
-        ValueRepr::Pair(_, _) => Err(CodegenError::Unsupported("string condition".to_string())),
+        ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
+            Err(CodegenError::Unsupported("string condition".to_string()))
+        }
     }
 }
 
@@ -870,7 +1027,7 @@ fn emit_short_circuit_expr(
     )?;
     let rhs_val = match rhs_value {
         ValueRepr::Single(v) => v,
-        ValueRepr::Pair(_, _) => {
+        ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
             return Err(CodegenError::Unsupported("boolean op on string".to_string()))
         }
     };

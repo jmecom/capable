@@ -15,6 +15,11 @@ pub extern "C" fn capable_rt_system_console(_sys: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_system_fs_read(_sys: Handle, _root_ptr: *const u8, _root_len: usize) -> Handle {
+    new_handle()
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_console_print(_console: Handle, ptr: *const u8, len: usize) {
     unsafe { write_bytes(ptr, len, false) };
 }
@@ -22,6 +27,29 @@ pub extern "C" fn capable_rt_console_print(_console: Handle, ptr: *const u8, len
 #[no_mangle]
 pub extern "C" fn capable_rt_console_println(_console: Handle, ptr: *const u8, len: usize) {
     unsafe { write_bytes(ptr, len, true) };
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_read_to_string(
+    _fs: Handle,
+    _path_ptr: *const u8,
+    _path_len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    unsafe {
+        if !out_ptr.is_null() {
+            *out_ptr = std::ptr::null();
+        }
+        if !out_len.is_null() {
+            *out_len = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    1
 }
 
 #[no_mangle]
