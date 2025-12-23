@@ -3,6 +3,7 @@ module sys.string
 
 use sys.buffer
 use sys.bytes
+use sys.vec
 
 pub fn len(s: string) -> i32 {
   return 0
@@ -18,4 +19,8 @@ pub fn as_slice(s: string) -> Slice[u8] {
 
 pub fn bytes(s: string) -> Slice[u8] {
   return as_slice(s)
+}
+
+pub fn split_whitespace(s: string) -> VecString {
+  return ()
 }

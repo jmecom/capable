@@ -1,0 +1,97 @@
+package safe
+module sys.vec
+
+use sys.buffer
+
+pub opaque struct VecU8
+pub opaque struct VecI32
+pub opaque struct VecString
+
+pub enum VecErr {
+  OutOfRange,
+  Empty
+}
+
+pub fn vec_u8_new(a: Alloc) -> VecU8 {
+  return ()
+}
+
+pub fn vec_u8_len(v: VecU8) -> i32 {
+  return 0
+}
+
+pub fn vec_u8_get(v: VecU8, i: i32) -> Result[u8, VecErr] {
+  return Err(VecErr.OutOfRange)
+}
+
+pub fn vec_u8_set(v: VecU8, i: i32, x: u8) -> Result[unit, VecErr] {
+  return Err(VecErr.OutOfRange)
+}
+
+pub fn vec_u8_push(v: VecU8, x: u8) -> Result[unit, AllocErr] {
+  return Err(AllocErr.Oom)
+}
+
+pub fn vec_u8_pop(v: VecU8) -> Result[u8, VecErr] {
+  return Err(VecErr.Empty)
+}
+
+pub fn vec_u8_as_slice(v: VecU8) -> Slice[u8] {
+  return ()
+}
+
+pub fn vec_u8_free(a: Alloc, v: VecU8) -> unit {
+  return ()
+}
+
+pub fn vec_i32_new(a: Alloc) -> VecI32 {
+  return ()
+}
+
+pub fn vec_i32_len(v: VecI32) -> i32 {
+  return 0
+}
+
+pub fn vec_i32_get(v: VecI32, i: i32) -> Result[i32, VecErr] {
+  return Err(VecErr.OutOfRange)
+}
+
+pub fn vec_i32_set(v: VecI32, i: i32, x: i32) -> Result[unit, VecErr] {
+  return Err(VecErr.OutOfRange)
+}
+
+pub fn vec_i32_push(v: VecI32, x: i32) -> Result[unit, AllocErr] {
+  return Err(AllocErr.Oom)
+}
+
+pub fn vec_i32_pop(v: VecI32) -> Result[i32, VecErr] {
+  return Err(VecErr.Empty)
+}
+
+pub fn vec_i32_free(a: Alloc, v: VecI32) -> unit {
+  return ()
+}
+
+pub fn vec_string_new(a: Alloc) -> VecString {
+  return ()
+}
+
+pub fn vec_string_len(v: VecString) -> i32 {
+  return 0
+}
+
+pub fn vec_string_get(v: VecString, i: i32) -> Result[string, VecErr] {
+  return Err(VecErr.OutOfRange)
+}
+
+pub fn vec_string_push(v: VecString, x: string) -> Result[unit, AllocErr] {
+  return Err(AllocErr.Oom)
+}
+
+pub fn vec_string_pop(v: VecString) -> Result[string, VecErr] {
+  return Err(VecErr.Empty)
+}
+
+pub fn vec_string_free(a: Alloc, v: VecString) -> unit {
+  return ()
+}
