@@ -44,4 +44,12 @@ fn audit_lists_unsafe_package() {
     assert_eq!(code, 0, "stderr was: {stderr:?}");
     assert!(stdout.contains("unsafe packages"));
     assert!(stdout.contains("unsafe_pkg"));
+    assert!(stdout.contains("package unsafe"));
+}
+
+#[test]
+fn audit_reports_extern_in_safe_package() {
+    let (code, stdout, stderr) = run_capc(&["audit", "tests/programs/extern_safe.cap"]);
+    assert_eq!(code, 0, "stderr was: {stderr:?}");
+    assert!(stdout.contains("extern declarations"));
 }

@@ -234,29 +234,17 @@ fn audit_unsafe(path: &PathBuf) -> Result<()> {
         .map_err(|err| miette::Report::new(err))?;
 
     let mut findings = Vec::new();
-    if module.package == capc::ast::PackageSafety::Unsafe {
-        findings.push(format!(
-            "user: {} ({})",
-            module.name,
-            module_path_for(root, &module.name).display()
-        ));
+    if let Some(entry) = audit_entry("user", &module, root) {
+        findings.push(entry);
     }
     for module in &user_modules {
-        if module.package == capc::ast::PackageSafety::Unsafe {
-            findings.push(format!(
-                "user: {} ({})",
-                module.name,
-                module_path_for(root, &module.name).display()
-            ));
+        if let Some(entry) = audit_entry("user", module, root) {
+            findings.push(entry);
         }
     }
     for module in &stdlib {
-        if module.package == capc::ast::PackageSafety::Unsafe {
-            findings.push(format!(
-                "stdlib: {} ({})",
-                module.name,
-                module_path_for(&capc::stdlib_root(), &module.name).display()
-            ));
+        if let Some(entry) = audit_entry("stdlib", module, &capc::stdlib_root()) {
+            findings.push(entry);
         }
     }
 
@@ -271,6 +259,33 @@ fn audit_unsafe(path: &PathBuf) -> Result<()> {
         println!("- {entry}");
     }
     Ok(())
+}
+
+fn audit_entry(
+    scope: &str,
+    module: &capc::ast::Module,
+    root: &std::path::Path,
+) -> Option<String> {
+    let mut reasons = Vec::new();
+    if module.package == capc::ast::PackageSafety::Unsafe {
+        reasons.push("package unsafe");
+    }
+    if module
+        .items
+        .iter()
+        .any(|item| matches!(item, capc::ast::Item::ExternFunction(_)))
+    {
+        reasons.push("extern declarations");
+    }
+    if reasons.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{scope}: {} ({}): {}",
+        module.name,
+        module_path_for(root, &module.name).display(),
+        reasons.join(", ")
+    ))
 }
 
 fn module_path_for(root: &std::path::Path, name: &capc::ast::Path) -> PathBuf {
