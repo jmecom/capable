@@ -74,3 +74,17 @@ fn run_match_expr() {
     assert_eq!(code, 0);
     assert!(stdout.contains("yes"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_malloc_demo() {
+    let out_dir = make_out_dir("malloc_demo");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "examples/malloc_demo/malloc_demo.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("malloc ok"), "stdout was: {stdout:?}");
+}
