@@ -43,7 +43,7 @@ impl Parser {
         }
 
         self.expect(TokenKind::Module)?;
-        let name = self.expect_ident()?;
+        let name = self.parse_path()?;
 
         let mut uses = Vec::new();
         while self.peek_kind() == Some(TokenKind::Use) {

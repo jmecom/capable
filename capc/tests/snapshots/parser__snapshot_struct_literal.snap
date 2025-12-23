@@ -4,8 +4,16 @@ expression: module
 ---
 Module {
     package: Safe,
-    name: Spanned {
-        item: "demo",
+    name: Path {
+        segments: [
+            Spanned {
+                item: "demo",
+                span: Span {
+                    start: 7,
+                    end: 11,
+                },
+            },
+        ],
         span: Span {
             start: 7,
             end: 11,

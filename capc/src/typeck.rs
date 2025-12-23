@@ -36,6 +36,10 @@ struct UseMap {
     aliases: HashMap<String, Vec<String>>,
 }
 
+struct StdlibIndex {
+    types: HashMap<String, String>,
+}
+
 impl UseMap {
     fn new(module: &Module) -> Self {
         let mut aliases = HashMap::new();
@@ -54,66 +58,6 @@ impl UseMap {
     }
 }
 
-fn intrinsic_functions() -> HashMap<String, FunctionSig> {
-    let mut map = HashMap::new();
-
-    map.insert(
-        "sys.system.console".to_string(),
-        FunctionSig {
-            params: vec![Ty::Path("sys.system.System".to_string(), Vec::new())],
-            ret: Ty::Path("sys.console.Console".to_string(), Vec::new()),
-        },
-    );
-    map.insert(
-        "sys.system.fs_read".to_string(),
-        FunctionSig {
-            params: vec![
-                Ty::Path("sys.system.System".to_string(), Vec::new()),
-                Ty::Builtin(BuiltinType::String),
-            ],
-            ret: Ty::Path("sys.fs.ReadFS".to_string(), Vec::new()),
-        },
-    );
-    map.insert(
-        "sys.console.print".to_string(),
-        FunctionSig {
-            params: vec![
-                Ty::Path("sys.console.Console".to_string(), Vec::new()),
-                Ty::Builtin(BuiltinType::String),
-            ],
-            ret: Ty::Builtin(BuiltinType::Unit),
-        },
-    );
-    map.insert(
-        "sys.console.println".to_string(),
-        FunctionSig {
-            params: vec![
-                Ty::Path("sys.console.Console".to_string(), Vec::new()),
-                Ty::Builtin(BuiltinType::String),
-            ],
-            ret: Ty::Builtin(BuiltinType::Unit),
-        },
-    );
-    map.insert(
-        "sys.fs.read_to_string".to_string(),
-        FunctionSig {
-            params: vec![
-                Ty::Path("sys.fs.ReadFS".to_string(), Vec::new()),
-                Ty::Builtin(BuiltinType::String),
-            ],
-            ret: Ty::Path(
-                "Result".to_string(),
-                vec![
-                    Ty::Builtin(BuiltinType::String),
-                    Ty::Path("sys.fs.FsErr".to_string(), Vec::new()),
-                ],
-            ),
-        },
-    );
-
-    map
-}
-
 fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
     if path.segments.len() > 1 {
         let first = &path.segments[0].item;
@@ -128,70 +72,139 @@ fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
     path.segments.iter().map(|seg| seg.item.clone()).collect()
 }
 
-fn collect_structs(
-    module: &Module,
-    use_map: &UseMap,
-) -> Result<HashMap<String, StructInfo>, TypeError> {
-    let mut structs = HashMap::new();
-    for item in &module.items {
-        if let Item::Struct(decl) = item {
-            let name = decl.name.item.clone();
-            if structs.contains_key(&name) {
+fn build_stdlib_index(stdlib: &[Module]) -> Result<StdlibIndex, TypeError> {
+    let mut types = HashMap::new();
+    for module in stdlib {
+        let module_name = module.name.to_string();
+        for item in &module.items {
+            let name = match item {
+                Item::Struct(decl) if decl.is_pub => decl.name.item.clone(),
+                Item::Enum(decl) if decl.is_pub => decl.name.item.clone(),
+                _ => continue,
+            };
+            let qualified = format!("{module_name}.{name}");
+            if types.insert(name.clone(), qualified).is_some() {
                 return Err(TypeError::new(
-                    format!("duplicate struct `{name}`"),
-                    decl.name.span,
+                    format!("duplicate stdlib type `{name}`"),
+                    module.span,
                 ));
             }
-            let mut fields = HashMap::new();
-            for field in &decl.fields {
-                let ty = lower_type(&field.ty, use_map)?;
-                if fields.insert(field.name.item.clone(), ty).is_some() {
+        }
+    }
+    Ok(StdlibIndex { types })
+}
+
+fn collect_functions(
+    modules: &[&Module],
+    entry_name: &str,
+    stdlib: &StdlibIndex,
+) -> Result<HashMap<String, FunctionSig>, TypeError> {
+    let mut functions = HashMap::new();
+    for module in modules {
+        let module_name = module.name.to_string();
+        let local_use = UseMap::new(module);
+        for item in &module.items {
+            if let Item::Function(func) = item {
+                let sig = FunctionSig {
+                    params: func
+                        .params
+                        .iter()
+                        .map(|p| lower_type(&p.ty, &local_use, stdlib))
+                        .collect::<Result<_, _>>()?,
+                    ret: lower_type(&func.ret, &local_use, stdlib)?,
+                };
+                let key = if module_name == entry_name {
+                    func.name.item.clone()
+                } else {
+                    format!("{module_name}.{}", func.name.item)
+                };
+                if functions.insert(key.clone(), sig).is_some() {
                     return Err(TypeError::new(
-                        format!("duplicate field `{}`", field.name.item),
-                        field.name.span,
+                        format!("duplicate function `{key}`"),
+                        func.name.span,
                     ));
                 }
             }
-            structs.insert(
-                name,
-                StructInfo {
+        }
+    }
+    Ok(functions)
+}
+
+fn collect_structs(
+    modules: &[&Module],
+    entry_name: &str,
+    stdlib: &StdlibIndex,
+) -> Result<HashMap<String, StructInfo>, TypeError> {
+    let mut structs = HashMap::new();
+    for module in modules {
+        let module_name = module.name.to_string();
+        let local_use = UseMap::new(module);
+        for item in &module.items {
+            if let Item::Struct(decl) = item {
+                let mut fields = HashMap::new();
+                for field in &decl.fields {
+                    let ty = lower_type(&field.ty, &local_use, stdlib)?;
+                    if fields.insert(field.name.item.clone(), ty).is_some() {
+                        return Err(TypeError::new(
+                            format!("duplicate field `{}`", field.name.item),
+                            field.name.span,
+                        ));
+                    }
+                }
+                let qualified = format!("{module_name}.{}", decl.name.item);
+                if structs.contains_key(&qualified) {
+                    return Err(TypeError::new(
+                        format!("duplicate struct `{qualified}`"),
+                        decl.name.span,
+                    ));
+                }
+                let info = StructInfo {
                     fields,
                     is_opaque: decl.is_opaque,
-                    module: module.name.item.clone(),
-                },
-            );
+                    module: module_name.clone(),
+                };
+                structs.insert(qualified, info.clone());
+                if module_name == entry_name {
+                    let name = decl.name.item.clone();
+                    if structs.contains_key(&name) {
+                        return Err(TypeError::new(
+                            format!("duplicate struct `{name}`"),
+                            decl.name.span,
+                        ));
+                    }
+                    structs.insert(name, info);
+                }
+            }
         }
     }
     Ok(structs)
 }
 
 pub fn type_check(module: &Module) -> Result<(), TypeError> {
+    type_check_program(module, &[])
+}
+
+pub fn type_check_program(module: &Module, stdlib: &[Module]) -> Result<(), TypeError> {
     let use_map = UseMap::new(module);
-    let struct_map = collect_structs(module, &use_map)?;
-    let mut functions = intrinsic_functions();
-    for item in &module.items {
-        if let Item::Function(func) = item {
-            let sig = FunctionSig {
-                params: func
-                    .params
-                    .iter()
-                    .map(|p| lower_type(&p.ty, &use_map))
-                    .collect::<Result<_, _>>()?,
-                ret: lower_type(&func.ret, &use_map)?,
-            };
-            let name = func.name.item.clone();
-            if functions.insert(name.clone(), sig).is_some() {
-                return Err(TypeError::new(
-                    format!("duplicate function `{name}`"),
-                    func.name.span,
-                ));
-            }
-        }
-    }
+    let stdlib_index = build_stdlib_index(stdlib)?;
+    let modules = stdlib
+        .iter()
+        .chain(std::iter::once(module))
+        .collect::<Vec<_>>();
+    let module_name = module.name.to_string();
+    let struct_map = collect_structs(&modules, &module_name, &stdlib_index)?;
+    let functions = collect_functions(&modules, &module_name, &stdlib_index)?;
 
     for item in &module.items {
         if let Item::Function(func) = item {
-            check_function(func, &functions, &use_map, &struct_map, &module.name.item)?;
+            check_function(
+                func,
+                &functions,
+                &use_map,
+                &struct_map,
+                &stdlib_index,
+                &module_name,
+            )?;
         }
     }
 
@@ -203,15 +216,16 @@ fn check_function(
     functions: &HashMap<String, FunctionSig>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    stdlib: &StdlibIndex,
     module_name: &str,
 ) -> Result<(), TypeError> {
     let mut locals = HashMap::new();
     for param in &func.params {
-        let ty = lower_type(&param.ty, use_map)?;
+        let ty = lower_type(&param.ty, use_map, stdlib)?;
         locals.insert(param.name.item.clone(), ty);
     }
 
-    let ret_ty = lower_type(&func.ret, use_map)?;
+    let ret_ty = lower_type(&func.ret, use_map, stdlib)?;
     let mut has_return = false;
 
     for stmt in &func.body.stmts {
@@ -222,6 +236,7 @@ fn check_function(
             &mut locals,
             use_map,
             struct_map,
+            stdlib,
             module_name,
             &mut has_return,
         )?;
@@ -244,6 +259,7 @@ fn check_stmt(
     locals: &mut HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    stdlib: &StdlibIndex,
     module_name: &str,
     has_return: &mut bool,
 ) -> Result<(), TypeError> {
@@ -255,11 +271,12 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                stdlib,
                 ret_ty,
                 module_name,
             )?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
-                let annot_ty = lower_type(annot, use_map)?;
+                let annot_ty = lower_type(annot, use_map, stdlib)?;
                 if annot_ty != expr_ty {
                     return Err(TypeError::new(
                         format!("type mismatch: expected {annot_ty:?}, found {expr_ty:?}"),
@@ -274,7 +291,16 @@ fn check_stmt(
         }
         Stmt::Return(ret_stmt) => {
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
-                check_expr(expr, functions, locals, use_map, struct_map, ret_ty, module_name)?
+                check_expr(
+                    expr,
+                    functions,
+                    locals,
+                    use_map,
+                    struct_map,
+                    stdlib,
+                    ret_ty,
+                    module_name,
+                )?
             } else {
                 Ty::Builtin(BuiltinType::Unit)
             };
@@ -287,8 +313,16 @@ fn check_stmt(
             *has_return = true;
         }
         Stmt::If(if_stmt) => {
-            let cond_ty =
-                check_expr(&if_stmt.cond, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+            let cond_ty = check_expr(
+                &if_stmt.cond,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
                     "if condition must be bool".to_string(),
@@ -302,6 +336,7 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                stdlib,
                 module_name,
                 has_return,
             )?;
@@ -313,14 +348,23 @@ fn check_stmt(
                     locals,
                     use_map,
                     struct_map,
+                    stdlib,
                     module_name,
                     has_return,
                 )?;
             }
         }
         Stmt::While(while_stmt) => {
-            let cond_ty =
-                check_expr(&while_stmt.cond, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+            let cond_ty = check_expr(
+                &while_stmt.cond,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
                     "while condition must be bool".to_string(),
@@ -334,6 +378,7 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                stdlib,
                 module_name,
                 has_return,
             )?;
@@ -347,6 +392,7 @@ fn check_stmt(
                     locals,
                     use_map,
                     struct_map,
+                    stdlib,
                     ret_ty,
                     module_name,
                     Some(&mut any_return),
@@ -361,6 +407,7 @@ fn check_stmt(
                     locals,
                     use_map,
                     struct_map,
+                    stdlib,
                     ret_ty,
                     module_name,
                 )?;
@@ -378,6 +425,7 @@ fn check_block(
     locals: &mut HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    stdlib: &StdlibIndex,
     module_name: &str,
     has_return: &mut bool,
 ) -> Result<(), TypeError> {
@@ -389,6 +437,7 @@ fn check_block(
             locals,
             use_map,
             struct_map,
+            stdlib,
             module_name,
             has_return,
         )?;
@@ -402,6 +451,7 @@ fn check_expr(
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
 ) -> Result<Ty, TypeError> {
@@ -442,8 +492,16 @@ fn check_expr(
                     ));
                 }
                 for (arg, expected) in call.args.iter().zip(&sig.params) {
-                    let arg_ty =
-                        check_expr(arg, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+                    let arg_ty = check_expr(
+                        arg,
+                        functions,
+                        locals,
+                        use_map,
+                        struct_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                    )?;
                     if &arg_ty != expected {
                         return Err(TypeError::new(
                             format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
@@ -464,12 +522,21 @@ fn check_expr(
             locals,
             use_map,
             struct_map,
+            stdlib,
             ret_ty,
             module_name,
         ),
         Expr::Unary(unary) => {
-            let expr_ty =
-                check_expr(&unary.expr, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+            let expr_ty = check_expr(
+                &unary.expr,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
             match unary.op {
                 UnaryOp::Neg => {
                     if expr_ty == Ty::Builtin(BuiltinType::I32)
@@ -496,10 +563,26 @@ fn check_expr(
             }
         }
         Expr::Binary(binary) => {
-            let left =
-                check_expr(&binary.left, functions, locals, use_map, struct_map, ret_ty, module_name)?;
-            let right =
-                check_expr(&binary.right, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+            let left = check_expr(
+                &binary.left,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
+            let right = check_expr(
+                &binary.right,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
             match binary.op {
                 BinaryOp::Add
                 | BinaryOp::Sub
@@ -552,6 +635,7 @@ fn check_expr(
                 locals,
                 use_map,
                 struct_map,
+                stdlib,
                 ret_ty,
                 module_name,
                 None,
@@ -563,6 +647,7 @@ fn check_expr(
             locals,
             use_map,
             struct_map,
+            stdlib,
             ret_ty,
             module_name,
         ),
@@ -575,12 +660,21 @@ fn check_match_expr(
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
     any_return: Option<&mut bool>,
 ) -> Result<Ty, TypeError> {
-    let match_ty =
-        check_expr(&match_expr.expr, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+    let match_ty = check_expr(
+        &match_expr.expr,
+        functions,
+        locals,
+        use_map,
+        struct_map,
+        stdlib,
+        ret_ty,
+        module_name,
+    )?;
     let mut saw_return = false;
     for arm in &match_expr.arms {
         let mut arm_locals = locals.clone();
@@ -593,6 +687,7 @@ fn check_match_expr(
             &mut arm_locals,
             use_map,
             struct_map,
+            stdlib,
             module_name,
             &mut arm_return,
         )?;
@@ -612,28 +707,17 @@ fn check_struct_literal(
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
 ) -> Result<Ty, TypeError> {
-    let type_name = resolve_type_name(&lit.path, use_map);
-    if let Some(opaque_module) = opaque_type_module(&type_name) {
-        if opaque_module != module_name {
-            let display = lit
-                .path
-                .segments
-                .last()
-                .map(|seg| seg.item.clone())
-                .unwrap_or(type_name.clone());
-            return Err(TypeError::new(
-                format!(
-                    "cannot construct opaque type `{display}` outside module `{opaque_module}`"
-                ),
-                lit.span,
-            ));
-        }
-    }
+    let type_name = resolve_type_name(&lit.path, use_map, stdlib);
     let key = if lit.path.segments.len() == 1 {
-        lit.path.segments[0].item.clone()
+        if stdlib.types.contains_key(&lit.path.segments[0].item) {
+            type_name.clone()
+        } else {
+            lit.path.segments[0].item.clone()
+        }
     } else {
         type_name.clone()
     };
@@ -658,8 +742,16 @@ fn check_struct_literal(
                 field.span,
             )
         })?;
-        let actual =
-            check_expr(&field.expr, functions, locals, use_map, struct_map, ret_ty, module_name)?;
+        let actual = check_expr(
+            &field.expr,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            stdlib,
+            ret_ty,
+            module_name,
+        )?;
         if actual != expected {
             return Err(TypeError::new(
                 format!("field `{}` expects {expected:?}, found {actual:?}", field.name.item),
@@ -719,31 +811,17 @@ fn bind_pattern(
     }
 }
 
-fn resolve_type_name(path: &Path, use_map: &UseMap) -> String {
+fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> String {
     let resolved = resolve_path(path, use_map);
     if resolved.len() == 1 {
-        match resolved[0].as_str() {
-            "System" => return "sys.system.System".to_string(),
-            "Console" => return "sys.console.Console".to_string(),
-            "ReadFS" => return "sys.fs.ReadFS".to_string(),
-            "FsErr" => return "sys.fs.FsErr".to_string(),
-            _ => {}
+        if let Some(full) = stdlib.types.get(&resolved[0]) {
+            return full.clone();
         }
     }
     resolved.join(".")
 }
 
-fn opaque_type_module(type_name: &str) -> Option<String> {
-    match type_name {
-        "sys.system.System" => Some("sys.system".to_string()),
-        "sys.console.Console" => Some("sys.console".to_string()),
-        "sys.fs.ReadFS" => Some("sys.fs".to_string()),
-        "sys.fs.FsErr" => Some("sys.fs".to_string()),
-        _ => None,
-    }
-}
-
-fn lower_type(ty: &Type, use_map: &UseMap) -> Result<Ty, TypeError> {
+fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, TypeError> {
     let resolved = resolve_path(&ty.path, use_map);
     let path = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
     if path.len() == 1 {
@@ -759,7 +837,7 @@ fn lower_type(ty: &Type, use_map: &UseMap) -> Result<Ty, TypeError> {
         if let Some(builtin) = builtin {
             return Ok(Ty::Builtin(builtin));
         }
-        let alias = resolve_type_name(&ty.path, use_map);
+        let alias = resolve_type_name(&ty.path, use_map, stdlib);
         if alias != resolved.join(".") {
             return Ok(Ty::Path(alias, Vec::new()));
         }
@@ -768,7 +846,7 @@ fn lower_type(ty: &Type, use_map: &UseMap) -> Result<Ty, TypeError> {
     let args = ty
         .args
         .iter()
-        .map(|arg| lower_type(arg, use_map))
+        .map(|arg| lower_type(arg, use_map, stdlib))
         .collect::<Result<_, _>>()?;
     Ok(Ty::Path(joined, args))
 }

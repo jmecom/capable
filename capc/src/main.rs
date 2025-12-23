@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use miette::{miette, NamedSource, Result};
 
-use capc::{parse_module, type_check};
+use capc::{load_stdlib, parse_module, type_check_program};
 
 #[derive(Debug, Parser)]
 #[command(name = "capc", version, about = "Capable compiler (milestone 0/1)")]
@@ -38,7 +38,10 @@ fn main() -> Result<()> {
                 let named = NamedSource::new(path.display().to_string(), source.clone());
                 miette::Report::new(err).with_source_code(named)
             })?;
-            type_check(&module).map_err(|err| {
+            let stdlib = load_stdlib().map_err(|err| {
+                miette::Report::new(err)
+            })?;
+            type_check_program(&module, &stdlib).map_err(|err| {
                 let named = NamedSource::new(path.display().to_string(), source);
                 miette::Report::new(err).with_source_code(named)
             })?;

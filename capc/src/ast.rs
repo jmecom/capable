@@ -35,7 +35,7 @@ pub enum PackageSafety {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub package: PackageSafety,
-    pub name: Ident,
+    pub name: Path,
     pub uses: Vec<UseDecl>,
     pub items: Vec<Item>,
     pub span: Span,

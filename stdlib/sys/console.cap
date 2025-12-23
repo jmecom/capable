@@ -1,0 +1,12 @@
+package unsafe
+module sys.console
+
+pub opaque struct Console
+
+pub fn print(c: Console, s: string) -> unit {
+  return ()
+}
+
+pub fn println(c: Console, s: string) -> unit {
+  return ()
+}
