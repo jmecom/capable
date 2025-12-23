@@ -1,0 +1,8 @@
+module app
+use sys.console
+
+pub fn main(sys: System) -> i32 {
+  let c = console.Console { }
+  console.println(c, "nope")
+  return 0
+}

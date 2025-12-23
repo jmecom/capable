@@ -181,14 +181,19 @@ fn collect_structs(
 }
 
 pub fn type_check(module: &Module) -> Result<(), TypeError> {
-    type_check_program(module, &[])
+    type_check_program(module, &[], &[])
 }
 
-pub fn type_check_program(module: &Module, stdlib: &[Module]) -> Result<(), TypeError> {
+pub fn type_check_program(
+    module: &Module,
+    stdlib: &[Module],
+    user_modules: &[Module],
+) -> Result<(), TypeError> {
     let use_map = UseMap::new(module);
     let stdlib_index = build_stdlib_index(stdlib)?;
     let modules = stdlib
         .iter()
+        .chain(user_modules.iter())
         .chain(std::iter::once(module))
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();

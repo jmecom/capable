@@ -41,3 +41,39 @@ pub fn load_module_from_path(path: &Path) -> Result<Module, ParseError> {
     })?;
     parse_module(&source)
 }
+
+pub fn load_user_modules(entry_path: &Path, entry_module: &Module) -> Result<Vec<Module>, ParseError> {
+    let dir = entry_path
+        .parent()
+        .ok_or_else(|| {
+            ParseError::new(
+                "entry path has no parent directory".to_string(),
+                crate::ast::Span::new(0, 0),
+            )
+        })?
+        .to_path_buf();
+    let mut modules = Vec::new();
+    for use_decl in &entry_module.uses {
+        let segments = &use_decl.path.segments;
+        if segments.first().map(|s| s.item.as_str()) == Some("sys") {
+            continue;
+        }
+        let mut path = dir.clone();
+        if segments.len() == 1 {
+            path.push(format!("{}.cap", segments[0].item));
+        } else {
+            for seg in segments.iter().take(segments.len() - 1) {
+                path.push(&seg.item);
+            }
+            path.push(format!("{}.cap", segments.last().unwrap().item));
+        }
+        if !path.exists() {
+            return Err(ParseError::new(
+                format!("module file not found for `{}`", use_decl.path),
+                use_decl.span,
+            ));
+        }
+        modules.push(load_module_from_path(&path)?);
+    }
+    Ok(modules)
+}
