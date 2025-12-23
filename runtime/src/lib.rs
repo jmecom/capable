@@ -13,6 +13,8 @@ static READ_FS: LazyLock<Mutex<HashMap<Handle, ReadFsState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static BUFFERS: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone)]
 struct ReadFsState {
@@ -223,6 +225,137 @@ pub extern "C" fn capable_rt_mut_slice_at(slice: Handle, index: i32) -> u8 {
     }
     let ptr = state.ptr as *mut u8;
     unsafe { *ptr.add(idx) }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_new(
+    _alloc: Handle,
+    initial_len: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    if initial_len < 0 {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let len = initial_len as usize;
+    let mut data = Vec::new();
+    if data.try_reserve(len).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    data.resize(len, 0);
+    let handle = new_handle();
+    let mut table = BUFFERS.lock().expect("buffer table");
+    table.insert(handle, data);
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = handle;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_len(buffer: Handle) -> i32 {
+    let table = BUFFERS.lock().expect("buffer table");
+    table
+        .get(&buffer)
+        .map(|data| data.len().min(i32::MAX as usize) as i32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_push(
+    buffer: Handle,
+    value: u8,
+    out_err: *mut i32,
+) -> u8 {
+    let mut table = BUFFERS.lock().expect("buffer table");
+    let Some(data) = table.get_mut(&buffer) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    if data.try_reserve(1).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    data.push(value);
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_free(_alloc: Handle, buffer: Handle) {
+    let mut table = BUFFERS.lock().expect("buffer table");
+    table.remove(&buffer);
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_as_slice(buffer: Handle) -> Handle {
+    let table = BUFFERS.lock().expect("buffer table");
+    let Some(data) = table.get(&buffer) else {
+        return 0;
+    };
+    let handle = new_handle();
+    let ptr = if data.is_empty() {
+        0
+    } else {
+        data.as_ptr() as usize
+    };
+    let len = data.len();
+    drop(table);
+    let mut slices = SLICES.lock().expect("slice table");
+    slices.insert(
+        handle,
+        SliceState {
+            ptr,
+            len,
+            mutable: false,
+        },
+    );
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_as_mut_slice(buffer: Handle) -> Handle {
+    let mut table = BUFFERS.lock().expect("buffer table");
+    let Some(data) = table.get_mut(&buffer) else {
+        return 0;
+    };
+    let handle = new_handle();
+    let ptr = if data.is_empty() {
+        0
+    } else {
+        data.as_mut_ptr() as usize
+    };
+    let len = data.len();
+    drop(table);
+    let mut slices = SLICES.lock().expect("slice table");
+    slices.insert(
+        handle,
+        SliceState {
+            ptr,
+            len,
+            mutable: true,
+        },
+    );
+    handle
 }
 
 unsafe fn write_bytes(ptr: *const u8, len: usize, newline: bool) {

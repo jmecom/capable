@@ -42,6 +42,7 @@ enum TyKind {
     Handle,
     Ptr,
     Result(Box<TyKind>, Box<TyKind>),
+    ResultOut(Box<TyKind>, Box<TyKind>),
     ResultString,
 }
 
@@ -266,6 +267,14 @@ fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
             append_ty_params(signature, ok, ptr_ty);
             append_ty_params(signature, err, ptr_ty);
         }
+        TyKind::ResultOut(ok, err) => {
+            if **ok != TyKind::Unit {
+                signature.params.push(AbiParam::new(ptr_ty));
+            }
+            if **err != TyKind::Unit {
+                signature.params.push(AbiParam::new(ptr_ty));
+            }
+        }
         TyKind::ResultString => {
             signature.params.push(AbiParam::new(ir::types::I64)); // out_ptr
             signature.params.push(AbiParam::new(ir::types::I64)); // out_len
@@ -291,6 +300,9 @@ fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
             signature.returns.push(AbiParam::new(ir::types::I8)); // tag
             append_ty_returns(signature, ok, ptr_ty);
             append_ty_returns(signature, err, ptr_ty);
+        }
+        TyKind::ResultOut(_, _) => {
+            signature.returns.push(AbiParam::new(ir::types::I8)); // tag
         }
         TyKind::ResultString => {
             signature.returns.push(AbiParam::new(ir::types::I8)); // tag
@@ -350,6 +362,42 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     let mem_slice_at = FnSig {
         params: vec![TyKind::Handle, TyKind::I32],
         ret: TyKind::U8,
+    };
+    let mem_buffer_new = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::Result(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
+    };
+    let mem_buffer_new_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::I32,
+            TyKind::ResultOut(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
+    };
+    let mem_buffer_len = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::I32,
+    };
+    let mem_buffer_push = FnSig {
+        params: vec![TyKind::Handle, TyKind::U8],
+        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let mem_buffer_push_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::U8,
+            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let mem_buffer_free = FnSig {
+        params: vec![TyKind::Handle, TyKind::Handle],
+        ret: TyKind::Unit,
+    };
+    let mem_buffer_as_slice = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Handle,
     };
 
     map.insert(
@@ -484,6 +532,60 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_slice_at,
             abi_sig: None,
             symbol: "capable_rt_mut_slice_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.buffer_new".to_string(),
+        FnInfo {
+            sig: mem_buffer_new,
+            abi_sig: Some(mem_buffer_new_abi),
+            symbol: "capable_rt_buffer_new".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.buffer_len".to_string(),
+        FnInfo {
+            sig: mem_buffer_len,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.buffer_push".to_string(),
+        FnInfo {
+            sig: mem_buffer_push,
+            abi_sig: Some(mem_buffer_push_abi),
+            symbol: "capable_rt_buffer_push".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.buffer_free".to_string(),
+        FnInfo {
+            sig: mem_buffer_free,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_free".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.buffer_as_slice".to_string(),
+        FnInfo {
+            sig: mem_buffer_as_slice.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_buffer_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.mem.buffer_as_mut_slice".to_string(),
+        FnInfo {
+            sig: mem_buffer_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_as_mut_slice".to_string(),
             is_runtime: true,
         },
     );
@@ -828,6 +930,7 @@ fn emit_expr(
                 args.extend(flatten_value(&value));
             }
             let mut out_slots = None;
+            let mut result_out = None;
             let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
             if abi_sig.ret == TyKind::ResultString {
                 let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
@@ -849,6 +952,34 @@ fn emit_expr(
                 args.push(len_ptr);
                 args.push(err_ptr);
                 out_slots = Some((slot_ptr, slot_len, slot_err));
+            }
+            if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
+                let ptr_ty = module.isa().pointer_type();
+                let ok_slot = if **ok_ty == TyKind::Unit {
+                    None
+                } else {
+                    let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        ty.bytes().max(1) as u32,
+                    ));
+                    let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+                    args.push(addr);
+                    Some((slot, ty))
+                };
+                let err_slot = if **err_ty == TyKind::Unit {
+                    None
+                } else {
+                    let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        ty.bytes().max(1) as u32,
+                    ));
+                    let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+                    args.push(addr);
+                    Some((slot, ty))
+                };
+                result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
             }
             let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
             let func_id = module
@@ -899,6 +1030,36 @@ fn emit_expr(
                         })
                     }
                     _ => Err(CodegenError::Unsupported("result out params".to_string())),
+                }
+            } else if let TyKind::ResultOut(_, _) = &abi_sig.ret {
+                let tag = results
+                    .get(0)
+                    .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+                let (ok_slot, err_slot, ok_ty, err_ty) = result_out
+                    .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
+                let ok_val = if let Some((slot, ty)) = ok_slot {
+                    let addr = builder.ins().stack_addr(module.isa().pointer_type(), slot, 0);
+                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                    ValueRepr::Single(val)
+                } else {
+                    ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+                };
+                let err_val = if let Some((slot, ty)) = err_slot {
+                    let addr = builder.ins().stack_addr(module.isa().pointer_type(), slot, 0);
+                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                    ValueRepr::Single(val)
+                } else {
+                    ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+                };
+                match &info.sig.ret {
+                    TyKind::Result(_, _) => Ok(ValueRepr::Result {
+                        tag: *tag,
+                        ok: Box::new(ok_val),
+                        err: Box::new(err_val),
+                    }),
+                    _ => Err(CodegenError::Unsupported(format!(
+                        "result out params for {ok_ty:?}/{err_ty:?}"
+                    ))),
                 }
             } else {
                 let mut index = 0;
@@ -1484,6 +1645,17 @@ fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
     }
 }
 
+fn value_type_for_result_out(ty: &TyKind, ptr_ty: Type) -> Result<ir::Type, CodegenError> {
+    match ty {
+        TyKind::I32 | TyKind::U32 => Ok(ir::types::I32),
+        TyKind::U8 | TyKind::Bool => Ok(ir::types::I8),
+        TyKind::Handle => Ok(ir::types::I64),
+        TyKind::Ptr => Ok(ptr_ty),
+        TyKind::Unit => Err(CodegenError::Unsupported("result out unit".to_string())),
+        _ => Err(CodegenError::Unsupported("result out params".to_string())),
+    }
+}
+
 fn value_from_params(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
@@ -1518,6 +1690,9 @@ fn value_from_params(
                 ok: Box::new(ok_val),
                 err: Box::new(err_val),
             }
+        }
+        TyKind::ResultOut(_, _) => {
+            ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
         }
         TyKind::ResultString => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
     }
@@ -1565,6 +1740,7 @@ fn value_from_results(
                 err: Box::new(err_val),
             })
         }
+        TyKind::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
         TyKind::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
     }
 }
