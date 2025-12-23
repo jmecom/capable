@@ -235,3 +235,34 @@ fn normalize_path(path: &Path) -> PathBuf {
 extern "C" {
     fn capable_main(sys: Handle) -> i32;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_relative;
+    use std::path::Path;
+
+    #[test]
+    fn normalize_relative_allows_simple_paths() {
+        let path = normalize_relative(Path::new("a/b.txt")).expect("path");
+        assert_eq!(path.to_string_lossy(), "a/b.txt");
+    }
+
+    #[test]
+    fn normalize_relative_cleans_dot_segments() {
+        let path = normalize_relative(Path::new("a/./b")).expect("path");
+        assert_eq!(path.to_string_lossy(), "a/b");
+        let path = normalize_relative(Path::new("a/../b")).expect("path");
+        assert_eq!(path.to_string_lossy(), "b");
+    }
+
+    #[test]
+    fn normalize_relative_rejects_escape() {
+        assert!(normalize_relative(Path::new("../secret")).is_none());
+        assert!(normalize_relative(Path::new("a/../../b")).is_none());
+    }
+
+    #[test]
+    fn normalize_relative_rejects_absolute() {
+        assert!(normalize_relative(Path::new("/abs/path")).is_none());
+    }
+}
