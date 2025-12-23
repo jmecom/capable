@@ -1,0 +1,7 @@
+package unsafe
+module unsafe_pkg
+use sys.system
+
+pub fn main(sys: System) -> i32 {
+  return 0
+}

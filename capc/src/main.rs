@@ -15,19 +15,28 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Parse { path: PathBuf },
-    Check { path: PathBuf },
+    Check {
+        path: PathBuf,
+        #[arg(long)]
+        safe_only: bool,
+    },
     Build {
         path: PathBuf,
         #[arg(short, long)]
         out: Option<PathBuf>,
         #[arg(long)]
         out_dir: Option<PathBuf>,
+        #[arg(long)]
+        safe_only: bool,
     },
     Run {
         path: PathBuf,
         #[arg(long)]
         out_dir: Option<PathBuf>,
+        #[arg(long)]
+        safe_only: bool,
     },
+    Audit { path: PathBuf },
 }
 
 fn main() -> Result<()> {
@@ -43,7 +52,7 @@ fn main() -> Result<()> {
             println!("{module:#?}");
             Ok(())
         }
-        Command::Check { path } => {
+        Command::Check { path, safe_only } => {
             let source = std::fs::read_to_string(&path)
                 .map_err(|err| miette!("failed to read {}: {err}", path.display()))?;
             let module = parse_module(&source).map_err(|err| {
@@ -63,6 +72,9 @@ fn main() -> Result<()> {
             let user_modules = graph.load_user_modules_transitive(&path, &module).map_err(|err| {
                 miette::Report::new(err)
             })?;
+            if safe_only {
+                enforce_safe_only(&module, &user_modules)?;
+            }
             type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
                 let named = NamedSource::new(path.display().to_string(), source);
                 miette::Report::new(err).with_source_code(named)
@@ -70,13 +82,22 @@ fn main() -> Result<()> {
             println!("ok");
             Ok(())
         }
-        Command::Build { path, out, out_dir } => {
-            let out_path = build_binary(&path, out, out_dir)?;
+        Command::Build {
+            path,
+            out,
+            out_dir,
+            safe_only,
+        } => {
+            let out_path = build_binary(&path, out, out_dir, safe_only)?;
             println!("built {}", out_path.display());
             Ok(())
         }
-        Command::Run { path, out_dir } => {
-            let out_path = build_binary(&path, None, out_dir)?;
+        Command::Run {
+            path,
+            out_dir,
+            safe_only,
+        } => {
+            let out_path = build_binary(&path, None, out_dir, safe_only)?;
             let status = std::process::Command::new(&out_path)
                 .status()
                 .map_err(|err| miette!("failed to run {}: {err}", out_path.display()))?;
@@ -85,10 +106,16 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Audit { path } => audit_unsafe(&path),
     }
 }
 
-fn build_binary(path: &PathBuf, out: Option<PathBuf>, out_dir: Option<PathBuf>) -> Result<PathBuf> {
+fn build_binary(
+    path: &PathBuf,
+    out: Option<PathBuf>,
+    out_dir: Option<PathBuf>,
+    safe_only: bool,
+) -> Result<PathBuf> {
     let source = std::fs::read_to_string(path)
         .map_err(|err| miette!("failed to read {}: {err}", path.display()))?;
     let module = parse_module(&source).map_err(|err| {
@@ -102,6 +129,9 @@ fn build_binary(path: &PathBuf, out: Option<PathBuf>, out_dir: Option<PathBuf>) 
     let user_modules = graph
         .load_user_modules_transitive(path, &module)
         .map_err(|err| miette::Report::new(err))?;
+    if safe_only {
+        enforce_safe_only(&module, &user_modules)?;
+    }
     type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
         let named = NamedSource::new(path.display().to_string(), source.clone());
         miette::Report::new(err).with_source_code(named)
@@ -150,4 +180,90 @@ fn build_binary(path: &PathBuf, out: Option<PathBuf>, out_dir: Option<PathBuf>) 
         return Err(miette!("link failed"));
     }
     Ok(out_path)
+}
+
+fn enforce_safe_only(entry: &capc::ast::Module, user_modules: &[capc::ast::Module]) -> Result<()> {
+    let mut offenders = Vec::new();
+    if entry.package == capc::ast::PackageSafety::Unsafe {
+        offenders.push(entry.name.to_string());
+    }
+    for module in user_modules {
+        if module.package == capc::ast::PackageSafety::Unsafe {
+            offenders.push(module.name.to_string());
+        }
+    }
+    if offenders.is_empty() {
+        return Ok(());
+    }
+    offenders.sort();
+    offenders.dedup();
+    Err(miette!(
+        "safe-only build rejected unsafe package(s): {}",
+        offenders.join(", ")
+    ))
+}
+
+fn audit_unsafe(path: &PathBuf) -> Result<()> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|err| miette!("failed to read {}: {err}", path.display()))?;
+    let module = parse_module(&source).map_err(|err| {
+        let named = NamedSource::new(path.display().to_string(), source.clone());
+        miette::Report::new(err).with_source_code(named)
+    })?;
+    let root = path
+        .parent()
+        .ok_or_else(|| miette!("entry path has no parent directory"))?;
+    let mut graph = ModuleGraph::new();
+    let stdlib = graph.load_stdlib().map_err(|err| miette::Report::new(err))?;
+    let user_modules = graph
+        .load_user_modules_transitive(path, &module)
+        .map_err(|err| miette::Report::new(err))?;
+
+    let mut findings = Vec::new();
+    if module.package == capc::ast::PackageSafety::Unsafe {
+        findings.push(format!(
+            "user: {} ({})",
+            module.name,
+            module_path_for(root, &module.name).display()
+        ));
+    }
+    for module in &user_modules {
+        if module.package == capc::ast::PackageSafety::Unsafe {
+            findings.push(format!(
+                "user: {} ({})",
+                module.name,
+                module_path_for(root, &module.name).display()
+            ));
+        }
+    }
+    for module in &stdlib {
+        if module.package == capc::ast::PackageSafety::Unsafe {
+            findings.push(format!(
+                "stdlib: {} ({})",
+                module.name,
+                module_path_for(&capc::stdlib_root(), &module.name).display()
+            ));
+        }
+    }
+
+    if findings.is_empty() {
+        println!("no unsafe packages");
+        return Ok(());
+    }
+
+    findings.sort();
+    println!("unsafe packages:");
+    for entry in findings {
+        println!("- {entry}");
+    }
+    Ok(())
+}
+
+fn module_path_for(root: &std::path::Path, name: &capc::ast::Path) -> PathBuf {
+    let mut path = root.to_path_buf();
+    for seg in &name.segments {
+        path.push(&seg.item);
+    }
+    path.set_extension("cap");
+    path
 }
