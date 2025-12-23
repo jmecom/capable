@@ -446,6 +446,162 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         params: vec![TyKind::String],
         ret: TyKind::Handle,
     };
+    let string_split = FnSig {
+        params: vec![TyKind::String],
+        ret: TyKind::Handle,
+    };
+    let vec_new = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Handle,
+    };
+    let vec_len = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::I32,
+    };
+    let vec_u8_get = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::Result(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+    };
+    let vec_u8_get_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::I32,
+            TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+    };
+    let vec_u8_set = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32, TyKind::U8],
+        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_u8_set_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::I32,
+            TyKind::U8,
+            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_u8_push = FnSig {
+        params: vec![TyKind::Handle, TyKind::U8],
+        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_u8_push_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::U8,
+            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_u8_pop = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Result(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+    };
+    let vec_u8_pop_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+    };
+    let vec_u8_as_slice = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Handle,
+    };
+    let vec_u8_free = FnSig {
+        params: vec![TyKind::Handle, TyKind::Handle],
+        ret: TyKind::Unit,
+    };
+    let vec_i32_get = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::Result(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+    };
+    let vec_i32_get_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::I32,
+            TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+    };
+    let vec_i32_set = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32, TyKind::I32],
+        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_i32_set_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::I32,
+            TyKind::I32,
+            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_i32_push = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_i32_push_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::I32,
+            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_i32_pop = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Result(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+    };
+    let vec_i32_pop_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+    };
+    let vec_i32_free = FnSig {
+        params: vec![TyKind::Handle, TyKind::Handle],
+        ret: TyKind::Unit,
+    };
+    let vec_string_len = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::I32,
+    };
+    let vec_string_get = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32],
+        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+    };
+    let vec_string_get_abi = FnSig {
+        params: vec![TyKind::Handle, TyKind::I32, TyKind::ResultString],
+        ret: TyKind::ResultString,
+    };
+    let vec_string_push = FnSig {
+        params: vec![TyKind::Handle, TyKind::String],
+        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_string_push_abi = FnSig {
+        params: vec![
+            TyKind::Handle,
+            TyKind::String,
+            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ],
+        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+    };
+    let vec_string_pop = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+    };
+    let vec_string_pop_abi = FnSig {
+        params: vec![TyKind::Handle, TyKind::ResultString],
+        ret: TyKind::ResultString,
+    };
+    let vec_string_free = FnSig {
+        params: vec![TyKind::Handle, TyKind::Handle],
+        ret: TyKind::Unit,
+    };
 
     map.insert(
         "sys.system.console".to_string(),
@@ -834,6 +990,204 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_as_slice,
             abi_sig: None,
             symbol: "capable_rt_string_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.split_whitespace".to_string(),
+        FnInfo {
+            sig: string_split,
+            abi_sig: None,
+            symbol: "capable_rt_string_split_whitespace".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_new".to_string(),
+        FnInfo {
+            sig: vec_new.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_new".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_len".to_string(),
+        FnInfo {
+            sig: vec_len.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_get".to_string(),
+        FnInfo {
+            sig: vec_u8_get.clone(),
+            abi_sig: Some(vec_u8_get_abi),
+            symbol: "capable_rt_vec_u8_get".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_set".to_string(),
+        FnInfo {
+            sig: vec_u8_set.clone(),
+            abi_sig: Some(vec_u8_set_abi),
+            symbol: "capable_rt_vec_u8_set".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_push".to_string(),
+        FnInfo {
+            sig: vec_u8_push.clone(),
+            abi_sig: Some(vec_u8_push_abi),
+            symbol: "capable_rt_vec_u8_push".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_pop".to_string(),
+        FnInfo {
+            sig: vec_u8_pop.clone(),
+            abi_sig: Some(vec_u8_pop_abi),
+            symbol: "capable_rt_vec_u8_pop".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_as_slice".to_string(),
+        FnInfo {
+            sig: vec_u8_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_u8_free".to_string(),
+        FnInfo {
+            sig: vec_u8_free,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_free".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_i32_new".to_string(),
+        FnInfo {
+            sig: vec_new.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_new".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_i32_len".to_string(),
+        FnInfo {
+            sig: vec_len.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_i32_get".to_string(),
+        FnInfo {
+            sig: vec_i32_get.clone(),
+            abi_sig: Some(vec_i32_get_abi),
+            symbol: "capable_rt_vec_i32_get".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_i32_set".to_string(),
+        FnInfo {
+            sig: vec_i32_set.clone(),
+            abi_sig: Some(vec_i32_set_abi),
+            symbol: "capable_rt_vec_i32_set".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_i32_push".to_string(),
+        FnInfo {
+            sig: vec_i32_push.clone(),
+            abi_sig: Some(vec_i32_push_abi),
+            symbol: "capable_rt_vec_i32_push".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_i32_pop".to_string(),
+        FnInfo {
+            sig: vec_i32_pop.clone(),
+            abi_sig: Some(vec_i32_pop_abi),
+            symbol: "capable_rt_vec_i32_pop".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_i32_free".to_string(),
+        FnInfo {
+            sig: vec_i32_free,
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_free".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_string_new".to_string(),
+        FnInfo {
+            sig: vec_new,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_new".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_string_len".to_string(),
+        FnInfo {
+            sig: vec_string_len,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_string_get".to_string(),
+        FnInfo {
+            sig: vec_string_get,
+            abi_sig: Some(vec_string_get_abi),
+            symbol: "capable_rt_vec_string_get".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_string_push".to_string(),
+        FnInfo {
+            sig: vec_string_push,
+            abi_sig: Some(vec_string_push_abi),
+            symbol: "capable_rt_vec_string_push".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_string_pop".to_string(),
+        FnInfo {
+            sig: vec_string_pop,
+            abi_sig: Some(vec_string_pop_abi),
+            symbol: "capable_rt_vec_string_pop".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.vec_string_free".to_string(),
+        FnInfo {
+            sig: vec_string_free,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_free".to_string(),
             is_runtime: true,
         },
     );
@@ -2187,6 +2541,10 @@ fn lower_ty(
         || resolved == "sys.buffer.Buffer"
         || resolved == "sys.buffer.Slice"
         || resolved == "sys.buffer.MutSlice"
+        || resolved == "sys.list.ListString"
+        || resolved == "sys.vec.VecU8"
+        || resolved == "sys.vec.VecI32"
+        || resolved == "sys.vec.VecString"
     {
         return TyKind::Handle;
     }

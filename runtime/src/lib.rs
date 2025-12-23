@@ -15,6 +15,12 @@ static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static BUFFERS: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static VECS_U8: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static VECS_I32: LazyLock<Mutex<HashMap<Handle, Vec<i32>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static VECS_STRING: LazyLock<Mutex<HashMap<Handle, Vec<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static ARGS: LazyLock<Vec<String>> = LazyLock::new(|| std::env::args().collect());
 
 #[derive(Debug, Clone)]
@@ -27,6 +33,12 @@ struct SliceState {
     ptr: usize,
     len: usize,
     mutable: bool,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum VecErr {
+    OutOfRange = 0,
+    Empty = 1,
 }
 
 fn new_handle() -> Handle {
@@ -370,6 +382,475 @@ pub extern "C" fn capable_rt_buffer_as_mut_slice(buffer: Handle) -> Handle {
             mutable: true,
         },
     );
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_new(_alloc: Handle) -> Handle {
+    let handle = new_handle();
+    let mut table = VECS_U8.lock().expect("vec u8 table");
+    table.insert(handle, Vec::new());
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_len(vec: Handle) -> i32 {
+    let table = VECS_U8.lock().expect("vec u8 table");
+    table
+        .get(&vec)
+        .map(|data| data.len().min(i32::MAX as usize) as i32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_get(
+    vec: Handle,
+    index: i32,
+    out_ok: *mut u8,
+    out_err: *mut i32,
+) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        }
+    };
+    let table = VECS_U8.lock().expect("vec u8 table");
+    let Some(data) = table.get(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    };
+    let Some(value) = data.get(idx) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    };
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = *value;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_set(
+    vec: Handle,
+    index: i32,
+    value: u8,
+    out_err: *mut i32,
+) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        }
+    };
+    let mut table = VECS_U8.lock().expect("vec u8 table");
+    let Some(data) = table.get_mut(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    };
+    if idx >= data.len() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    }
+    data[idx] = value;
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_push(
+    vec: Handle,
+    value: u8,
+    out_err: *mut i32,
+) -> u8 {
+    let mut table = VECS_U8.lock().expect("vec u8 table");
+    let Some(data) = table.get_mut(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    if data.try_reserve(1).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    data.push(value);
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_pop(
+    vec: Handle,
+    out_ok: *mut u8,
+    out_err: *mut i32,
+) -> u8 {
+    let mut table = VECS_U8.lock().expect("vec u8 table");
+    let Some(data) = table.get_mut(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::Empty as i32;
+            }
+        }
+        return 1;
+    };
+    let Some(value) = data.pop() else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::Empty as i32;
+            }
+        }
+        return 1;
+    };
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = value;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_as_slice(vec: Handle) -> Handle {
+    let table = VECS_U8.lock().expect("vec u8 table");
+    let Some(data) = table.get(&vec) else {
+        return 0;
+    };
+    let handle = new_handle();
+    let ptr = if data.is_empty() {
+        0
+    } else {
+        data.as_ptr() as usize
+    };
+    let len = data.len();
+    drop(table);
+    let mut slices = SLICES.lock().expect("slice table");
+    slices.insert(
+        handle,
+        SliceState {
+            ptr,
+            len,
+            mutable: false,
+        },
+    );
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_free(_alloc: Handle, vec: Handle) {
+    let mut table = VECS_U8.lock().expect("vec u8 table");
+    table.remove(&vec);
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_new(_alloc: Handle) -> Handle {
+    let handle = new_handle();
+    let mut table = VECS_I32.lock().expect("vec i32 table");
+    table.insert(handle, Vec::new());
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_len(vec: Handle) -> i32 {
+    let table = VECS_I32.lock().expect("vec i32 table");
+    table
+        .get(&vec)
+        .map(|data| data.len().min(i32::MAX as usize) as i32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_get(
+    vec: Handle,
+    index: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        }
+    };
+    let table = VECS_I32.lock().expect("vec i32 table");
+    let Some(data) = table.get(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    };
+    let Some(value) = data.get(idx) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    };
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = *value;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_set(
+    vec: Handle,
+    index: i32,
+    value: i32,
+    out_err: *mut i32,
+) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        }
+    };
+    let mut table = VECS_I32.lock().expect("vec i32 table");
+    let Some(data) = table.get_mut(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    };
+    if idx >= data.len() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    }
+    data[idx] = value;
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_push(
+    vec: Handle,
+    value: i32,
+    out_err: *mut i32,
+) -> u8 {
+    let mut table = VECS_I32.lock().expect("vec i32 table");
+    let Some(data) = table.get_mut(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    if data.try_reserve(1).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    data.push(value);
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_pop(
+    vec: Handle,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let mut table = VECS_I32.lock().expect("vec i32 table");
+    let Some(data) = table.get_mut(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::Empty as i32;
+            }
+        }
+        return 1;
+    };
+    let Some(value) = data.pop() else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::Empty as i32;
+            }
+        }
+        return 1;
+    };
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = value;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_free(_alloc: Handle, vec: Handle) {
+    let mut table = VECS_I32.lock().expect("vec i32 table");
+    table.remove(&vec);
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_new(_alloc: Handle) -> Handle {
+    let handle = new_handle();
+    let mut table = VECS_STRING.lock().expect("vec string table");
+    table.insert(handle, Vec::new());
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_len(vec: Handle) -> i32 {
+    let table = VECS_STRING.lock().expect("vec string table");
+    table
+        .get(&vec)
+        .map(|data| data.len().min(i32::MAX as usize) as i32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_get(
+    vec: Handle,
+    index: i32,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let idx = match usize::try_from(index) {
+        Ok(idx) => idx,
+        Err(_) => {
+            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+        }
+    };
+    let table = VECS_STRING.lock().expect("vec string table");
+    let Some(data) = table.get(&vec) else {
+        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+    };
+    let Some(value) = data.get(idx) else {
+        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+    };
+    write_string_result(out_ptr, out_len, out_err, Ok(value.clone()))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_push(
+    vec: Handle,
+    ptr: *const u8,
+    len: usize,
+    out_err: *mut i32,
+) -> u8 {
+    let value = unsafe { read_str(ptr, len) };
+    let Some(value) = value else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    let mut table = VECS_STRING.lock().expect("vec string table");
+    let Some(data) = table.get_mut(&vec) else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    if data.try_reserve(1).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    data.push(value);
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_pop(
+    vec: Handle,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let mut table = VECS_STRING.lock().expect("vec string table");
+    let Some(data) = table.get_mut(&vec) else {
+        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
+    };
+    let Some(value) = data.pop() else {
+        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
+    };
+    write_string_result(out_ptr, out_len, out_err, Ok(value))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_free(_alloc: Handle, vec: Handle) {
+    let mut table = VECS_STRING.lock().expect("vec string table");
+    table.remove(&vec);
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_split_whitespace(
+    ptr: *const u8,
+    len: usize,
+) -> Handle {
+    let value = unsafe { read_str(ptr, len) };
+    let mut vec = Vec::new();
+    if let Some(value) = value {
+        vec.extend(value.split_whitespace().map(|s| s.to_string()));
+    }
+    let handle = new_handle();
+    let mut table = VECS_STRING.lock().expect("vec string table");
+    table.insert(handle, vec);
     handle
 }
 
