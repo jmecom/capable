@@ -1,0 +1,11 @@
+{
+  "name": "tree-sitter-capable",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Capable language",
+  "main": "grammar.js",
+  "keywords": [
+    "tree-sitter",
+    "capable"
+  ],
+  "license": "MIT OR Apache-2.0"
+}
