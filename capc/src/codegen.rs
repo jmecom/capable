@@ -594,6 +594,15 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     map.insert(
         "sys.buffer.slice_len".to_string(),
         FnInfo {
+            sig: mem_slice_len.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.bytes.len".to_string(),
+        FnInfo {
             sig: mem_slice_len,
             abi_sig: None,
             symbol: "capable_rt_slice_len".to_string(),
@@ -615,6 +624,27 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_slice_at.clone(),
             abi_sig: None,
             symbol: "capable_rt_slice_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.bytes.at".to_string(),
+        FnInfo {
+            sig: mem_slice_at.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.bytes.is_whitespace".to_string(),
+        FnInfo {
+            sig: FnSig {
+                params: vec![TyKind::U8],
+                ret: TyKind::Bool,
+            },
+            abi_sig: None,
+            symbol: "capable_rt_bytes_is_whitespace".to_string(),
             is_runtime: true,
         },
     );
@@ -791,6 +821,15 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     );
     map.insert(
         "sys.string.as_slice".to_string(),
+        FnInfo {
+            sig: string_as_slice.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_string_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.bytes".to_string(),
         FnInfo {
             sig: string_as_slice,
             abi_sig: None,

@@ -1,0 +1,19 @@
+package safe
+module sys.bytes
+
+use sys.buffer
+
+pub fn len(s: Slice[u8]) -> i32 {
+  return buffer.slice_len(s)
+}
+
+pub fn at(s: Slice[u8], i: i32) -> u8 {
+  return buffer.slice_at(s, i)
+}
+
+pub fn is_whitespace(b: u8) -> bool {
+  if (b == 32u8 || b == 9u8 || b == 10u8 || b == 13u8) {
+    return true
+  }
+  return false
+}

@@ -467,6 +467,14 @@ pub extern "C" fn capable_rt_string_as_slice(ptr: *const u8, len: usize) -> Hand
     handle
 }
 
+#[no_mangle]
+pub extern "C" fn capable_rt_bytes_is_whitespace(value: u8) -> u8 {
+    match value {
+        b' ' | b'\t' | b'\n' | b'\r' => 1,
+        _ => 0,
+    }
+}
+
 unsafe fn write_bytes(ptr: *const u8, len: usize, newline: bool) {
     if ptr.is_null() {
         return;

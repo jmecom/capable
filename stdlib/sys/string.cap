@@ -2,6 +2,7 @@ package safe
 module sys.string
 
 use sys.buffer
+use sys.bytes
 
 pub fn len(s: string) -> i32 {
   return 0
@@ -13,4 +14,8 @@ pub fn byte_at(s: string, index: i32) -> u8 {
 
 pub fn as_slice(s: string) -> Slice[u8] {
   return ()
+}
+
+pub fn bytes(s: string) -> Slice[u8] {
+  return as_slice(s)
 }
