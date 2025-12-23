@@ -32,6 +32,11 @@ struct StructInfo {
     module: String,
 }
 
+#[derive(Debug, Clone)]
+struct EnumInfo {
+    variants: Vec<String>,
+}
+
 struct UseMap {
     aliases: HashMap<String, Vec<String>>,
 }
@@ -180,6 +185,55 @@ fn collect_structs(
     Ok(structs)
 }
 
+fn collect_enums(
+    modules: &[&Module],
+    entry_name: &str,
+) -> Result<HashMap<String, EnumInfo>, TypeError> {
+    let mut enums = HashMap::new();
+    for module in modules {
+        let module_name = module.name.to_string();
+        for item in &module.items {
+            if let Item::Enum(decl) = item {
+                let mut variants = Vec::new();
+                for variant in &decl.variants {
+                    if variants.contains(&variant.name.item) {
+                        return Err(TypeError::new(
+                            format!(
+                                "duplicate variant `{}` in enum `{}`",
+                                variant.name.item, decl.name.item
+                            ),
+                            variant.name.span,
+                        ));
+                    }
+                    variants.push(variant.name.item.clone());
+                }
+                let qualified = format!("{module_name}.{}", decl.name.item);
+                if enums.contains_key(&qualified) {
+                    return Err(TypeError::new(
+                        format!("duplicate enum `{qualified}`"),
+                        decl.name.span,
+                    ));
+                }
+                let info = EnumInfo {
+                    variants: variants.clone(),
+                };
+                enums.insert(qualified, info.clone());
+                if module_name == entry_name {
+                    let name = decl.name.item.clone();
+                    if enums.contains_key(&name) {
+                        return Err(TypeError::new(
+                            format!("duplicate enum `{name}`"),
+                            decl.name.span,
+                        ));
+                    }
+                    enums.insert(name, info);
+                }
+            }
+        }
+    }
+    Ok(enums)
+}
+
 pub fn type_check(module: &Module) -> Result<(), TypeError> {
     type_check_program(module, &[], &[])
 }
@@ -198,6 +252,7 @@ pub fn type_check_program(
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();
     let struct_map = collect_structs(&modules, &module_name, &stdlib_index)?;
+    let enum_map = collect_enums(&modules, &module_name)?;
     let functions = collect_functions(&modules, &module_name, &stdlib_index)?;
 
     for item in &module.items {
@@ -207,6 +262,7 @@ pub fn type_check_program(
                 &functions,
                 &use_map,
                 &struct_map,
+                &enum_map,
                 &stdlib_index,
                 &module_name,
             )?;
@@ -221,6 +277,7 @@ fn check_function(
     functions: &HashMap<String, FunctionSig>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
 ) -> Result<(), TypeError> {
@@ -241,6 +298,7 @@ fn check_function(
             &mut locals,
             use_map,
             struct_map,
+            enum_map,
             stdlib,
             module_name,
             &mut has_return,
@@ -264,6 +322,7 @@ fn check_stmt(
     locals: &mut HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
     has_return: &mut bool,
@@ -276,6 +335,7 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 ret_ty,
                 module_name,
@@ -302,6 +362,7 @@ fn check_stmt(
                     locals,
                     use_map,
                     struct_map,
+                    enum_map,
                     stdlib,
                     ret_ty,
                     module_name,
@@ -324,6 +385,7 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 ret_ty,
                 module_name,
@@ -341,6 +403,7 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 module_name,
                 has_return,
@@ -353,6 +416,7 @@ fn check_stmt(
                     locals,
                     use_map,
                     struct_map,
+                    enum_map,
                     stdlib,
                     module_name,
                     has_return,
@@ -366,6 +430,7 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 ret_ty,
                 module_name,
@@ -383,6 +448,7 @@ fn check_stmt(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 module_name,
                 has_return,
@@ -391,12 +457,13 @@ fn check_stmt(
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
                 let mut any_return = false;
-                let _ = check_match_expr(
+                let _ = check_match_stmt(
                     match_expr,
                     functions,
                     locals,
                     use_map,
                     struct_map,
+                    enum_map,
                     stdlib,
                     ret_ty,
                     module_name,
@@ -412,6 +479,7 @@ fn check_stmt(
                     locals,
                     use_map,
                     struct_map,
+                    enum_map,
                     stdlib,
                     ret_ty,
                     module_name,
@@ -430,6 +498,7 @@ fn check_block(
     locals: &mut HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
     has_return: &mut bool,
@@ -442,6 +511,7 @@ fn check_block(
             locals,
             use_map,
             struct_map,
+            enum_map,
             stdlib,
             module_name,
             has_return,
@@ -456,6 +526,7 @@ fn check_expr(
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
@@ -473,6 +544,9 @@ fn check_expr(
                 if let Some(ty) = locals.get(name) {
                     return Ok(ty.clone());
                 }
+            }
+            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map) {
+                return Ok(ty);
             }
             Err(TypeError::new(
                 format!("unknown value `{path}`"),
@@ -503,6 +577,7 @@ fn check_expr(
                         locals,
                         use_map,
                         struct_map,
+                        enum_map,
                         stdlib,
                         ret_ty,
                         module_name,
@@ -527,6 +602,7 @@ fn check_expr(
             locals,
             use_map,
             struct_map,
+            enum_map,
             stdlib,
             ret_ty,
             module_name,
@@ -538,6 +614,7 @@ fn check_expr(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 ret_ty,
                 module_name,
@@ -574,6 +651,7 @@ fn check_expr(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 ret_ty,
                 module_name,
@@ -584,6 +662,7 @@ fn check_expr(
                 locals,
                 use_map,
                 struct_map,
+                enum_map,
                 stdlib,
                 ret_ty,
                 module_name,
@@ -633,25 +712,24 @@ fn check_expr(
                 }
             }
         }
-        Expr::Match(match_expr) => {
-            check_match_expr(
-                match_expr,
-                functions,
-                locals,
-                use_map,
-                struct_map,
-                stdlib,
-                ret_ty,
-                module_name,
-                None,
-            )
-        }
+        Expr::Match(match_expr) => check_match_expr_value(
+            match_expr,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            enum_map,
+            stdlib,
+            ret_ty,
+            module_name,
+        ),
         Expr::Grouping(group) => check_expr(
             &group.expr,
             functions,
             locals,
             use_map,
             struct_map,
+            enum_map,
             stdlib,
             ret_ty,
             module_name,
@@ -659,12 +737,13 @@ fn check_expr(
     }
 }
 
-fn check_match_expr(
+fn check_match_stmt(
     match_expr: &MatchExpr,
     functions: &HashMap<String, FunctionSig>,
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
@@ -676,6 +755,7 @@ fn check_match_expr(
         locals,
         use_map,
         struct_map,
+        enum_map,
         stdlib,
         ret_ty,
         module_name,
@@ -683,7 +763,7 @@ fn check_match_expr(
     let mut saw_return = false;
     for arm in &match_expr.arms {
         let mut arm_locals = locals.clone();
-        bind_pattern(&arm.pattern, &match_ty, &mut arm_locals)?;
+        bind_pattern(&arm.pattern, &match_ty, &mut arm_locals, use_map, enum_map)?;
         let mut arm_return = false;
         check_block(
             &arm.body,
@@ -692,6 +772,7 @@ fn check_match_expr(
             &mut arm_locals,
             use_map,
             struct_map,
+            enum_map,
             stdlib,
             module_name,
             &mut arm_return,
@@ -706,12 +787,121 @@ fn check_match_expr(
     Ok(Ty::Builtin(BuiltinType::Unit))
 }
 
+fn check_match_expr_value(
+    match_expr: &MatchExpr,
+    functions: &HashMap<String, FunctionSig>,
+    locals: &HashMap<String, Ty>,
+    use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    stdlib: &StdlibIndex,
+    ret_ty: &Ty,
+    module_name: &str,
+) -> Result<Ty, TypeError> {
+    let match_ty = check_expr(
+        &match_expr.expr,
+        functions,
+        locals,
+        use_map,
+        struct_map,
+        enum_map,
+        stdlib,
+        ret_ty,
+        module_name,
+    )?;
+    let mut result_ty: Option<Ty> = None;
+    for arm in &match_expr.arms {
+        let mut arm_locals = locals.clone();
+        bind_pattern(&arm.pattern, &match_ty, &mut arm_locals, use_map, enum_map)?;
+        let arm_ty = check_match_arm_value(
+            &arm.body,
+            functions,
+            &mut arm_locals,
+            use_map,
+            struct_map,
+            enum_map,
+            stdlib,
+            ret_ty,
+            module_name,
+        )?;
+        if let Some(prev) = &result_ty {
+            if prev != &arm_ty {
+                return Err(TypeError::new(
+                    format!("match arm type mismatch: expected {prev:?}, found {arm_ty:?}"),
+                    arm.body.span,
+                ));
+            }
+        } else {
+            result_ty = Some(arm_ty);
+        }
+    }
+    Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))
+}
+
+fn check_match_arm_value(
+    block: &Block,
+    functions: &HashMap<String, FunctionSig>,
+    locals: &mut HashMap<String, Ty>,
+    use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    stdlib: &StdlibIndex,
+    ret_ty: &Ty,
+    module_name: &str,
+) -> Result<Ty, TypeError> {
+    let Some((last, prefix)) = block.stmts.split_last() else {
+        return Err(TypeError::new(
+            "match arm must end with expression".to_string(),
+            block.span,
+        ));
+    };
+    let mut saw_return = false;
+    for stmt in prefix {
+        check_stmt(
+            stmt,
+            ret_ty,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            enum_map,
+            stdlib,
+            module_name,
+            &mut saw_return,
+        )?;
+        if saw_return {
+            return Err(TypeError::new(
+                "match arm cannot return in expression context".to_string(),
+                block.span,
+            ));
+        }
+    }
+    match last {
+        Stmt::Expr(expr_stmt) => check_expr(
+            &expr_stmt.expr,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            enum_map,
+            stdlib,
+            ret_ty,
+            module_name,
+        ),
+        _ => Err(TypeError::new(
+            "match arm must end with expression".to_string(),
+            block.span,
+        )),
+    }
+}
+
 fn check_struct_literal(
     lit: &StructLiteralExpr,
     functions: &HashMap<String, FunctionSig>,
     locals: &HashMap<String, Ty>,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
@@ -753,6 +943,7 @@ fn check_struct_literal(
             locals,
             use_map,
             struct_map,
+            enum_map,
             stdlib,
             ret_ty,
             module_name,
@@ -778,6 +969,8 @@ fn bind_pattern(
     pattern: &Pattern,
     match_ty: &Ty,
     locals: &mut HashMap<String, Ty>,
+    use_map: &UseMap,
+    enum_map: &HashMap<String, EnumInfo>,
 ) -> Result<(), TypeError> {
     match pattern {
         Pattern::Call { path, binding, .. } => {
@@ -812,9 +1005,37 @@ fn bind_pattern(
             locals.insert(ident.item.clone(), match_ty.clone());
             Ok(())
         }
-        Pattern::Literal(_) => Ok(()),
-        Pattern::Path(_) | Pattern::Wildcard(_) => Ok(()),
+        Pattern::Path(path) => {
+            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map) {
+                if &ty != match_ty {
+                    return Err(TypeError::new(
+                        format!("pattern type mismatch: expected {match_ty:?}, found {ty:?}"),
+                        path.span,
+                    ));
+                }
+            }
+            Ok(())
+        }
+        Pattern::Literal(_) | Pattern::Wildcard(_) => Ok(()),
     }
+}
+
+fn resolve_enum_variant(
+    path: &Path,
+    use_map: &UseMap,
+    enum_map: &HashMap<String, EnumInfo>,
+) -> Option<Ty> {
+    let resolved = resolve_path(path, use_map);
+    if resolved.len() < 2 {
+        return None;
+    }
+    let (enum_path, variant) = resolved.split_at(resolved.len() - 1);
+    let enum_name = enum_path.join(".");
+    let info = enum_map.get(&enum_name)?;
+    if info.variants.iter().any(|name| name == &variant[0]) {
+        return Some(Ty::Path(enum_name, Vec::new()));
+    }
+    None
 }
 
 fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> String {

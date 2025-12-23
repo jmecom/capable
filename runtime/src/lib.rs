@@ -83,7 +83,7 @@ pub extern "C" fn capable_rt_fs_read_to_string(
         Err(err) => return write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
     };
     if !full.starts_with(&state.root) {
-        return write_result(out_ptr, out_len, out_err, Err(FsErr::PermissionDenied));
+        return write_result(out_ptr, out_len, out_err, Err(FsErr::InvalidPath));
     }
 
     match std::fs::read_to_string(&full) {

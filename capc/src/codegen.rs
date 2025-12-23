@@ -31,13 +31,14 @@ pub enum CodegenError {
     Codegen(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum TyKind {
     I32,
     Bool,
     Unit,
     String,
     Handle,
+    Result(Box<TyKind>, Box<TyKind>),
     ResultString,
 }
 
@@ -50,6 +51,7 @@ struct FnSig {
 #[derive(Clone, Debug)]
 struct FnInfo {
     sig: FnSig,
+    abi_sig: Option<FnSig>,
     symbol: String,
     is_runtime: bool,
 }
@@ -83,15 +85,32 @@ struct StdlibIndex {
 }
 
 #[derive(Clone, Debug)]
+struct EnumIndex {
+    variants: HashMap<String, HashMap<String, i32>>,
+}
+
+#[derive(Clone, Debug)]
 enum ValueRepr {
     Single(ir::Value),
     Pair(ir::Value, ir::Value),
-    ResultString {
+    Result {
         tag: ir::Value,
-        ok_ptr: ir::Value,
-        ok_len: ir::Value,
-        err: ir::Value,
+        ok: Box<ValueRepr>,
+        err: Box<ValueRepr>,
     },
+}
+
+#[derive(Clone, Debug)]
+struct ResultShape {
+    kind: ResultKind,
+    slots: Vec<ir::StackSlot>,
+    types: Vec<Type>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResultKind {
+    Single,
+    Pair,
 }
 
 pub fn build_object(
@@ -119,6 +138,7 @@ pub fn build_object(
     );
 
     let stdlib_index = build_stdlib_index(stdlib);
+    let enum_index = build_enum_index(entry, user_modules, stdlib);
 
     let mut fn_map = HashMap::new();
     register_runtime_intrinsics(&mut fn_map, module.isa().pointer_type());
@@ -131,6 +151,7 @@ pub fn build_object(
             module_ref,
             entry,
             &stdlib_index,
+            &enum_index,
             &mut fn_map,
             module.isa().pointer_type(),
         )?;
@@ -167,25 +188,13 @@ pub fn build_object(
                 // Blocks sealed after body emission.
 
                 let mut locals: HashMap<String, ValueRepr> = HashMap::new();
+                let params = builder.block_params(block).to_vec();
                 let mut param_index = 0;
                 for param in &func.params {
-                    let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index);
-                    match ty_kind {
-                        TyKind::String => {
-                            let ptr = builder.block_params(block)[param_index];
-                            let len = builder.block_params(block)[param_index + 1];
-                            param_index += 2;
-                            locals.insert(param.name.item.clone(), ValueRepr::Pair(ptr, len));
-                        }
-                        TyKind::Unit => {
-                            locals.insert(param.name.item.clone(), ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)));
-                        }
-                        _ => {
-                            let val = builder.block_params(block)[param_index];
-                            param_index += 1;
-                            locals.insert(param.name.item.clone(), ValueRepr::Single(val));
-                        }
-                    }
+                    let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index);
+                    let value =
+                        value_from_params(&mut builder, &ty_kind, &params, &mut param_index);
+                    locals.insert(param.name.item.clone(), value);
                 }
 
                 for stmt in &func.body.stmts {
@@ -197,6 +206,7 @@ pub fn build_object(
                         &use_map,
                         &module_name,
                         &stdlib_index,
+                        &enum_index,
                         &mut module,
                         &mut data_counter,
                     )?;
@@ -208,6 +218,11 @@ pub fn build_object(
 
                 builder.seal_all_blocks();
                 builder.finalize();
+                if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
+                    return Err(CodegenError::Codegen(format!(
+                        "verifier errors: {err}"
+                    )));
+                }
                 module
                     .define_function(func_id, &mut ctx)
                     .map_err(|err| CodegenError::Codegen(err.to_string()))?;
@@ -224,23 +239,37 @@ pub fn build_object(
 fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
     let mut signature = Signature::new(CallConv::SystemV);
     for param in &sig.params {
-        match param {
-            TyKind::String => {
-                signature.params.push(AbiParam::new(ptr_ty));
-                signature.params.push(AbiParam::new(ir::types::I64));
-            }
-            TyKind::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
-            TyKind::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
-            TyKind::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
-            TyKind::ResultString => {
-                signature.params.push(AbiParam::new(ir::types::I64)); // out_ptr
-                signature.params.push(AbiParam::new(ir::types::I64)); // out_len
-                signature.params.push(AbiParam::new(ir::types::I64)); // out_err
-            }
-            TyKind::Unit => {}
+        append_ty_params(&mut signature, param, ptr_ty);
+    }
+    append_ty_returns(&mut signature, &sig.ret, ptr_ty);
+    signature
+}
+
+fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
+    match ty {
+        TyKind::Unit => {}
+        TyKind::String => {
+            signature.params.push(AbiParam::new(ptr_ty));
+            signature.params.push(AbiParam::new(ir::types::I64));
+        }
+        TyKind::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
+        TyKind::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        TyKind::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
+        TyKind::Result(ok, err) => {
+            signature.params.push(AbiParam::new(ir::types::I8)); // tag
+            append_ty_params(signature, ok, ptr_ty);
+            append_ty_params(signature, err, ptr_ty);
+        }
+        TyKind::ResultString => {
+            signature.params.push(AbiParam::new(ir::types::I64)); // out_ptr
+            signature.params.push(AbiParam::new(ir::types::I64)); // out_len
+            signature.params.push(AbiParam::new(ir::types::I64)); // out_err
         }
     }
-    match sig.ret {
+}
+
+fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
+    match ty {
         TyKind::Unit => {}
         TyKind::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
         TyKind::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
@@ -249,11 +278,15 @@ fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
             signature.returns.push(AbiParam::new(ptr_ty));
             signature.returns.push(AbiParam::new(ir::types::I64));
         }
+        TyKind::Result(ok, err) => {
+            signature.returns.push(AbiParam::new(ir::types::I8)); // tag
+            append_ty_returns(signature, ok, ptr_ty);
+            append_ty_returns(signature, err, ptr_ty);
+        }
         TyKind::ResultString => {
             signature.returns.push(AbiParam::new(ir::types::I8)); // tag
         }
     }
-    signature
 }
 
 fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) {
@@ -266,6 +299,10 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         ret: TyKind::Handle,
     };
     let fs_read_to_string = FnSig {
+        params: vec![TyKind::Handle, TyKind::String],
+        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+    };
+    let fs_read_to_string_abi = FnSig {
         params: vec![TyKind::Handle, TyKind::String, TyKind::ResultString],
         ret: TyKind::ResultString,
     };
@@ -282,6 +319,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         "sys.system.console".to_string(),
         FnInfo {
             sig: system_console,
+            abi_sig: None,
             symbol: "capable_rt_system_console".to_string(),
             is_runtime: true,
         },
@@ -290,6 +328,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         "sys.system.fs_read".to_string(),
         FnInfo {
             sig: system_fs_read,
+            abi_sig: None,
             symbol: "capable_rt_system_fs_read".to_string(),
             is_runtime: true,
         },
@@ -298,6 +337,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         "sys.console.println".to_string(),
         FnInfo {
             sig: console_println,
+            abi_sig: None,
             symbol: "capable_rt_console_println".to_string(),
             is_runtime: true,
         },
@@ -306,6 +346,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         "sys.console.print".to_string(),
         FnInfo {
             sig: console_print,
+            abi_sig: None,
             symbol: "capable_rt_console_print".to_string(),
             is_runtime: true,
         },
@@ -314,6 +355,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         "sys.fs.read_to_string".to_string(),
         FnInfo {
             sig: fs_read_to_string,
+            abi_sig: Some(fs_read_to_string_abi),
             symbol: "capable_rt_fs_read_to_string".to_string(),
             is_runtime: true,
         },
@@ -326,6 +368,7 @@ fn register_user_functions(
     module: &AstModule,
     entry: &AstModule,
     stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
     map: &mut HashMap<String, FnInfo>,
     _ptr_ty: Type,
 ) -> Result<(), CodegenError> {
@@ -333,14 +376,14 @@ fn register_user_functions(
     let use_map = UseMap::new(module);
     for item in &module.items {
         if let Item::Function(func) = item {
-            let sig = FnSig {
-                params: func
-                    .params
-                    .iter()
-                    .map(|p| lower_ty(&p.ty, &use_map, stdlib))
-                    .collect(),
-                ret: lower_ty(&func.ret, &use_map, stdlib),
-            };
+                let sig = FnSig {
+                    params: func
+                        .params
+                        .iter()
+                        .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
+                        .collect(),
+                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index),
+                };
             let key = format!("{module_name}.{}", func.name.item);
             let symbol = if module_name == entry.name.to_string() && func.name.item == "main" {
                 "capable_main".to_string()
@@ -351,6 +394,7 @@ fn register_user_functions(
                 key,
                 FnInfo {
                     sig,
+                    abi_sig: None,
                     symbol,
                     is_runtime: false,
                 },
@@ -376,6 +420,7 @@ fn emit_stmt(
     use_map: &UseMap,
     module_name: &str,
     stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<(), CodegenError> {
@@ -389,6 +434,7 @@ fn emit_stmt(
                 use_map,
                 module_name,
                 stdlib,
+                enum_index,
                 module,
                 data_counter,
             )?;
@@ -404,15 +450,15 @@ fn emit_stmt(
                     use_map,
                     module_name,
                     stdlib,
+                    enum_index,
                     module,
                     data_counter,
                 )?;
                 match value {
                     ValueRepr::Single(val) => builder.ins().return_(&[val]),
-                    ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
-                        return Err(CodegenError::Unsupported(
-                            "non-scalar return values".to_string(),
-                        ))
+                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                        let values = flatten_value(&value);
+                        builder.ins().return_(&values)
                     }
                 };
             } else {
@@ -429,6 +475,7 @@ fn emit_stmt(
                     use_map,
                     module_name,
                     stdlib,
+                    enum_index,
                     module,
                     data_counter,
                 )?;
@@ -441,6 +488,7 @@ fn emit_stmt(
                     use_map,
                     module_name,
                     stdlib,
+                    enum_index,
                     module,
                     data_counter,
                 )?;
@@ -462,6 +510,7 @@ fn emit_stmt(
                 use_map,
                 module_name,
                 stdlib,
+                enum_index,
                 module,
                 data_counter,
             )?;
@@ -478,11 +527,14 @@ fn emit_stmt(
                     use_map,
                     module_name,
                     stdlib,
+                    enum_index,
                     module,
                     data_counter,
                 )?;
             }
-            builder.ins().jump(merge_block, &[]);
+            if !block_ends_with_return(&if_stmt.then_block) {
+                builder.ins().jump(merge_block, &[]);
+            }
             builder.seal_block(then_block);
 
             if let Some(else_block_ast) = &if_stmt.else_block {
@@ -496,11 +548,14 @@ fn emit_stmt(
                         use_map,
                         module_name,
                         stdlib,
+                        enum_index,
                         module,
                         data_counter,
                     )?;
                 }
-                builder.ins().jump(merge_block, &[]);
+                if !block_ends_with_return(else_block_ast) {
+                    builder.ins().jump(merge_block, &[]);
+                }
                 builder.seal_block(else_block);
             }
 
@@ -522,6 +577,7 @@ fn emit_stmt(
                 use_map,
                 module_name,
                 stdlib,
+                enum_index,
                 module,
                 data_counter,
             )?;
@@ -538,11 +594,14 @@ fn emit_stmt(
                     use_map,
                     module_name,
                     stdlib,
+                    enum_index,
                     module,
                     data_counter,
                 )?;
             }
-            builder.ins().jump(header_block, &[]);
+            if !block_ends_with_return(&while_stmt.body) {
+                builder.ins().jump(header_block, &[]);
+            }
             builder.seal_block(body_block);
             builder.seal_block(header_block);
 
@@ -553,6 +612,10 @@ fn emit_stmt(
     Ok(())
 }
 
+fn block_ends_with_return(block: &crate::ast::Block) -> bool {
+    matches!(block.stmts.last(), Some(Stmt::Return(_)))
+}
+
 fn emit_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
@@ -561,6 +624,7 @@ fn emit_expr(
     use_map: &UseMap,
     module_name: &str,
     stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -572,13 +636,17 @@ fn emit_expr(
             Literal::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
         },
         Expr::Path(path) => {
-            if path.segments.len() != 1 {
-                return Err(CodegenError::Unsupported("path expression".to_string()));
+            if path.segments.len() == 1 {
+                if let Some(value) = locals.get(&path.segments[0].item) {
+                    return Ok(value.clone());
+                }
             }
-            locals
-                .get(&path.segments[0].item)
-                .cloned()
-                .ok_or_else(|| CodegenError::UnknownVariable(path.to_string()))
+            if let Some(index) = resolve_enum_variant(path, use_map, enum_index) {
+                return Ok(ValueRepr::Single(
+                    builder.ins().iconst(ir::types::I32, i64::from(index)),
+                ));
+            }
+            Err(CodegenError::UnknownVariable(path.to_string()))
         }
         Expr::Call(call) => {
             let callee_path = match &*call.callee {
@@ -603,22 +671,15 @@ fn emit_expr(
                     use_map,
                     module_name,
                     stdlib,
+                    enum_index,
                     module,
                     data_counter,
                 )?;
-                match value {
-                    ValueRepr::Single(val) => args.push(val),
-                    ValueRepr::Pair(a, b) => {
-                        args.push(a);
-                        args.push(b);
-                    }
-                    ValueRepr::ResultString { .. } => {
-                        return Err(CodegenError::Unsupported("result value arg".to_string()))
-                    }
-                }
+                args.extend(flatten_value(&value));
             }
             let mut out_slots = None;
-            if info.sig.ret == TyKind::ResultString {
+            let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
+            if abi_sig.ret == TyKind::ResultString {
                 let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
                     8,
@@ -639,47 +700,59 @@ fn emit_expr(
                 args.push(err_ptr);
                 out_slots = Some((slot_ptr, slot_len, slot_err));
             }
-            let sig = sig_to_clif(&info.sig, module.isa().pointer_type());
+            let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
             let func_id = module
-                .declare_function(&info.symbol, if info.is_runtime { Linkage::Import } else { Linkage::Export }, &sig)
+                .declare_function(
+                    &info.symbol,
+                    if info.is_runtime {
+                        Linkage::Import
+                    } else {
+                        Linkage::Export
+                    },
+                    &sig,
+                )
                 .map_err(|err| CodegenError::Codegen(err.to_string()))?;
             let local = module.declare_func_in_func(func_id, builder.func);
             let call_inst = builder.ins().call(local, &args);
-            let results = builder.inst_results(call_inst);
-            match info.sig.ret {
-                TyKind::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
-                TyKind::String => {
-                    if results.len() != 2 {
-                        return Err(CodegenError::Codegen("string return count".to_string()));
+            let results = builder.inst_results(call_inst).to_vec();
+            if abi_sig.ret == TyKind::ResultString {
+                let tag = results
+                    .get(0)
+                    .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+                let (slot_ptr, slot_len, slot_err) = out_slots
+                    .ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
+                let ptr_addr =
+                    builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+                let len_addr =
+                    builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
+                let err_addr =
+                    builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
+                let ptr = builder.ins().load(
+                    module.isa().pointer_type(),
+                    MemFlags::new(),
+                    ptr_addr,
+                    0,
+                );
+                let len = builder.ins().load(ir::types::I64, MemFlags::new(), len_addr, 0);
+                let err = builder.ins().load(ir::types::I32, MemFlags::new(), err_addr, 0);
+                match &info.sig.ret {
+                    TyKind::Result(ok_ty, err_ty) => {
+                        if **ok_ty != TyKind::String || **err_ty != TyKind::I32 {
+                            return Err(CodegenError::Unsupported(
+                                "result out params".to_string(),
+                            ));
+                        }
+                        Ok(ValueRepr::Result {
+                            tag: *tag,
+                            ok: Box::new(ValueRepr::Pair(ptr, len)),
+                            err: Box::new(ValueRepr::Single(err)),
+                        })
                     }
-                    Ok(ValueRepr::Pair(results[0], results[1]))
+                    _ => Err(CodegenError::Unsupported("result out params".to_string())),
                 }
-                TyKind::ResultString => {
-                    let tag = results[0];
-                    let (slot_ptr, slot_len, slot_err) =
-                        out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
-                    let ptr_addr =
-                        builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
-                    let len_addr =
-                        builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
-                    let err_addr =
-                        builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
-                    let ptr = builder.ins().load(
-                        module.isa().pointer_type(),
-                        MemFlags::new(),
-                        ptr_addr,
-                        0,
-                    );
-                    let len = builder.ins().load(ir::types::I64, MemFlags::new(), len_addr, 0);
-                    let err = builder.ins().load(ir::types::I32, MemFlags::new(), err_addr, 0);
-                    Ok(ValueRepr::ResultString {
-                        tag,
-                        ok_ptr: ptr,
-                        ok_len: len,
-                        err,
-                    })
-                }
-                _ => Ok(ValueRepr::Single(results[0])),
+            } else {
+                let mut index = 0;
+                value_from_results(builder, &info.sig.ret, &results, &mut index)
             }
         }
         Expr::Binary(binary) => {
@@ -691,13 +764,14 @@ fn emit_expr(
                 use_map,
                 module_name,
                 stdlib,
+                enum_index,
                 module,
                 data_counter,
             )?;
             if matches!(binary.op, BinaryOp::And | BinaryOp::Or) {
                 let lhs_val = match lhs {
                     ValueRepr::Single(v) => v,
-                    ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
+                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
                         return Err(CodegenError::Unsupported("boolean op on string".to_string()))
                     }
                 };
@@ -711,6 +785,7 @@ fn emit_expr(
                     use_map,
                     module_name,
                     stdlib,
+                    enum_index,
                     module,
                     data_counter,
                 );
@@ -723,6 +798,7 @@ fn emit_expr(
                 use_map,
                 module_name,
                 stdlib,
+                enum_index,
                 module,
                 data_counter,
             )?;
@@ -774,6 +850,7 @@ fn emit_expr(
             use_map,
             module_name,
             stdlib,
+            enum_index,
             module,
             data_counter,
         ),
@@ -786,6 +863,7 @@ fn emit_expr(
                 use_map,
                 module_name,
                 stdlib,
+                enum_index,
                 module,
                 data_counter,
             )?;
@@ -798,9 +876,19 @@ fn emit_expr(
                 _ => Err(CodegenError::Unsupported("unary op".to_string())),
             }
         }
-        Expr::Match(_) | Expr::StructLiteral(_) => Err(CodegenError::Unsupported(
-            "expression".to_string(),
-        )),
+        Expr::Match(match_expr) => emit_match_expr(
+            builder,
+            match_expr,
+            locals,
+            fn_map,
+            use_map,
+            module_name,
+            stdlib,
+            enum_index,
+            module,
+            data_counter,
+        ),
+        Expr::StructLiteral(_) => Err(CodegenError::Unsupported("expression".to_string())),
     }
 }
 
@@ -812,6 +900,7 @@ fn emit_match_stmt(
     use_map: &UseMap,
     module_name: &str,
     stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<(), CodegenError> {
@@ -823,14 +912,13 @@ fn emit_match_stmt(
         use_map,
         module_name,
         stdlib,
+        enum_index,
         module,
         data_counter,
     )?;
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
-        ValueRepr::ResultString { tag, ok_ptr, ok_len, err } => {
-            (tag, Some((ok_ptr, ok_len, err)))
-        }
+        ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -861,11 +949,11 @@ fn emit_match_stmt(
         if idx > 0 {
             builder.switch_to_block(current_block);
         }
-        let cond = match_pattern_cond(builder, &arm.pattern, match_val)?;
+        let cond = match_pattern_cond(builder, &arm.pattern, match_val, use_map, enum_index)?;
         builder.ins().brif(cond, arm_block, &[], next_block, &[]);
 
         builder.switch_to_block(arm_block);
-        bind_match_pattern_value(&arm.pattern, &value, match_result, locals)?;
+        bind_match_pattern_value(&arm.pattern, &value, match_result.as_ref(), locals)?;
         for stmt in &arm.body.stmts {
             emit_stmt(
                 builder,
@@ -875,6 +963,7 @@ fn emit_match_stmt(
                 use_map,
                 module_name,
                 stdlib,
+                enum_index,
                 module,
                 data_counter,
             )?;
@@ -901,10 +990,167 @@ fn emit_match_stmt(
     Ok(())
 }
 
+fn emit_match_expr(
+    builder: &mut FunctionBuilder,
+    match_expr: &crate::ast::MatchExpr,
+    locals: &HashMap<String, ValueRepr>,
+    fn_map: &HashMap<String, FnInfo>,
+    use_map: &UseMap,
+    module_name: &str,
+    stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    let value = emit_expr(
+        builder,
+        &match_expr.expr,
+        locals,
+        fn_map,
+        use_map,
+        module_name,
+        stdlib,
+        enum_index,
+        module,
+        data_counter,
+    )?;
+    let (match_val, match_result) = match value.clone() {
+        ValueRepr::Single(v) => (v, None),
+        ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
+        ValueRepr::Pair(_, _) => {
+            return Err(CodegenError::Unsupported("match on string".to_string()))
+        }
+    };
+
+    let merge_block = builder.create_block();
+    let mut current_block = builder.current_block().ok_or_else(|| {
+        CodegenError::Codegen("no current block for match".to_string())
+    })?;
+
+    let mut result_shape: Option<ResultShape> = None;
+
+    for (idx, arm) in match_expr.arms.iter().enumerate() {
+        let is_last = idx + 1 == match_expr.arms.len();
+        let arm_block = builder.create_block();
+        let next_block = if is_last {
+            merge_block
+        } else {
+            builder.create_block()
+        };
+
+        if idx > 0 {
+            builder.switch_to_block(current_block);
+        }
+        let cond = match_pattern_cond(builder, &arm.pattern, match_val, use_map, enum_index)?;
+        builder.ins().brif(cond, arm_block, &[], next_block, &[]);
+
+        builder.switch_to_block(arm_block);
+        let mut arm_locals = locals.clone();
+        bind_match_pattern_value(&arm.pattern, &value, match_result.as_ref(), &mut arm_locals)?;
+        let Some((last, prefix)) = arm.body.stmts.split_last() else {
+            return Err(CodegenError::Unsupported("empty match arm".to_string()));
+        };
+        for stmt in prefix {
+            emit_stmt(
+                builder,
+                stmt,
+                &mut arm_locals,
+                fn_map,
+                use_map,
+                module_name,
+                stdlib,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+        }
+        let Stmt::Expr(expr_stmt) = last else {
+            return Err(CodegenError::Unsupported(
+                "match arm must end with expression".to_string(),
+            ));
+        };
+        let arm_value = emit_expr(
+            builder,
+            &expr_stmt.expr,
+            &arm_locals,
+            fn_map,
+            use_map,
+            module_name,
+            stdlib,
+            enum_index,
+            module,
+            data_counter,
+        )?;
+        let values = match &arm_value {
+            ValueRepr::Single(val) => vec![*val],
+            ValueRepr::Pair(a, b) => vec![*a, *b],
+            ValueRepr::Result { .. } => {
+                return Err(CodegenError::Unsupported("match result value".to_string()))
+            }
+        };
+        if result_shape.is_none() {
+            let mut types = Vec::new();
+            let mut slots = Vec::new();
+            for val in &values {
+                let ty = builder.func.dfg.value_type(*val);
+                let size = ty.bytes() as u32;
+                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    size.max(1),
+                ));
+                types.push(ty);
+                slots.push(slot);
+            }
+            result_shape = Some(ResultShape {
+                kind: match &arm_value {
+                    ValueRepr::Single(_) => ResultKind::Single,
+                    ValueRepr::Pair(_, _) => ResultKind::Pair,
+                    _ => ResultKind::Single,
+                },
+                slots,
+                types,
+            });
+        }
+        let shape = result_shape.as_ref().ok_or_else(|| {
+            CodegenError::Codegen("missing match result shape".to_string())
+        })?;
+        if values.len() != shape.types.len() {
+            return Err(CodegenError::Unsupported("mismatched match arm".to_string()));
+        }
+        for (idx, val) in values.iter().enumerate() {
+            builder.ins().stack_store(*val, shape.slots[idx], 0);
+        }
+        builder.ins().jump(merge_block, &[]);
+        builder.seal_block(arm_block);
+
+        if is_last {
+            break;
+        }
+        current_block = next_block;
+    }
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    let shape = result_shape.ok_or_else(|| {
+        CodegenError::Codegen("missing match result value".to_string())
+    })?;
+    let mut loaded = Vec::new();
+    for (slot, ty) in shape.slots.iter().zip(shape.types.iter()) {
+        loaded.push(builder.ins().stack_load(*ty, *slot, 0));
+    }
+    let result = match shape.kind {
+        ResultKind::Single => ValueRepr::Single(loaded[0]),
+        ResultKind::Pair => ValueRepr::Pair(loaded[0], loaded[1]),
+    };
+    Ok(result)
+}
+
 fn match_pattern_cond(
     builder: &mut FunctionBuilder,
     pattern: &Pattern,
     match_val: ir::Value,
+    use_map: &UseMap,
+    enum_index: &EnumIndex,
 ) -> Result<ir::Value, CodegenError> {
     match pattern {
         Pattern::Wildcard(_) | Pattern::Binding(_) => {
@@ -931,21 +1177,27 @@ fn match_pattern_cond(
             let rhs = builder.ins().iconst(ir::types::I8, tag_value);
             Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
         }
-        _ => Err(CodegenError::Unsupported("pattern".to_string())),
+        Pattern::Path(path) => {
+            let Some(index) = resolve_enum_variant(path, use_map, enum_index) else {
+                return Err(CodegenError::Unsupported("path pattern".to_string()));
+            };
+            let rhs = builder.ins().iconst(ir::types::I32, i64::from(index));
+            Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+        }
     }
 }
 
 fn bind_match_pattern_value(
     pattern: &Pattern,
     value: &ValueRepr,
-    result: Option<(ir::Value, ir::Value, ir::Value)>,
+    result: Option<&(ValueRepr, ValueRepr)>,
     locals: &mut HashMap<String, ValueRepr>,
 ) -> Result<(), CodegenError> {
     match pattern {
         Pattern::Binding(ident) => match value {
-            ValueRepr::ResultString { .. } => Err(CodegenError::Unsupported(
-                "binding result value".to_string(),
-            )),
+            ValueRepr::Result { .. } => {
+                Err(CodegenError::Unsupported("binding result value".to_string()))
+            }
             _ => {
                 locals.insert(ident.item.clone(), value.clone());
                 Ok(())
@@ -953,16 +1205,16 @@ fn bind_match_pattern_value(
         },
         Pattern::Call { path, binding, .. } => {
             let name = path.segments.last().map(|seg| seg.item.as_str()).unwrap_or("");
-            let Some((ok_ptr, ok_len, err)) = result else {
+            let Some((ok_val, err_val)) = result else {
                 return Err(CodegenError::Unsupported("call pattern".to_string()));
             };
             if let Some(binding) = binding {
                 if name == "Ok" {
-                    locals.insert(binding.item.clone(), ValueRepr::Pair(ok_ptr, ok_len));
+                    locals.insert(binding.item.clone(), ok_val.clone());
                     return Ok(());
                 }
                 if name == "Err" {
-                    locals.insert(binding.item.clone(), ValueRepr::Single(err));
+                    locals.insert(binding.item.clone(), err_val.clone());
                     return Ok(());
                 }
             }
@@ -975,14 +1227,19 @@ fn bind_match_pattern_value(
 fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, CodegenError> {
     match value {
         ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
-        ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
+        ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
             Err(CodegenError::Unsupported("string condition".to_string()))
         }
     }
 }
 
 fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
-    builder.ins().uextend(ir::types::I8, value)
+    let ty = builder.func.dfg.value_type(value);
+    if ty == ir::types::I8 {
+        value
+    } else {
+        builder.ins().uextend(ir::types::I8, value)
+    }
 }
 
 fn emit_short_circuit_expr(
@@ -995,6 +1252,7 @@ fn emit_short_circuit_expr(
     use_map: &UseMap,
     module_name: &str,
     stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1022,12 +1280,13 @@ fn emit_short_circuit_expr(
         use_map,
         module_name,
         stdlib,
+        enum_index,
         module,
         data_counter,
     )?;
     let rhs_val = match rhs_value {
         ValueRepr::Single(v) => v,
-        ValueRepr::Pair(_, _) | ValueRepr::ResultString { .. } => {
+        ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
             return Err(CodegenError::Unsupported("boolean op on string".to_string()))
         }
     };
@@ -1062,6 +1321,94 @@ fn emit_string(
     Ok(ValueRepr::Pair(ptr, len))
 }
 
+fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
+    match value {
+        ValueRepr::Single(val) => vec![*val],
+        ValueRepr::Pair(a, b) => vec![*a, *b],
+        ValueRepr::Result { tag, ok, err } => {
+            let mut out = vec![*tag];
+            out.extend(flatten_value(ok));
+            out.extend(flatten_value(err));
+            out
+        }
+    }
+}
+
+fn value_from_params(
+    builder: &mut FunctionBuilder,
+    ty: &TyKind,
+    params: &[ir::Value],
+    idx: &mut usize,
+) -> ValueRepr {
+    match ty {
+        TyKind::Unit => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
+        TyKind::I32 | TyKind::Bool | TyKind::Handle => {
+            let val = params[*idx];
+            *idx += 1;
+            ValueRepr::Single(val)
+        }
+        TyKind::String => {
+            let ptr = params[*idx];
+            let len = params[*idx + 1];
+            *idx += 2;
+            ValueRepr::Pair(ptr, len)
+        }
+        TyKind::Result(ok, err) => {
+            let tag = params[*idx];
+            *idx += 1;
+            let ok_val = value_from_params(builder, ok, params, idx);
+            let err_val = value_from_params(builder, err, params, idx);
+            ValueRepr::Result {
+                tag,
+                ok: Box::new(ok_val),
+                err: Box::new(err_val),
+            }
+        }
+        TyKind::ResultString => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
+    }
+}
+
+fn value_from_results(
+    builder: &mut FunctionBuilder,
+    ty: &TyKind,
+    results: &[ir::Value],
+    idx: &mut usize,
+) -> Result<ValueRepr, CodegenError> {
+    match ty {
+        TyKind::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
+        TyKind::I32 | TyKind::Bool | TyKind::Handle => {
+            let val = results
+                .get(*idx)
+                .ok_or_else(|| CodegenError::Codegen("missing return value".to_string()))?;
+            *idx += 1;
+            Ok(ValueRepr::Single(*val))
+        }
+        TyKind::String => {
+            if results.len() < *idx + 2 {
+                return Err(CodegenError::Codegen("string return count".to_string()));
+            }
+            let ptr = results[*idx];
+            let len = results[*idx + 1];
+            *idx += 2;
+            Ok(ValueRepr::Pair(ptr, len))
+        }
+        TyKind::Result(ok, err) => {
+            let tag = results
+                .get(*idx)
+                .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+            *idx += 1;
+            let ok_val = value_from_results(builder, ok, results, idx)?;
+            let err_val = value_from_results(builder, err, results, idx)?;
+            Ok(ValueRepr::Result {
+                tag: *tag,
+                ok: Box::new(ok_val),
+                err: Box::new(err_val),
+            })
+        }
+        TyKind::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+    }
+}
+
 fn resolve_call_path(path: &AstPath, module_name: &str, use_map: &UseMap) -> String {
     let resolved = resolve_path(path, use_map);
     if resolved.len() == 1 {
@@ -1085,6 +1432,21 @@ fn resolve_path(path: &AstPath, use_map: &UseMap) -> Vec<String> {
     path.segments.iter().map(|seg| seg.item.clone()).collect()
 }
 
+fn resolve_enum_variant(
+    path: &AstPath,
+    use_map: &UseMap,
+    enum_index: &EnumIndex,
+) -> Option<i32> {
+    let resolved = resolve_path(path, use_map);
+    if resolved.len() < 2 {
+        return None;
+    }
+    let (enum_path, variant) = resolved.split_at(resolved.len() - 1);
+    let enum_name = enum_path.join(".");
+    let info = enum_index.variants.get(&enum_name)?;
+    info.get(&variant[0]).copied()
+}
+
 fn build_stdlib_index(stdlib: &[AstModule]) -> StdlibIndex {
     let mut types = HashMap::new();
     for module in stdlib {
@@ -1102,7 +1464,41 @@ fn build_stdlib_index(stdlib: &[AstModule]) -> StdlibIndex {
     StdlibIndex { types }
 }
 
-fn lower_ty(ty: &AstType, use_map: &UseMap, stdlib: &StdlibIndex) -> TyKind {
+fn build_enum_index(
+    entry: &AstModule,
+    user_modules: &[AstModule],
+    stdlib: &[AstModule],
+) -> EnumIndex {
+    let mut variants = HashMap::new();
+    let entry_name = entry.name.to_string();
+    let modules = stdlib
+        .iter()
+        .chain(user_modules.iter())
+        .chain(std::iter::once(entry));
+    for module in modules {
+        let module_name = module.name.to_string();
+        for item in &module.items {
+            let Item::Enum(decl) = item else { continue };
+            let mut map = HashMap::new();
+            for (idx, variant) in decl.variants.iter().enumerate() {
+                map.insert(variant.name.item.clone(), idx as i32);
+            }
+            let qualified = format!("{module_name}.{}", decl.name.item);
+            variants.insert(qualified, map.clone());
+            if module_name == entry_name {
+                variants.insert(decl.name.item.clone(), map);
+            }
+        }
+    }
+    EnumIndex { variants }
+}
+
+fn lower_ty(
+    ty: &AstType,
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
+) -> TyKind {
     let resolved = resolve_type_name(&ty.path, use_map, stdlib);
     if resolved == "i32" {
         return TyKind::I32;
@@ -1116,11 +1512,19 @@ fn lower_ty(ty: &AstType, use_map: &UseMap, stdlib: &StdlibIndex) -> TyKind {
     if resolved == "string" {
         return TyKind::String;
     }
+    if resolved == "Result" && ty.args.len() == 2 {
+        let ok = lower_ty(&ty.args[0], use_map, stdlib, enum_index);
+        let err = lower_ty(&ty.args[1], use_map, stdlib, enum_index);
+        return TyKind::Result(Box::new(ok), Box::new(err));
+    }
     if resolved == "sys.system.System"
         || resolved == "sys.console.Console"
         || resolved == "sys.fs.ReadFS"
     {
         return TyKind::Handle;
+    }
+    if enum_index.variants.contains_key(&resolved) {
+        return TyKind::I32;
     }
     TyKind::Unit
 }
