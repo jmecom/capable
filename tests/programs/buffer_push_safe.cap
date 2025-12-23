@@ -9,9 +9,7 @@ pub fn main(sys: System) -> i32 {
   let alloc = buffer.alloc_default()
   match buffer.buffer_new(alloc, 1) {
     Ok(b) => {
-      let seed_slice = buffer.buffer_as_slice(b)
-      let v = buffer.slice_at(seed_slice, 0)
-      match buffer.buffer_push(b, v) {
+      match buffer.buffer_push(b, 7u8) {
         Ok(u) => { u }
         Err(e) => {
           console.println(c, "push err")

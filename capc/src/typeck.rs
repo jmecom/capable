@@ -679,6 +679,7 @@ fn check_expr(
     match expr {
         Expr::Literal(lit) => match &lit.value {
             Literal::Int(_) => Ok(Ty::Builtin(BuiltinType::I32)),
+            Literal::U8(_) => Ok(Ty::Builtin(BuiltinType::U8)),
             Literal::String(_) => Ok(Ty::Builtin(BuiltinType::String)),
             Literal::Bool(_) => Ok(Ty::Builtin(BuiltinType::Bool)),
             Literal::Unit => Ok(Ty::Builtin(BuiltinType::Unit)),

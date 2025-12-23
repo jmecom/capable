@@ -11,7 +11,7 @@ pub fn main(sys: System) -> i32 {
     Ok(b) => {
       let slice = buffer.buffer_as_slice(b)
       let v = buffer.slice_at(slice, 0)
-      if (v == buffer.slice_at(slice, 0)) {
+      if (v == 0u8) {
         console.println(c, "slice read ok")
       } else {
         console.println(c, "slice read bad")

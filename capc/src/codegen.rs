@@ -973,6 +973,7 @@ fn emit_expr(
     match expr {
         Expr::Literal(lit) => match &lit.value {
             Literal::Int(value) => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, *value as i64))),
+            Literal::U8(value) => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, *value as i64))),
             Literal::Bool(value) => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, *value as i64))),
             Literal::String(value) => emit_string(builder, value, module, data_counter),
             Literal::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
@@ -1565,6 +1566,10 @@ fn match_pattern_cond(
             }
             Literal::Int(value) => {
                 let rhs = builder.ins().iconst(ir::types::I32, *value);
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
+            Literal::U8(value) => {
+                let rhs = builder.ins().iconst(ir::types::I8, *value as i64);
                 Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
             }
             _ => Err(CodegenError::Unsupported("literal pattern".to_string())),

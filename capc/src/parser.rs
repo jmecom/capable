@@ -448,6 +448,24 @@ impl Parser {
                 let value = token.text.parse::<i64>().map_err(|_| {
                     self.error_at(token.span, "invalid integer literal".to_string())
                 })?;
+                if let Some(next) = self.peek_token(0) {
+                    if next.kind == TokenKind::Ident
+                        && next.text == "u8"
+                        && next.span.start == token.span.end
+                    {
+                        let suffix = self.bump().unwrap();
+                        if !(0..=255).contains(&value) {
+                            return Err(self.error_at(
+                                Span::new(token.span.start, suffix.span.end),
+                                "u8 literal out of range".to_string(),
+                            ));
+                        }
+                        return Ok(Expr::Literal(LiteralExpr {
+                            value: Literal::U8(value as u8),
+                            span: Span::new(token.span.start, suffix.span.end),
+                        }));
+                    }
+                }
                 Ok(Expr::Literal(LiteralExpr {
                     value: Literal::Int(value),
                     span: token.span,
@@ -741,6 +759,10 @@ impl Parser {
 
     fn error_at(&self, span: Span, message: String) -> ParseError {
         ParseError::new(message, span)
+    }
+
+    fn peek_token(&self, offset: usize) -> Option<&Token> {
+        self.tokens.get(self.index + offset)
     }
 }
 
