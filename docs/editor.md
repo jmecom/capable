@@ -22,11 +22,15 @@ tree-sitter generate
 
 ## Neovim example
 
-Load the parser + LSP with:
+Run `scripts/install-editor.sh` to drop the tree-sitter parser into `~/.config/nvim`
+and copy the helper module to `~/.config/nvim/lua/capable`. That script also runs
+`tree-sitter generate` so the parser is ready.
+
+Then add this snippet:
 
 ```lua
 require("nvim-treesitter.parsers").get_parser_configs()
-require("path.to.nvim.capable").setup()
+require("capable").setup()
 ```
 
 `caplsp` publishes `textDocument/publishDiagnostics`, so errors from `capc check`
