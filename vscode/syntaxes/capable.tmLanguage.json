@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Capable",
+  "scopeName": "source.cap",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.cap",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.cap",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.cap",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.cap",
+          "match": "\\b\\d+u8\\b|\\b\\d+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.cap",
+          "match": "\\b(module|package|safe|unsafe|use|pub|extern|fn|let|if|else|while|return|struct|enum|opaque|match|true|false)\\b"
+        },
+        {
+          "name": "constant.language.cap",
+          "match": "\\bunit\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.cap",
+          "match": "\\b(i32|u32|u8|bool|string|Result)\\b"
+        }
+      ]
+    }
+  }
+}

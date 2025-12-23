@@ -20,23 +20,26 @@ cd tree-sitter-capable
 tree-sitter generate
 ```
 
-## Neovim example
+## VS Code
 
-Run `scripts/install-editor.sh` to drop the tree-sitter parser into `~/.config/nvim`
-and copy the helper module to `~/.config/nvim/lua/capable`. That script also runs
-`tree-sitter generate` so the parser is ready.
+1. Build/install the LSP server:
 
-Then add this snippet:
-
-```lua
-require("capable").setup()
+```sh
+just lsp
 ```
 
-`caplsp` publishes `textDocument/publishDiagnostics`, so errors from `capc check`
-show up as squiggles automatically.
+2. Install the extension dependencies:
 
-If you need a custom tree-sitter path, set:
-
-```lua
-vim.g.capable_treesitter_dir = "/path/to/tree-sitter-capable"
+```sh
+cd vscode
+npm install
 ```
+
+3. Launch VS Code with the extension in dev mode:
+
+```sh
+code --extensionDevelopmentPath=./vscode
+```
+
+The extension registers the `cap` language, basic highlighting, and runs `caplsp`
+for diagnostics (errors from `capc check` show as squiggles).

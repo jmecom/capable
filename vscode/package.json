@@ -1,0 +1,57 @@
+{
+  "name": "capable-vscode",
+  "displayName": "Capable",
+  "description": "Capable language support (syntax + diagnostics)",
+  "version": "0.1.0",
+  "publisher": "capable",
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:cap"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "cap",
+        "aliases": [
+          "Capable",
+          "cap"
+        ],
+        "extensions": [
+          ".cap"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "cap",
+        "scopeName": "source.cap",
+        "path": "./syntaxes/capable.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Capable",
+      "properties": {
+        "capable.serverPath": {
+          "type": "string",
+          "default": "caplsp",
+          "description": "Path to the caplsp language server binary."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "echo \"no lint\"",
+    "test": "echo \"no tests\""
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
