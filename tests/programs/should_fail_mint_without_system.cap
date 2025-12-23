@@ -1,0 +1,8 @@
+module should_fail_mint_without_system
+use sys.system
+
+pub fn main(sys: System) -> i32 {
+  let s: i32 = 0
+  let c = system.console(s)
+  return 0
+}

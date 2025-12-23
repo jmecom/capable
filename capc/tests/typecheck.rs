@@ -71,7 +71,7 @@ fn typecheck_missing_console_cap() {
 
 #[test]
 fn typecheck_opaque_console_constructor_fails() {
-    let source = load_program("should_fail_construct_console.cap");
+    let source = load_program("should_fail_forge_console.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
@@ -79,6 +79,30 @@ fn typecheck_opaque_console_constructor_fails() {
         err.to_string()
             .contains("cannot construct opaque type `sys.console.Console` outside module `sys.console`")
     );
+}
+
+#[test]
+fn typecheck_console_wrong_type() {
+    let source = load_program("should_fail_console_wrong_type.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let text = err.to_string();
+    assert!(text.contains("argument type mismatch"));
+    assert!(text.contains("Path(\"sys.console.Console\""));
+    assert!(text.contains("Builtin(I32)"));
+}
+
+#[test]
+fn typecheck_mint_without_system() {
+    let source = load_program("should_fail_mint_without_system.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let text = err.to_string();
+    assert!(text.contains("argument type mismatch"));
+    assert!(text.contains("Path(\"sys.system.System\""));
+    assert!(text.contains("Builtin(I32)"));
 }
 
 #[test]
