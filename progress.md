@@ -1,9 +1,9 @@
-# Project Progress (Capable)
+# Project Progress
 
 This is a living status report for future-me. It summarizes what exists, where it
 lives, and what’s missing vs the spec. Keep it updated as milestones complete.
 
-## Repo Layout (where code lives)
+## Repo Layout
 
 - Compiler: `capc/`
   - Lexer: `capc/src/lexer.rs` (logos-based)
@@ -29,7 +29,7 @@ lives, and what’s missing vs the spec. Keep it updated as milestones complete.
 - Docs: `spec.md`, `docs/` (design notes)
 - Examples: `examples/` (extern demo)
 
-## Milestones (spec alignment)
+## Milestones
 
 - M0: Parser/AST/typecheck + minimal stdlib -> done
 - M1: Codegen for basic programs + module loader -> done
@@ -137,7 +137,7 @@ Not Built:
 - Real package manager / dependency system
 - Robust editor integration (go-to-def, hover)
 
-## Next Steps (high value)
+## Next Steps
 
 - Add `i64` end-to-end (lexer/parser/typecheck/codegen/runtime helpers).
 - Decide generic strategy:

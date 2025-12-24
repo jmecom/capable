@@ -36,10 +36,12 @@ fn count_text(c: Console, s: string) -> i32 {
 
 pub fn main(sys: System) -> i32 {
   let c = system.console(sys)
+
   if (args.len(sys) < 2) {
     console.println(c, "usage: wc <path>")
     return 1
   }
+
   let code = match args.at(sys, 1) {
     Ok(path) => {
       let rfs = system.fs_read(sys, "./")
@@ -56,5 +58,6 @@ pub fn main(sys: System) -> i32 {
       1
     }
   }
+
   return code
 }
