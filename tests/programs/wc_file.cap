@@ -1,60 +1,61 @@
 package safe
 module wc_file
-use sys.system
-use sys.console
-use sys.args
-use sys.fs
-use sys.string
-use sys.bytes
-use sys.buffer
-use sys.vec
+use sys::root
+use sys::console
+use sys::args
+use sys::fs
+use sys::string
+use sys::bytes
+use sys::buffer
+use sys::vec
 
 fn count_text(c: Console, s: string) -> i32 {
-  let buf = string.bytes(s)
-  let bytes = bytes.len(buf)
-  let words_vec = string.split_whitespace(s)
-  let words = vec.vec_string_len(words_vec)
+  let buf = s.bytes()
+  let bytes = buf.len()
+  let words_vec = s.split_whitespace()
+  let words = words_vec.len()
   let alloc = buffer.alloc_default()
   vec.vec_string_free(alloc, words_vec)
   let i: i32 = 0
   let lines: i32 = 0
   while (i < bytes) {
-    let b = bytes.at(buf, i)
+    let b = buf.at(i)
     if (b == 10u8) {
       lines = lines + 1
     }
     i = i + 1
   }
-  console.print_i32(c, lines)
-  console.print(c, " ")
-  console.print_i32(c, words)
-  console.print(c, " ")
-  console.print_i32(c, bytes)
-  console.println(c, "")
+  c.print_i32(lines)
+  c.print(" ")
+  c.print_i32(words)
+  c.print(" ")
+  c.print_i32(bytes)
+  c.println("")
   return 0
 }
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let a = rc.mint_args()
 
-  if (args.len(sys) < 2) {
-    console.println(c, "usage: wc <path>")
+  if (a.len() < 2) {
+    c.println("usage: wc <path>")
     return 1
   }
 
-  let code = match args.at(sys, 1) {
+  let code = match a.at(1) {
     Ok(path) => {
-      let rfs = system.fs_read(sys, "./")
-      match fs.read_to_string(rfs, path) {
+      let rfs = rc.mint_fs_read("./")
+      match rfs.read_to_string(path) {
         Ok(s) => { count_text(c, s) }
         Err(e) => {
-          console.println(c, "read err")
+          c.println("read err")
           1
         }
       }
     }
     Err(e) => {
-      console.println(c, "arg err")
+      c.println("arg err")
       1
     }
   }

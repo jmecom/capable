@@ -1,7 +1,7 @@
 package unsafe
 module unsafe_pkg
-use sys.system
+use sys::root::RootCap
 
-pub fn main(sys: System) -> i32 {
+pub fn main(rc: RootCap) -> i32 {
   return 0
 }

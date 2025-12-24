@@ -1,0 +1,6 @@
+package safe
+module test
+
+pub fn main() -> i32 {
+  return 0
+}

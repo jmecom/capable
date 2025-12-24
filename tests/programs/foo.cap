@@ -1,0 +1,6 @@
+package safe
+module foo
+
+pub fn bar() -> i32 {
+  return 0
+}

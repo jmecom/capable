@@ -13,8 +13,8 @@ use cranelift_native;
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Stmt, Type as AstType,
-    UnaryOp,
+    BinaryOp, Expr, Item, Literal, MethodCallExpr, Module as AstModule, Path as AstPath, Pattern,
+    Stmt, Type as AstType, UnaryOp,
 };
 
 #[derive(Debug, Error)]
@@ -198,6 +198,7 @@ pub fn build_object(
                 // Blocks sealed after body emission.
 
                 let mut locals: HashMap<String, LocalValue> = HashMap::new();
+                let mut local_types: HashMap<String, String> = HashMap::new();
                 let params = builder.block_params(block).to_vec();
                 let mut param_index = 0;
                 for param in &func.params {
@@ -206,6 +207,11 @@ pub fn build_object(
                         value_from_params(&mut builder, &ty_kind, &params, &mut param_index);
                     let local = store_local(&mut builder, value);
                     locals.insert(param.name.item.clone(), local);
+                    // Track type for method call resolution
+                    if let AstType::Path { path, .. } = &param.ty {
+                        let type_name = resolve_type_name(path, &use_map, &stdlib_index);
+                        local_types.insert(param.name.item.clone(), type_name);
+                    }
                 }
 
                 for stmt in &func.body.stmts {
@@ -213,6 +219,7 @@ pub fn build_object(
                         &mut builder,
                         stmt,
                         &mut locals,
+                        &mut local_types,
                         &fn_map,
                         &use_map,
                         &module_name,
@@ -608,16 +615,16 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     };
 
     map.insert(
-        "sys.system.console".to_string(),
+        "sys.root.RootCap.mint_console".to_string(),
         FnInfo {
-            sig: system_console,
+            sig: system_console.clone(),
             abi_sig: None,
             symbol: "capable_rt_system_console".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.system.fs_read".to_string(),
+        "sys.root.RootCap.mint_fs_read".to_string(),
         FnInfo {
             sig: system_fs_read,
             abi_sig: None,
@@ -626,7 +633,16 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.console.println".to_string(),
+        "sys.root.RootCap.mint_args".to_string(),
+        FnInfo {
+            sig: system_console,
+            abi_sig: None,
+            symbol: "capable_rt_system_console".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console.println".to_string(),
         FnInfo {
             sig: console_println,
             abi_sig: None,
@@ -635,7 +651,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.console.print".to_string(),
+        "sys.console.Console.print".to_string(),
         FnInfo {
             sig: console_print,
             abi_sig: None,
@@ -644,7 +660,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.console.print_i32".to_string(),
+        "sys.console.Console.print_i32".to_string(),
         FnInfo {
             sig: console_print_i32.clone(),
             abi_sig: None,
@@ -653,7 +669,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.console.println_i32".to_string(),
+        "sys.console.Console.println_i32".to_string(),
         FnInfo {
             sig: console_print_i32,
             abi_sig: None,
@@ -662,7 +678,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.fs.read_to_string".to_string(),
+        "sys.fs.ReadFS.read_to_string".to_string(),
         FnInfo {
             sig: fs_read_to_string,
             abi_sig: Some(fs_read_to_string_abi),
@@ -935,7 +951,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.args.len".to_string(),
+        "sys.args.Args.len".to_string(),
         FnInfo {
             sig: args_len,
             abi_sig: None,
@@ -944,7 +960,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.args.at".to_string(),
+        "sys.args.Args.at".to_string(),
         FnInfo {
             sig: args_at,
             abi_sig: Some(args_at_abi),
@@ -1283,6 +1299,7 @@ fn emit_stmt(
     builder: &mut FunctionBuilder,
     stmt: &Stmt,
     locals: &mut HashMap<String, LocalValue>,
+    local_types: &mut HashMap<String, String>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1297,6 +1314,7 @@ fn emit_stmt(
                 builder,
                 &let_stmt.expr,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1313,6 +1331,7 @@ fn emit_stmt(
                 builder,
                 &assign.expr,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1342,6 +1361,7 @@ fn emit_stmt(
                     builder,
                     expr,
                     locals,
+                    local_types,
                     fn_map,
                     use_map,
                     module_name,
@@ -1367,6 +1387,7 @@ fn emit_stmt(
                     builder,
                     match_expr,
                     locals,
+                    local_types,
                     fn_map,
                     use_map,
                     module_name,
@@ -1380,6 +1401,7 @@ fn emit_stmt(
                     builder,
                     &expr_stmt.expr,
                     locals,
+                    local_types,
                     fn_map,
                     use_map,
                     module_name,
@@ -1402,6 +1424,7 @@ fn emit_stmt(
                 builder,
                 &if_stmt.cond,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1419,6 +1442,7 @@ fn emit_stmt(
                     builder,
                     stmt,
                     locals,
+                    local_types,
                     fn_map,
                     use_map,
                     module_name,
@@ -1440,6 +1464,7 @@ fn emit_stmt(
                         builder,
                         stmt,
                         locals,
+                        local_types,
                         fn_map,
                         use_map,
                         module_name,
@@ -1469,6 +1494,7 @@ fn emit_stmt(
                 builder,
                 &while_stmt.cond,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1486,6 +1512,7 @@ fn emit_stmt(
                     builder,
                     stmt,
                     locals,
+                    local_types,
                     fn_map,
                     use_map,
                     module_name,
@@ -1516,6 +1543,7 @@ fn emit_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
     locals: &HashMap<String, LocalValue>,
+    local_types: &HashMap<String, String>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1564,6 +1592,7 @@ fn emit_expr(
                     builder,
                     arg,
                     locals,
+                    local_types,
                     fn_map,
                     use_map,
                     module_name,
@@ -1716,6 +1745,7 @@ fn emit_expr(
                 builder,
                 &binary.left,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1737,6 +1767,7 @@ fn emit_expr(
                     &binary.right,
                     matches!(binary.op, BinaryOp::And),
                     locals,
+                    local_types,
                     fn_map,
                     use_map,
                     module_name,
@@ -1750,6 +1781,7 @@ fn emit_expr(
                 builder,
                 &binary.right,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1802,6 +1834,7 @@ fn emit_expr(
             builder,
             &group.expr,
             locals,
+            local_types,
             fn_map,
             use_map,
             module_name,
@@ -1815,6 +1848,7 @@ fn emit_expr(
                 builder,
                 &unary.expr,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1836,6 +1870,20 @@ fn emit_expr(
             builder,
             match_expr,
             locals,
+            local_types,
+            fn_map,
+            use_map,
+            module_name,
+            stdlib,
+            enum_index,
+            module,
+            data_counter,
+        ),
+        Expr::MethodCall(call) => emit_method_call(
+            builder,
+            call,
+            locals,
+            local_types,
             fn_map,
             use_map,
             module_name,
@@ -1848,10 +1896,225 @@ fn emit_expr(
     }
 }
 
+fn emit_method_call(
+    builder: &mut FunctionBuilder,
+    call: &MethodCallExpr,
+    locals: &HashMap<String, LocalValue>,
+    local_types: &HashMap<String, String>,
+    fn_map: &HashMap<String, FnInfo>,
+    use_map: &UseMap,
+    module_name: &str,
+    stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    // For method calls, we need to determine the receiver type
+    // and build the function path as receiver_type.method
+    let receiver_type = if let Expr::Path(path) = &*call.receiver {
+        // Simple variable - look up its type
+        if path.segments.len() == 1 {
+            local_types
+                .get(&path.segments[0].item)
+                .ok_or_else(|| {
+                    CodegenError::UnknownVariable(format!(
+                        "unknown receiver type for {}",
+                        path.segments[0].item
+                    ))
+                })?
+                .clone()
+        } else {
+            return Err(CodegenError::Unsupported(
+                "method call on complex path".to_string(),
+            ));
+        }
+    } else {
+        return Err(CodegenError::Unsupported(
+            "method call on non-path receiver".to_string(),
+        ));
+    };
+
+    // Build the function path: receiver_type.method
+    let callee_path = format!("{}.{}", receiver_type, call.method.item);
+
+    let info = fn_map
+        .get(&callee_path)
+        .ok_or_else(|| CodegenError::UnknownFunction(callee_path.clone()))?
+        .clone();
+
+    // Emit receiver as first argument, then the rest
+    let mut args = Vec::new();
+    let receiver_value = emit_expr(
+        builder,
+        &call.receiver,
+        locals,
+        local_types,
+        fn_map,
+        use_map,
+        module_name,
+        stdlib,
+        enum_index,
+        module,
+        data_counter,
+    )?;
+    args.extend(flatten_value(&receiver_value));
+
+    for arg in &call.args {
+        let value = emit_expr(
+            builder,
+            arg,
+            locals,
+            local_types,
+            fn_map,
+            use_map,
+            module_name,
+            stdlib,
+            enum_index,
+            module,
+            data_counter,
+        )?;
+        args.extend(flatten_value(&value));
+    }
+
+    // Rest of the call emission is the same as regular calls
+    let mut out_slots = None;
+    let mut result_out = None;
+    let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
+    if abi_sig.ret == TyKind::ResultString {
+        let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            8,
+        ));
+        let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            8,
+        ));
+        let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            4,
+        ));
+        let ptr_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+        let len_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
+        let err_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
+        args.push(ptr_ptr);
+        args.push(len_ptr);
+        args.push(err_ptr);
+        out_slots = Some((slot_ptr, slot_len, slot_err));
+    }
+    if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
+        let ptr_ty = module.isa().pointer_type();
+        let ok_slot = if **ok_ty == TyKind::Unit {
+            None
+        } else {
+            let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                ty.bytes().max(1) as u32,
+            ));
+            let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+            args.push(addr);
+            Some((slot, ty))
+        };
+        let err_slot = if **err_ty == TyKind::Unit {
+            None
+        } else {
+            let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                ty.bytes().max(1) as u32,
+            ));
+            let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+            args.push(addr);
+            Some((slot, ty))
+        };
+        result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
+    }
+    let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+    let func_id = module
+        .declare_function(
+            &info.symbol,
+            if info.is_runtime {
+                Linkage::Import
+            } else {
+                Linkage::Export
+            },
+            &sig,
+        )
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local = module.declare_func_in_func(func_id, builder.func);
+    let call_inst = builder.ins().call(local, &args);
+    let results = builder.inst_results(call_inst).to_vec();
+    if abi_sig.ret == TyKind::ResultString {
+        let tag = results
+            .get(0)
+            .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+        let (slot_ptr, slot_len, slot_err) = out_slots
+            .ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
+        let ptr_addr = builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+        let len_addr = builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
+        let err_addr = builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
+        let ptr = builder.ins().load(
+            module.isa().pointer_type(),
+            MemFlags::new(),
+            ptr_addr,
+            0,
+        );
+        let len = builder.ins().load(ir::types::I64, MemFlags::new(), len_addr, 0);
+        let err = builder.ins().load(ir::types::I32, MemFlags::new(), err_addr, 0);
+        match &info.sig.ret {
+            TyKind::Result(ok_ty, err_ty) => {
+                if **ok_ty != TyKind::String || **err_ty != TyKind::I32 {
+                    return Err(CodegenError::Unsupported("result out params".to_string()));
+                }
+                Ok(ValueRepr::Result {
+                    tag: *tag,
+                    ok: Box::new(ValueRepr::Pair(ptr, len)),
+                    err: Box::new(ValueRepr::Single(err)),
+                })
+            }
+            _ => Err(CodegenError::Unsupported("result out params".to_string())),
+        }
+    } else if let TyKind::ResultOut(_, _) = &abi_sig.ret {
+        let tag = results
+            .get(0)
+            .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+        let (ok_slot, err_slot, ok_ty, err_ty) = result_out
+            .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
+        let ok_val = if let Some((slot, ty)) = ok_slot {
+            let addr = builder.ins().stack_addr(module.isa().pointer_type(), slot, 0);
+            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+            ValueRepr::Single(val)
+        } else {
+            ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+        };
+        let err_val = if let Some((slot, ty)) = err_slot {
+            let addr = builder.ins().stack_addr(module.isa().pointer_type(), slot, 0);
+            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+            ValueRepr::Single(val)
+        } else {
+            ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+        };
+        match &info.sig.ret {
+            TyKind::Result(_, _) => Ok(ValueRepr::Result {
+                tag: *tag,
+                ok: Box::new(ok_val),
+                err: Box::new(err_val),
+            }),
+            _ => Err(CodegenError::Unsupported(format!(
+                "result out params for {ok_ty:?}/{err_ty:?}"
+            ))),
+        }
+    } else {
+        let mut index = 0;
+        value_from_results(builder, &info.sig.ret, &results, &mut index)
+    }
+}
+
 fn emit_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::ast::MatchExpr,
     locals: &mut HashMap<String, LocalValue>,
+    local_types: &mut HashMap<String, String>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1864,6 +2127,7 @@ fn emit_match_stmt(
         builder,
         &match_expr.expr,
         locals,
+        local_types,
         fn_map,
         use_map,
         module_name,
@@ -1915,6 +2179,7 @@ fn emit_match_stmt(
                 builder,
                 stmt,
                 locals,
+                local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -1950,6 +2215,7 @@ fn emit_match_expr(
     builder: &mut FunctionBuilder,
     match_expr: &crate::ast::MatchExpr,
     locals: &HashMap<String, LocalValue>,
+    local_types: &HashMap<String, String>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -1962,6 +2228,7 @@ fn emit_match_expr(
         builder,
         &match_expr.expr,
         locals,
+        local_types,
         fn_map,
         use_map,
         module_name,
@@ -2002,6 +2269,7 @@ fn emit_match_expr(
 
         builder.switch_to_block(arm_block);
         let mut arm_locals = locals.clone();
+        let mut arm_local_types = local_types.clone();
         bind_match_pattern_value(
             builder,
             &arm.pattern,
@@ -2017,6 +2285,7 @@ fn emit_match_expr(
                 builder,
                 stmt,
                 &mut arm_locals,
+                &mut arm_local_types,
                 fn_map,
                 use_map,
                 module_name,
@@ -2035,6 +2304,7 @@ fn emit_match_expr(
             builder,
             &expr_stmt.expr,
             &arm_locals,
+            &arm_local_types,
             fn_map,
             use_map,
             module_name,
@@ -2215,6 +2485,7 @@ fn emit_short_circuit_expr(
     rhs_expr: &Expr,
     is_and: bool,
     locals: &HashMap<String, LocalValue>,
+    local_types: &HashMap<String, String>,
     fn_map: &HashMap<String, FnInfo>,
     use_map: &UseMap,
     module_name: &str,
@@ -2242,6 +2513,7 @@ fn emit_short_circuit_expr(
         builder,
         rhs_expr,
         locals,
+        local_types,
         fn_map,
         use_map,
         module_name,
@@ -2465,7 +2737,7 @@ fn resolve_enum_variant(
 fn build_stdlib_index(stdlib: &[AstModule]) -> StdlibIndex {
     let mut types = HashMap::new();
     for module in stdlib {
-        let module_name = module.name.to_string();
+        let module_name = module.name.to_string().replace("::", ".");
         for item in &module.items {
             let name = match item {
                 Item::Struct(decl) if decl.is_pub => decl.name.item.clone(),
@@ -2485,13 +2757,13 @@ fn build_enum_index(
     stdlib: &[AstModule],
 ) -> EnumIndex {
     let mut variants = HashMap::new();
-    let entry_name = entry.name.to_string();
+    let entry_name = entry.name.to_string().replace("::", ".");
     let modules = stdlib
         .iter()
         .chain(user_modules.iter())
         .chain(std::iter::once(entry));
     for module in modules {
-        let module_name = module.name.to_string();
+        let module_name = module.name.to_string().replace("::", ".");
         for item in &module.items {
             let Item::Enum(decl) = item else { continue };
             let mut map = HashMap::new();
@@ -2547,9 +2819,10 @@ fn lower_ty(
             }
         }
     }
-    if resolved == "sys.system.System"
+    if resolved == "sys.root.RootCap"
         || resolved == "sys.console.Console"
         || resolved == "sys.fs.ReadFS"
+        || resolved == "sys.args.Args"
         || resolved == "sys.buffer.Alloc"
         || resolved == "sys.buffer.Buffer"
         || resolved == "sys.buffer.Slice"

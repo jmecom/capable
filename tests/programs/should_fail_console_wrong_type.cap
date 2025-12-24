@@ -1,5 +1,5 @@
 module should_fail_console_wrong_type
-use sys.console
+use sys::console
 
 pub fn main(sys: System) -> i32 {
   let c: i32 = 0

@@ -1,7 +1,7 @@
 package unsafe
-module sys.mem
+module sys::mem
 
-use sys.buffer
+use sys::buffer
 
 pub extern fn malloc(size: i32) -> *u8
 pub extern fn free(ptr: *u8) -> unit

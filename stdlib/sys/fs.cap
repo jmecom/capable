@@ -1,10 +1,10 @@
 package unsafe
-module sys.fs
+module sys::fs
 
 pub opaque struct ReadFS
 
 pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }
 
-pub fn read_to_string(fs: ReadFS, path: string) -> Result[string, FsErr] {
+pub fn read_to_string(self: ReadFS, path: string) -> Result[string, FsErr] {
   return ()
 }

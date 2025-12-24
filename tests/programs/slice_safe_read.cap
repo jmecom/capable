@@ -1,8 +1,8 @@
 package safe
 module slice_safe_read
-use sys.system
-use sys.console
-use sys.buffer
+use sys::system
+use sys::console
+use sys::buffer
 
 pub fn main(sys: System) -> i32 {
   let c = system.console(sys)

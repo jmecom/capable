@@ -1,7 +1,7 @@
 package safe
-module sys.bytes
+module sys::bytes
 
-use sys.buffer
+use sys::buffer
 
 pub fn len(s: Slice[u8]) -> i32 {
   return buffer.slice_len(s)

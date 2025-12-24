@@ -31,21 +31,21 @@ Module {
                         },
                     },
                     Spanned {
-                        item: "system",
+                        item: "root",
                         span: Span {
-                            start: 23,
-                            end: 29,
+                            start: 24,
+                            end: 28,
                         },
                     },
                 ],
                 span: Span {
                     start: 19,
-                    end: 29,
+                    end: 28,
                 },
             },
             span: Span {
                 start: 15,
-                end: 29,
+                end: 28,
             },
         },
         UseDecl {
@@ -54,8 +54,8 @@ Module {
                     Spanned {
                         item: "sys",
                         span: Span {
-                            start: 34,
-                            end: 37,
+                            start: 33,
+                            end: 36,
                         },
                     },
                     Spanned {
@@ -67,12 +67,12 @@ Module {
                     },
                 ],
                 span: Span {
-                    start: 34,
+                    start: 33,
                     end: 40,
                 },
             },
             span: Span {
-                start: 30,
+                start: 29,
                 end: 40,
             },
         },
@@ -89,19 +89,19 @@ Module {
                     Spanned {
                         item: "console",
                         span: Span {
-                            start: 49,
-                            end: 56,
+                            start: 50,
+                            end: 57,
                         },
                     },
                 ],
                 span: Span {
                     start: 45,
-                    end: 56,
+                    end: 57,
                 },
             },
             span: Span {
                 start: 41,
-                end: 56,
+                end: 57,
             },
         },
     ],
@@ -111,16 +111,16 @@ Module {
                 name: Spanned {
                     item: "main",
                     span: Span {
-                        start: 65,
-                        end: 69,
+                        start: 66,
+                        end: 70,
                     },
                 },
                 params: [
                     Param {
                         name: Spanned {
-                            item: "sys",
+                            item: "rc",
                             span: Span {
-                                start: 70,
+                                start: 71,
                                 end: 73,
                             },
                         },
@@ -128,22 +128,22 @@ Module {
                             path: Path {
                                 segments: [
                                     Spanned {
-                                        item: "System",
+                                        item: "RootCap",
                                         span: Span {
                                             start: 75,
-                                            end: 81,
+                                            end: 82,
                                         },
                                     },
                                 ],
                                 span: Span {
                                     start: 75,
-                                    end: 81,
+                                    end: 82,
                                 },
                             },
                             args: [],
                             span: Span {
                                 start: 75,
-                                end: 81,
+                                end: 82,
                             },
                         },
                     },
@@ -154,20 +154,20 @@ Module {
                             Spanned {
                                 item: "i32",
                                 span: Span {
-                                    start: 86,
-                                    end: 89,
+                                    start: 87,
+                                    end: 90,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 86,
-                            end: 89,
+                            start: 87,
+                            end: 90,
                         },
                     },
                     args: [],
                     span: Span {
-                        start: 86,
-                        end: 89,
+                        start: 87,
+                        end: 90,
                     },
                 },
                 body: Block {
@@ -177,65 +177,47 @@ Module {
                                 name: Spanned {
                                     item: "c",
                                     span: Span {
-                                        start: 98,
-                                        end: 99,
+                                        start: 99,
+                                        end: 100,
                                     },
                                 },
                                 ty: None,
-                                expr: Call(
-                                    CallExpr {
-                                        callee: Path(
+                                expr: MethodCall(
+                                    MethodCallExpr {
+                                        receiver: Path(
                                             Path {
                                                 segments: [
                                                     Spanned {
-                                                        item: "system",
+                                                        item: "rc",
                                                         span: Span {
-                                                            start: 102,
-                                                            end: 108,
-                                                        },
-                                                    },
-                                                    Spanned {
-                                                        item: "console",
-                                                        span: Span {
-                                                            start: 109,
-                                                            end: 116,
+                                                            start: 103,
+                                                            end: 105,
                                                         },
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 102,
-                                                    end: 116,
+                                                    start: 103,
+                                                    end: 105,
                                                 },
                                             },
                                         ),
-                                        args: [
-                                            Path(
-                                                Path {
-                                                    segments: [
-                                                        Spanned {
-                                                            item: "sys",
-                                                            span: Span {
-                                                                start: 117,
-                                                                end: 120,
-                                                            },
-                                                        },
-                                                    ],
-                                                    span: Span {
-                                                        start: 117,
-                                                        end: 120,
-                                                    },
-                                                },
-                                            ),
-                                        ],
+                                        method: Spanned {
+                                            item: "mint_console",
+                                            span: Span {
+                                                start: 106,
+                                                end: 118,
+                                            },
+                                        },
+                                        args: [],
                                         span: Span {
-                                            start: 102,
-                                            end: 121,
+                                            start: 103,
+                                            end: 120,
                                         },
                                     },
                                 ),
                                 span: Span {
-                                    start: 94,
-                                    end: 121,
+                                    start: 95,
+                                    end: 120,
                                 },
                             },
                         ),
@@ -244,76 +226,59 @@ Module {
                                 name: Spanned {
                                     item: "rfs",
                                     span: Span {
-                                        start: 128,
-                                        end: 131,
+                                        start: 127,
+                                        end: 130,
                                     },
                                 },
                                 ty: None,
-                                expr: Call(
-                                    CallExpr {
-                                        callee: Path(
+                                expr: MethodCall(
+                                    MethodCallExpr {
+                                        receiver: Path(
                                             Path {
                                                 segments: [
                                                     Spanned {
-                                                        item: "system",
+                                                        item: "rc",
                                                         span: Span {
-                                                            start: 134,
-                                                            end: 140,
-                                                        },
-                                                    },
-                                                    Spanned {
-                                                        item: "fs_read",
-                                                        span: Span {
-                                                            start: 141,
-                                                            end: 148,
+                                                            start: 133,
+                                                            end: 135,
                                                         },
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 134,
-                                                    end: 148,
+                                                    start: 133,
+                                                    end: 135,
                                                 },
                                             },
                                         ),
+                                        method: Spanned {
+                                            item: "mint_fs_read",
+                                            span: Span {
+                                                start: 136,
+                                                end: 148,
+                                            },
+                                        },
                                         args: [
-                                            Path(
-                                                Path {
-                                                    segments: [
-                                                        Spanned {
-                                                            item: "sys",
-                                                            span: Span {
-                                                                start: 149,
-                                                                end: 152,
-                                                            },
-                                                        },
-                                                    ],
-                                                    span: Span {
-                                                        start: 149,
-                                                        end: 152,
-                                                    },
-                                                },
-                                            ),
                                             Literal(
                                                 LiteralExpr {
                                                     value: String(
                                                         "./config",
                                                     ),
                                                     span: Span {
-                                                        start: 154,
-                                                        end: 164,
+                                                        start: 149,
+                                                        end: 159,
                                                     },
                                                 },
                                             ),
                                         ],
                                         span: Span {
-                                            start: 134,
-                                            end: 165,
+                                            start: 133,
+                                            end: 160,
                                         },
                                     },
                                 ),
                                 span: Span {
-                                    start: 124,
-                                    end: 165,
+                                    start: 123,
+                                    end: 160,
                                 },
                             },
                         ),
@@ -321,65 +286,48 @@ Module {
                             ExprStmt {
                                 expr: Match(
                                     MatchExpr {
-                                        expr: Call(
-                                            CallExpr {
-                                                callee: Path(
+                                        expr: MethodCall(
+                                            MethodCallExpr {
+                                                receiver: Path(
                                                     Path {
                                                         segments: [
                                                             Spanned {
-                                                                item: "fs",
+                                                                item: "rfs",
                                                                 span: Span {
-                                                                    start: 175,
-                                                                    end: 177,
-                                                                },
-                                                            },
-                                                            Spanned {
-                                                                item: "read_to_string",
-                                                                span: Span {
-                                                                    start: 178,
-                                                                    end: 192,
+                                                                    start: 170,
+                                                                    end: 173,
                                                                 },
                                                             },
                                                         ],
                                                         span: Span {
-                                                            start: 175,
-                                                            end: 192,
+                                                            start: 170,
+                                                            end: 173,
                                                         },
                                                     },
                                                 ),
+                                                method: Spanned {
+                                                    item: "read_to_string",
+                                                    span: Span {
+                                                        start: 174,
+                                                        end: 188,
+                                                    },
+                                                },
                                                 args: [
-                                                    Path(
-                                                        Path {
-                                                            segments: [
-                                                                Spanned {
-                                                                    item: "rfs",
-                                                                    span: Span {
-                                                                        start: 193,
-                                                                        end: 196,
-                                                                    },
-                                                                },
-                                                            ],
-                                                            span: Span {
-                                                                start: 193,
-                                                                end: 196,
-                                                            },
-                                                        },
-                                                    ),
                                                     Literal(
                                                         LiteralExpr {
                                                             value: String(
                                                                 "app.txt",
                                                             ),
                                                             span: Span {
-                                                                start: 198,
-                                                                end: 207,
+                                                                start: 189,
+                                                                end: 198,
                                                             },
                                                         },
                                                     ),
                                                 ],
                                                 span: Span {
-                                                    start: 175,
-                                                    end: 208,
+                                                    start: 170,
+                                                    end: 199,
                                                 },
                                             },
                                         ),
@@ -391,105 +339,88 @@ Module {
                                                             Spanned {
                                                                 item: "Ok",
                                                                 span: Span {
-                                                                    start: 215,
-                                                                    end: 217,
+                                                                    start: 206,
+                                                                    end: 208,
                                                                 },
                                                             },
                                                         ],
                                                         span: Span {
-                                                            start: 215,
-                                                            end: 217,
+                                                            start: 206,
+                                                            end: 208,
                                                         },
                                                     },
                                                     binding: Some(
                                                         Spanned {
                                                             item: "s",
                                                             span: Span {
-                                                                start: 218,
-                                                                end: 219,
+                                                                start: 209,
+                                                                end: 210,
                                                             },
                                                         },
                                                     ),
                                                     span: Span {
-                                                        start: 215,
-                                                        end: 220,
+                                                        start: 206,
+                                                        end: 211,
                                                     },
                                                 },
                                                 body: Block {
                                                     stmts: [
                                                         Expr(
                                                             ExprStmt {
-                                                                expr: Call(
-                                                                    CallExpr {
-                                                                        callee: Path(
+                                                                expr: MethodCall(
+                                                                    MethodCallExpr {
+                                                                        receiver: Path(
                                                                             Path {
                                                                                 segments: [
                                                                                     Spanned {
-                                                                                        item: "console",
+                                                                                        item: "c",
                                                                                         span: Span {
-                                                                                            start: 226,
-                                                                                            end: 233,
-                                                                                        },
-                                                                                    },
-                                                                                    Spanned {
-                                                                                        item: "println",
-                                                                                        span: Span {
-                                                                                            start: 234,
-                                                                                            end: 241,
+                                                                                            start: 217,
+                                                                                            end: 218,
                                                                                         },
                                                                                     },
                                                                                 ],
                                                                                 span: Span {
-                                                                                    start: 226,
-                                                                                    end: 241,
+                                                                                    start: 217,
+                                                                                    end: 218,
                                                                                 },
                                                                             },
                                                                         ),
+                                                                        method: Spanned {
+                                                                            item: "println",
+                                                                            span: Span {
+                                                                                start: 219,
+                                                                                end: 226,
+                                                                            },
+                                                                        },
                                                                         args: [
-                                                                            Path(
-                                                                                Path {
-                                                                                    segments: [
-                                                                                        Spanned {
-                                                                                            item: "c",
-                                                                                            span: Span {
-                                                                                                start: 242,
-                                                                                                end: 243,
-                                                                                            },
-                                                                                        },
-                                                                                    ],
-                                                                                    span: Span {
-                                                                                        start: 242,
-                                                                                        end: 243,
-                                                                                    },
-                                                                                },
-                                                                            ),
                                                                             Path(
                                                                                 Path {
                                                                                     segments: [
                                                                                         Spanned {
                                                                                             item: "s",
                                                                                             span: Span {
-                                                                                                start: 245,
-                                                                                                end: 246,
+                                                                                                start: 227,
+                                                                                                end: 228,
                                                                                             },
                                                                                         },
                                                                                     ],
                                                                                     span: Span {
-                                                                                        start: 245,
-                                                                                        end: 246,
+                                                                                        start: 227,
+                                                                                        end: 228,
                                                                                     },
                                                                                 },
                                                                             ),
                                                                         ],
                                                                         span: Span {
-                                                                            start: 226,
-                                                                            end: 247,
+                                                                            start: 217,
+                                                                            end: 229,
                                                                         },
                                                                     },
                                                                 ),
                                                                 span: Span {
-                                                                    start: 226,
-                                                                    end: 248,
+                                                                    start: 217,
+                                                                    end: 230,
                                                                 },
                                                             },
                                                         ),
@@ -502,27 +433,27 @@ Module {
                                                                                 0,
                                                                             ),
                                                                             span: Span {
-                                                                                start: 256,
-                                                                                end: 257,
+                                                                                start: 238,
+                                                                                end: 239,
                                                                             },
                                                                         },
                                                                     ),
                                                                 ),
                                                                 span: Span {
-                                                                    start: 249,
-                                                                    end: 259,
+                                                                    start: 231,
+                                                                    end: 241,
                                                                 },
                                                             },
                                                         ),
                                                     ],
                                                     span: Span {
-                                                        start: 224,
-                                                        end: 259,
+                                                        start: 215,
+                                                        end: 241,
                                                     },
                                                 },
                                                 span: Span {
-                                                    start: 169,
-                                                    end: 259,
+                                                    start: 164,
+                                                    end: 241,
                                                 },
                                             },
                                             MatchArm {
@@ -532,99 +463,82 @@ Module {
                                                             Spanned {
                                                                 item: "Err",
                                                                 span: Span {
-                                                                    start: 264,
-                                                                    end: 267,
+                                                                    start: 246,
+                                                                    end: 249,
                                                                 },
                                                             },
                                                         ],
                                                         span: Span {
-                                                            start: 264,
-                                                            end: 267,
+                                                            start: 246,
+                                                            end: 249,
                                                         },
                                                     },
                                                     binding: Some(
                                                         Spanned {
                                                             item: "e",
                                                             span: Span {
-                                                                start: 268,
-                                                                end: 269,
+                                                                start: 250,
+                                                                end: 251,
                                                             },
                                                         },
                                                     ),
                                                     span: Span {
-                                                        start: 264,
-                                                        end: 270,
+                                                        start: 246,
+                                                        end: 252,
                                                     },
                                                 },
                                                 body: Block {
                                                     stmts: [
                                                         Expr(
                                                             ExprStmt {
-                                                                expr: Call(
-                                                                    CallExpr {
-                                                                        callee: Path(
+                                                                expr: MethodCall(
+                                                                    MethodCallExpr {
+                                                                        receiver: Path(
                                                                             Path {
                                                                                 segments: [
                                                                                     Spanned {
-                                                                                        item: "console",
+                                                                                        item: "c",
                                                                                         span: Span {
-                                                                                            start: 276,
-                                                                                            end: 283,
-                                                                                        },
-                                                                                    },
-                                                                                    Spanned {
-                                                                                        item: "println",
-                                                                                        span: Span {
-                                                                                            start: 284,
-                                                                                            end: 291,
+                                                                                            start: 258,
+                                                                                            end: 259,
                                                                                         },
                                                                                     },
                                                                                 ],
                                                                                 span: Span {
-                                                                                    start: 276,
-                                                                                    end: 291,
+                                                                                    start: 258,
+                                                                                    end: 259,
                                                                                 },
                                                                             },
                                                                         ),
+                                                                        method: Spanned {
+                                                                            item: "println",
+                                                                            span: Span {
+                                                                                start: 260,
+                                                                                end: 267,
+                                                                            },
+                                                                        },
                                                                         args: [
-                                                                            Path(
-                                                                                Path {
-                                                                                    segments: [
-                                                                                        Spanned {
-                                                                                            item: "c",
-                                                                                            span: Span {
-                                                                                                start: 292,
-                                                                                                end: 293,
-                                                                                            },
-                                                                                        },
-                                                                                    ],
-                                                                                    span: Span {
-                                                                                        start: 292,
-                                                                                        end: 293,
-                                                                                    },
-                                                                                },
-                                                                            ),
                                                                             Literal(
                                                                                 LiteralExpr {
                                                                                     value: String(
                                                                                         "read failed",
                                                                                     ),
                                                                                     span: Span {
-                                                                                        start: 295,
-                                                                                        end: 308,
+                                                                                        start: 268,
+                                                                                        end: 281,
                                                                                     },
                                                                                 },
                                                                             ),
                                                                         ],
                                                                         span: Span {
-                                                                            start: 276,
-                                                                            end: 309,
+                                                                            start: 258,
+                                                                            end: 282,
                                                                         },
                                                                     },
                                                                 ),
                                                                 span: Span {
-                                                                    start: 276,
-                                                                    end: 310,
+                                                                    start: 258,
+                                                                    end: 283,
                                                                 },
                                                             },
                                                         ),
@@ -637,59 +551,59 @@ Module {
                                                                                 1,
                                                                             ),
                                                                             span: Span {
-                                                                                start: 318,
-                                                                                end: 319,
+                                                                                start: 291,
+                                                                                end: 292,
                                                                             },
                                                                         },
                                                                     ),
                                                                 ),
                                                                 span: Span {
-                                                                    start: 311,
-                                                                    end: 321,
+                                                                    start: 284,
+                                                                    end: 294,
                                                                 },
                                                             },
                                                         ),
                                                     ],
                                                     span: Span {
-                                                        start: 274,
-                                                        end: 321,
+                                                        start: 256,
+                                                        end: 294,
                                                     },
                                                 },
                                                 span: Span {
-                                                    start: 169,
-                                                    end: 321,
+                                                    start: 164,
+                                                    end: 294,
                                                 },
                                             },
                                         ],
                                         span: Span {
-                                            start: 169,
-                                            end: 325,
+                                            start: 164,
+                                            end: 298,
                                         },
                                     },
                                 ),
                                 span: Span {
-                                    start: 169,
-                                    end: 325,
+                                    start: 164,
+                                    end: 298,
                                 },
                             },
                         ),
                     ],
                     span: Span {
-                        start: 90,
-                        end: 327,
+                        start: 91,
+                        end: 300,
                     },
                 },
                 is_pub: true,
                 doc: None,
                 span: Span {
-                    start: 62,
-                    end: 327,
+                    start: 63,
+                    end: 300,
                 },
             },
         ),
     ],
     span: Span {
         start: 0,
-        end: 327,
+        end: 300,
     },
 }

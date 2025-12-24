@@ -177,11 +177,20 @@ pub enum Expr {
     Literal(LiteralExpr),
     Path(Path),
     Call(CallExpr),
+    MethodCall(MethodCallExpr),
     StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
     Match(MatchExpr),
     Grouping(GroupingExpr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodCallExpr {
+    pub receiver: Box<Expr>,
+    pub method: Ident,
+    pub args: Vec<Expr>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,7 +239,7 @@ impl fmt::Display for Path {
         let mut first = true;
         for seg in &self.segments {
             if !first {
-                write!(f, ".")?;
+                write!(f, "::")?;
             }
             first = false;
             write!(f, "{}", seg.item)?;
@@ -321,6 +330,26 @@ impl Type {
         match self {
             Type::Path { span, .. } => *span,
             Type::Ptr { span, .. } => *span,
+        }
+    }
+}
+
+pub trait SpanExt {
+    fn span(&self) -> Span;
+}
+
+impl SpanExt for Expr {
+    fn span(&self) -> Span {
+        match self {
+            Expr::Literal(lit) => lit.span,
+            Expr::Path(path) => path.span,
+            Expr::Call(call) => call.span,
+            Expr::MethodCall(call) => call.span,
+            Expr::StructLiteral(lit) => lit.span,
+            Expr::Unary(unary) => unary.span,
+            Expr::Binary(binary) => binary.span,
+            Expr::Match(m) => m.span,
+            Expr::Grouping(g) => g.span,
         }
     }
 }

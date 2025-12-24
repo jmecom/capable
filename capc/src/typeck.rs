@@ -82,7 +82,7 @@ fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
 fn build_stdlib_index(stdlib: &[Module]) -> Result<StdlibIndex, TypeError> {
     let mut types = HashMap::new();
     for module in stdlib {
-        let module_name = module.name.to_string();
+        let module_name = module.name.to_string().replace("::", ".");
         for item in &module.items {
             let name = match item {
                 Item::Struct(decl) if decl.is_pub => decl.name.item.clone(),
@@ -108,7 +108,7 @@ fn collect_functions(
 ) -> Result<HashMap<String, FunctionSig>, TypeError> {
     let mut functions = HashMap::new();
     for module in modules {
-        let module_name = module.name.to_string();
+        let module_name = module.name.to_string().replace("::", ".");
         let local_use = UseMap::new(module);
         for item in &module.items {
             let (name, params, ret, span) = match item {
@@ -133,8 +133,24 @@ fn collect_functions(
                     .collect::<Result<_, _>>()?,
                 ret: lower_type(ret, &local_use, stdlib)?,
             };
+
+            // Check if this is a method (first parameter is named "self")
+            let is_method = params.first().map_or(false, |p| p.name.item == "self");
             let key = if module_name == entry_name {
                 name.item.clone()
+            } else if is_method {
+                // For methods, include the receiver type in the key
+                let receiver_ty = &params[0].ty;
+                let receiver_ty_name = match receiver_ty {
+                    Type::Path { path, .. } => path.to_string().replace("::", "."),
+                    _ => {
+                        return Err(TypeError::new(
+                            "self parameter must have a path type".to_string(),
+                            span,
+                        ))
+                    }
+                };
+                format!("{module_name}.{receiver_ty_name}.{}", name.item)
             } else {
                 format!("{module_name}.{}", name.item)
             };
@@ -770,6 +786,17 @@ fn check_expr(
                 call.callee.span(),
             )),
         },
+        Expr::MethodCall(call) => check_method_call(
+            call,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            enum_map,
+            stdlib,
+            ret_ty,
+            module_name,
+        ),
         Expr::StructLiteral(lit) => check_struct_literal(
             lit,
             functions,
@@ -1015,6 +1042,79 @@ fn check_match_expr_value(
         }
     }
     Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))
+}
+
+fn check_method_call(
+    call: &MethodCallExpr,
+    functions: &HashMap<String, FunctionSig>,
+    locals: &HashMap<String, Ty>,
+    use_map: &UseMap,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    stdlib: &StdlibIndex,
+    ret_ty: &Ty,
+    module_name: &str,
+) -> Result<Ty, TypeError> {
+    let receiver_ty = check_expr(
+        &call.receiver,
+        functions,
+        locals,
+        use_map,
+        struct_map,
+        enum_map,
+        stdlib,
+        ret_ty,
+        module_name,
+    )?;
+    let Ty::Path(receiver_ty_name, _) = receiver_ty else {
+        return Err(TypeError::new(
+            "cannot call method on non-path type".to_string(),
+            call.span,
+        ));
+    };
+
+    let key = format!("{}.{}", receiver_ty_name, call.method.item);
+    let sig = functions
+        .get(&key)
+        .ok_or_else(|| TypeError::new(format!("unknown function `{key}`"), call.span))?;
+
+    let mut args = vec![*call.receiver.clone()];
+    args.extend(call.args.clone());
+
+    if sig.params.len() != args.len() {
+        return Err(TypeError::new(
+            format!(
+                "argument count mismatch: expected {}, found {}",
+                sig.params.len(),
+                args.len()
+            ),
+            call.span,
+        ));
+    }
+
+    for (arg, expected) in args.iter().zip(&sig.params) {
+        let arg_ty = check_expr(
+            arg,
+            functions,
+            locals,
+            use_map,
+            struct_map,
+            enum_map,
+            stdlib,
+            ret_ty,
+            module_name,
+        )?;
+        if &arg_ty != expected {
+            return Err(TypeError::new(
+                format!(
+                    "argument type mismatch: expected {expected:?}, found {arg_ty:?}"
+                ),
+                arg.span(),
+            ));
+        }
+    }
+
+    Ok(sig.ret.clone())
 }
 
 fn check_match_arm_value(
@@ -1282,6 +1382,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::MethodCall(call) => call.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

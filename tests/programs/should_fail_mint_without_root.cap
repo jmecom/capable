@@ -1,0 +1,8 @@
+module should_fail_mint_without_root
+use sys::root
+
+pub fn main(rc: RootCap) -> i32 {
+  let s: i32 = 0
+  let c = rc.mint_console(s)
+  return 0
+}

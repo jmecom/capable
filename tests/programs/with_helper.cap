@@ -1,7 +1,7 @@
 module with_helper
 use helper
-use sys.system
-use sys.console
+use sys::system
+use sys::console
 
 pub fn main(sys: System) -> i32 {
   let c = system.console(sys)

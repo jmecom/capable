@@ -58,6 +58,8 @@ pub enum TokenKind {
     Arrow,
     #[token("=>")]
     FatArrow,
+    #[token("::")]
+    ColonColon,
     #[token("==")]
     EqEq,
     #[token("!=")]

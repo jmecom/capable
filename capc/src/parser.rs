@@ -62,10 +62,10 @@ impl Parser {
             let safety = match self.bump_kind()? {
                 TokenKind::Safe => PackageSafety::Safe,
                 TokenKind::Unsafe => PackageSafety::Unsafe,
-                _other => {
+                other => {
                     return Err(self.error_at(
                         pkg_span,
-                        format!("expected `safe` or `unsafe`, found {{other:?}}"),
+                        format!("expected `safe` or `unsafe`, found {other:?}"),
                     ));
                 }
             };
@@ -141,8 +141,8 @@ impl Parser {
                 }
                 Ok(Item::Enum(self.parse_enum(is_pub, doc)?))
             }
-            Some(_other) => Err(self.error_current(format!(
-                "expected item, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected item, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -443,6 +443,30 @@ impl Parser {
         let mut lhs = self.parse_prefix()?;
 
         loop {
+            if self.peek_kind() == Some(TokenKind::Dot) {
+                self.bump();
+                let method = self.expect_ident()?;
+                let start = lhs.span().start;
+                self.expect(TokenKind::LParen)?;
+                let mut args = Vec::new();
+                if self.peek_kind() != Some(TokenKind::RParen) {
+                    loop {
+                        args.push(self.parse_expr()?);
+                        if self.maybe_consume(TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                let end = self.expect(TokenKind::RParen)?.span.end;
+                lhs = Expr::MethodCall(MethodCallExpr {
+                    receiver: Box::new(lhs),
+                    method,
+                    args,
+                    span: Span::new(start, end),
+                });
+                continue;
+            }
+
             let op = match self.peek_kind() {
                 Some(TokenKind::OrOr) => BinaryOp::Or,
                 Some(TokenKind::AndAnd) => BinaryOp::And,
@@ -586,8 +610,8 @@ impl Parser {
                     Ok(Expr::Path(path))
                 }
             }
-            Some(_other) => Err(self.error_current(format!(
-                "unexpected token in expression: {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "unexpected token in expression: {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -672,7 +696,7 @@ impl Parser {
         let first = self.expect_ident()?;
         let start = first.span.start;
         let mut segments = vec![first];
-        while self.peek_kind() == Some(TokenKind::Dot) {
+        while self.peek_kind() == Some(TokenKind::ColonColon) {
             self.bump();
             segments.push(self.expect_ident()?);
         }
@@ -768,8 +792,8 @@ impl Parser {
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         match self.peek_kind() {
             Some(k) if k == kind => Ok(self.bump().unwrap()),
-            Some(_other) => Err(self.error_current(format!(
-                "expected {{kind:?}}, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected {kind:?}, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -778,8 +802,8 @@ impl Parser {
     fn expect_ident(&mut self) -> Result<Ident, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Ident) => Ok(to_ident(&self.bump().unwrap())),
-            Some(_other) => Err(self.error_current(format!(
-                "expected identifier, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected identifier, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -885,6 +909,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::MethodCall(call) => call.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

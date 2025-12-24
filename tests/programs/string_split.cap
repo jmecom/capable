@@ -1,10 +1,10 @@
 package safe
 module string_split
-use sys.system
-use sys.console
-use sys.string
-use sys.vec
-use sys.buffer
+use sys::system
+use sys::console
+use sys::string
+use sys::vec
+use sys::buffer
 
 pub fn main(sys: System) -> i32 {
   let c = system.console(sys)

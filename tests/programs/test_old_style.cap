@@ -1,0 +1,5 @@
+module test_old_style
+
+pub fn main() -> i32 {
+  return 0
+}

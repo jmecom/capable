@@ -1,0 +1,6 @@
+package safe
+module simple
+
+pub fn foo() -> i32 {
+  return 0
+}

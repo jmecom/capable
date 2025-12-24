@@ -1,0 +1,4 @@
+package safe
+module test_struct_only
+
+pub struct MyStruct

@@ -1,9 +1,9 @@
 package safe
 module vec_helpers
-use sys.system
-use sys.console
-use sys.buffer
-use sys.vec
+use sys::system
+use sys::console
+use sys::buffer
+use sys::vec
 
 pub fn main(sys: System) -> i32 {
   let c = system.console(sys)

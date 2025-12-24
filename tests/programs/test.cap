@@ -1,0 +1,6 @@
+module test
+use sys::root
+
+pub fn main() -> i32 {
+  return 0
+}

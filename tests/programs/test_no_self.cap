@@ -1,0 +1,8 @@
+package safe
+module test_no_self
+
+pub struct MyStruct
+
+pub fn my_method(c: MyStruct) -> i32 {
+  return 42
+}

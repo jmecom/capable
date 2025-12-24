@@ -1,8 +1,8 @@
 module should_fail_forge_console
-use sys.console
+use sys::console
 
 pub fn main(sys: System) -> i32 {
-  let c = console.Console { }
+  let c = console::Console { }
   console.println(c, "nope")
   return 0
 }

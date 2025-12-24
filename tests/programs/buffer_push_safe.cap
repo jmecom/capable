@@ -1,33 +1,33 @@
 package safe
 module buffer_push_safe
-use sys.system
-use sys.console
-use sys.buffer
+use sys::root
+use sys::console
+use sys::buffer
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let alloc = buffer.alloc_default()
   match buffer.buffer_new(alloc, 1) {
     Ok(b) => {
-      match buffer.buffer_push(b, 7u8) {
+      match b.push(7u8) {
         Ok(u) => { u }
         Err(e) => {
-          console.println(c, "push err")
+          c.println("push err")
           buffer.buffer_free(alloc, b)
           return 1
         }
       }
-      let len = buffer.buffer_len(b)
+      let len = b.len()
       if (len == 2) {
-        console.println(c, "push ok")
+        c.println("push ok")
       } else {
-        console.println(c, "push bad")
+        c.println("push bad")
       }
       buffer.buffer_free(alloc, b)
       return 0
     }
     Err(e) => {
-      console.println(c, "buffer err")
+      c.println("buffer err")
       return 1
     }
   }
