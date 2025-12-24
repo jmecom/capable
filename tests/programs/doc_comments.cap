@@ -1,0 +1,21 @@
+module test.docs
+
+/// This is a doc comment for a struct.
+/// It has multiple lines.
+pub struct Foo {
+    field: i32,
+}
+
+/// This is a block doc comment for an enum.
+pub enum MyEnum {
+    A,
+    B,
+}
+
+/// This is a function.
+pub fn my_func(a: i32) -> i32 {
+    return a
+}
+
+/// An extern function.
+pub extern fn my_extern_func() -> unit

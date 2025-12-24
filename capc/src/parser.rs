@@ -15,6 +15,36 @@ struct Parser {
 }
 
 impl Parser {
+    fn peek_kind_raw(&self) -> Option<TokenKind> {
+        self.tokens.get(self.index).map(|t| t.kind.clone())
+    }
+
+    fn peek_span_raw(&self) -> Span {
+        self.tokens
+            .get(self.index)
+            .map(|t| t.span)
+            .unwrap_or(self.eof_span)
+    }
+
+    fn take_doc_comments(&mut self) -> Option<String> {
+        let mut docs = Vec::new();
+        loop {
+            match self.peek_kind_raw() {
+                Some(TokenKind::DocLine) => {
+                    let token = self.bump().unwrap();
+                    let text = token.text.trim_start_matches("///");
+                    docs.push(text.trim_start().to_string());
+                }
+                _ => break,
+            }
+        }
+        if docs.is_empty() {
+            None
+        } else {
+            Some(docs.join("\n").trim().to_string())
+        }
+    }
+
     fn new(tokens: Vec<Token>, source_len: usize) -> Self {
         let eof_span = Span::new(source_len, source_len);
         Self {
@@ -26,16 +56,16 @@ impl Parser {
 
     fn parse_module(&mut self) -> Result<Module, ParseError> {
         let mut package = PackageSafety::Safe;
-        let start_span = self.peek_span();
+        let start_span = self.peek_span_raw();
         if self.peek_kind() == Some(TokenKind::Package) {
             let pkg_span = self.bump().unwrap().span;
             let safety = match self.bump_kind()? {
                 TokenKind::Safe => PackageSafety::Safe,
                 TokenKind::Unsafe => PackageSafety::Unsafe,
-                other => {
+                _other => {
                     return Err(self.error_at(
                         pkg_span,
-                        format!("expected `safe` or `unsafe`, found {other:?}"),
+                        format!("expected `safe` or `unsafe`, found {{other:?}}"),
                     ));
                 }
             };
@@ -51,8 +81,12 @@ impl Parser {
         }
 
         let mut items = Vec::new();
-        while self.peek_kind().is_some() {
-            items.push(self.parse_item()?);
+        while self.peek_kind_raw().is_some() {
+            let doc = self.take_doc_comments();
+            if self.peek_kind_raw().is_none() {
+                break;
+            }
+            items.push(self.parse_item(doc)?);
         }
 
         let end_span = if let Some(token) = self.tokens.last() {
@@ -78,7 +112,7 @@ impl Parser {
         Ok(UseDecl { path, span })
     }
 
-    fn parse_item(&mut self) -> Result<Item, ParseError> {
+    fn parse_item(&mut self, doc: Option<String>) -> Result<Item, ParseError> {
         let is_pub = self.maybe_consume(TokenKind::Pub).is_some();
         let is_opaque = self.maybe_consume(TokenKind::Opaque).is_some();
         if self.peek_kind() == Some(TokenKind::Extern) {
@@ -87,7 +121,7 @@ impl Parser {
                     "opaque applies only to struct declarations".to_string(),
                 ));
             }
-            return Ok(Item::ExternFunction(self.parse_extern_function(is_pub)?));
+            return Ok(Item::ExternFunction(self.parse_extern_function(is_pub, doc)?));
         }
         match self.peek_kind() {
             Some(TokenKind::Fn) => {
@@ -96,25 +130,25 @@ impl Parser {
                         "opaque applies only to struct declarations".to_string(),
                     ));
                 }
-                Ok(Item::Function(self.parse_function(is_pub)?))
+                Ok(Item::Function(self.parse_function(is_pub, doc)?))
             }
-            Some(TokenKind::Struct) => Ok(Item::Struct(self.parse_struct(is_pub, is_opaque)?)),
+            Some(TokenKind::Struct) => Ok(Item::Struct(self.parse_struct(is_pub, is_opaque, doc)?)),
             Some(TokenKind::Enum) => {
                 if is_opaque {
                     return Err(self.error_current(
                         "opaque applies only to struct declarations".to_string(),
                     ));
                 }
-                Ok(Item::Enum(self.parse_enum(is_pub)?))
+                Ok(Item::Enum(self.parse_enum(is_pub, doc)?))
             }
-            Some(other) => Err(self.error_current(format!(
-                "expected item, found {other:?}"
+            Some(_other) => Err(self.error_current(format!(
+                "expected item, found {{other:?}}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
     }
 
-    fn parse_extern_function(&mut self, is_pub: bool) -> Result<ExternFunction, ParseError> {
+    fn parse_extern_function(&mut self, is_pub: bool, doc: Option<String>) -> Result<ExternFunction, ParseError> {
         let start = self.expect(TokenKind::Extern)?.span.start;
         self.expect(TokenKind::Fn)?;
         let name = self.expect_ident()?;
@@ -146,11 +180,12 @@ impl Parser {
             params,
             ret,
             is_pub,
+            doc,
             span: Span::new(start, end),
         })
     }
 
-    fn parse_function(&mut self, is_pub: bool) -> Result<Function, ParseError> {
+    fn parse_function(&mut self, is_pub: bool, doc: Option<String>) -> Result<Function, ParseError> {
         let start = self.expect(TokenKind::Fn)?.span.start;
         let name = self.expect_ident()?;
         self.expect(TokenKind::LParen)?;
@@ -180,11 +215,12 @@ impl Parser {
             ret,
             body,
             is_pub,
+            doc,
             span,
         })
     }
 
-    fn parse_struct(&mut self, is_pub: bool, is_opaque: bool) -> Result<StructDecl, ParseError> {
+    fn parse_struct(&mut self, is_pub: bool, is_opaque: bool, doc: Option<String>) -> Result<StructDecl, ParseError> {
         let start = self.expect(TokenKind::Struct)?.span.start;
         let name = self.expect_ident()?;
         let mut fields = Vec::new();
@@ -200,6 +236,9 @@ impl Parser {
                         ty,
                     });
                     if self.maybe_consume(TokenKind::Comma).is_none() {
+                        break;
+                    }
+                    if self.peek_kind() == Some(TokenKind::RBrace) {
                         break;
                     }
                 }
@@ -220,11 +259,12 @@ impl Parser {
             fields,
             is_pub,
             is_opaque,
+            doc,
             span: Span::new(start, end),
         })
     }
 
-    fn parse_enum(&mut self, is_pub: bool) -> Result<EnumDecl, ParseError> {
+    fn parse_enum(&mut self, is_pub: bool, doc: Option<String>) -> Result<EnumDecl, ParseError> {
         let start = self.expect(TokenKind::Enum)?.span.start;
         let name = self.expect_ident()?;
         self.expect(TokenKind::LBrace)?;
@@ -252,6 +292,9 @@ impl Parser {
                 if self.maybe_consume(TokenKind::Comma).is_none() {
                     break;
                 }
+                if self.peek_kind() == Some(TokenKind::RBrace) {
+                    break;
+                }
             }
         }
         let end = self.expect(TokenKind::RBrace)?.span.end;
@@ -259,6 +302,7 @@ impl Parser {
             name,
             variants,
             is_pub,
+            doc,
             span: Span::new(start, end),
         })
     }
@@ -495,8 +539,8 @@ impl Parser {
             }
             Some(TokenKind::Str) => {
                 let token = self.bump().unwrap();
-                let value = unescape_string(&token.text).map_err(|message| {
-                    self.error_at(token.span, format!("invalid string literal: {message}"))
+                let value = unescape_string(&token.text).map_err(|_message| {
+                    self.error_at(token.span, format!("invalid string literal: {{message}}"))
                 })?;
                 Ok(Expr::Literal(LiteralExpr {
                     value: Literal::String(value),
@@ -542,8 +586,8 @@ impl Parser {
                     Ok(Expr::Path(path))
                 }
             }
-            Some(other) => Err(self.error_current(format!(
-                "unexpected token in expression: {other:?}"
+            Some(_other) => Err(self.error_current(format!(
+                "unexpected token in expression: {{other:?}}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -724,8 +768,8 @@ impl Parser {
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         match self.peek_kind() {
             Some(k) if k == kind => Ok(self.bump().unwrap()),
-            Some(other) => Err(self.error_current(format!(
-                "expected {kind:?}, found {other:?}"
+            Some(_other) => Err(self.error_current(format!(
+                "expected {{kind:?}}, found {{other:?}}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -734,8 +778,8 @@ impl Parser {
     fn expect_ident(&mut self) -> Result<Ident, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Ident) => Ok(to_ident(&self.bump().unwrap())),
-            Some(other) => Err(self.error_current(format!(
-                "expected identifier, found {other:?}"
+            Some(_other) => Err(self.error_current(format!(
+                "expected identifier, found {{other:?}}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -814,8 +858,8 @@ fn unescape_string(text: &str) -> Result<String, String> {
                 't' => '\t',
                 '\\' => '\\',
                 '"' => '"',
-                other => {
-                    return Err(format!("unsupported escape \\{other}"));
+                _other => {
+                    return Err(format!("unsupported escape \\{{other}}"));
                 }
             };
             out.push(escaped);

@@ -1,6 +1,5 @@
 ---
 source: capc/tests/parser.rs
-assertion_line: 23
 expression: module
 ---
 Module {
@@ -681,6 +680,7 @@ Module {
                     },
                 },
                 is_pub: true,
+                doc: None,
                 span: Span {
                     start: 62,
                     end: 327,

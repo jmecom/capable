@@ -13,6 +13,8 @@ pub struct Token {
 #[logos(skip r"[ \t\r\n]+")]
 #[logos(skip r"//[^\n]*")]
 pub enum TokenKind {
+    #[regex(r"///[^\n]*", priority = 3)]
+    DocLine,
     #[token("module")]
     Module,
     #[token("package")]

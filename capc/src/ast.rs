@@ -62,6 +62,7 @@ pub struct Function {
     pub ret: Type,
     pub body: Block,
     pub is_pub: bool,
+    pub doc: Option<String>,
     pub span: Span,
 }
 
@@ -71,6 +72,7 @@ pub struct ExternFunction {
     pub params: Vec<Param>,
     pub ret: Type,
     pub is_pub: bool,
+    pub doc: Option<String>,
     pub span: Span,
 }
 
@@ -86,6 +88,7 @@ pub struct StructDecl {
     pub fields: Vec<Field>,
     pub is_pub: bool,
     pub is_opaque: bool,
+    pub doc: Option<String>,
     pub span: Span,
 }
 
@@ -94,6 +97,7 @@ pub struct EnumDecl {
     pub name: Ident,
     pub variants: Vec<EnumVariant>,
     pub is_pub: bool,
+    pub doc: Option<String>,
     pub span: Span,
 }
 

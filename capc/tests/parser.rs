@@ -29,3 +29,11 @@ fn snapshot_struct_literal() {
     let module = parse_module(&source).expect("parse module");
     insta::assert_debug_snapshot!(module);
 }
+
+#[test]
+fn snapshot_doc_comments() {
+    let source = load_program("doc_comments.cap");
+    let module = parse_module(&source).expect("parse module");
+    insta::assert_debug_snapshot!(module);
+}
+
