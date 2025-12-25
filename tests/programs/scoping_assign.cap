@@ -1,0 +1,17 @@
+module scoping_assign
+use sys.system
+use sys.console
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  let x = 1
+
+  if (true) {
+    let y = x
+    x = 2
+  }
+
+  console.println(c, "x was mutated in inner scope")
+  console.println(c, "scoping assign test ok")
+  return 0
+}

@@ -39,6 +39,79 @@ struct EnumInfo {
     variants: Vec<String>,
 }
 
+/// Stack-based scope manager for proper lexical scoping.
+/// Allows block-scoped `let` declarations while enabling assignments
+/// to mutate variables in outer scopes.
+struct Scopes {
+    /// Stack of scopes, where each scope is a map from name to type.
+    /// The last element is the innermost (current) scope.
+    stack: Vec<HashMap<String, Ty>>,
+}
+
+impl Scopes {
+    fn new() -> Self {
+        Scopes {
+            stack: vec![HashMap::new()],
+        }
+    }
+
+    /// Push a new scope (entering a block)
+    fn push_scope(&mut self) {
+        self.stack.push(HashMap::new());
+    }
+
+    /// Pop the current scope (exiting a block)
+    fn pop_scope(&mut self) {
+        if self.stack.len() > 1 {
+            self.stack.pop();
+        }
+    }
+
+    /// Insert a new local variable in the current scope
+    fn insert_local(&mut self, name: String, ty: Ty) {
+        if let Some(scope) = self.stack.last_mut() {
+            scope.insert(name, ty);
+        }
+    }
+
+    /// Look up a variable, searching from innermost to outermost scope
+    fn lookup(&self, name: &str) -> Option<&Ty> {
+        for scope in self.stack.iter().rev() {
+            if let Some(ty) = scope.get(name) {
+                return Some(ty);
+            }
+        }
+        None
+    }
+
+    /// Assign to an existing variable, searching from innermost to outermost scope.
+    /// Returns true if the variable was found and updated, false otherwise.
+    fn assign(&mut self, name: &str, ty: Ty) -> bool {
+        for scope in self.stack.iter_mut().rev() {
+            if scope.contains_key(name) {
+                scope.insert(name.to_string(), ty);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Convert to a flat HashMap for compatibility with existing code.
+    /// This flattens all scopes, with inner scopes shadowing outer ones.
+    fn to_flat_map(&self) -> HashMap<String, Ty> {
+        let mut result = HashMap::new();
+        for scope in &self.stack {
+            result.extend(scope.clone());
+        }
+        result
+    }
+
+    /// Create from a flat HashMap (for function parameters initialization)
+    fn from_flat_map(map: HashMap<String, Ty>) -> Self {
+        Scopes { stack: vec![map] }
+    }
+}
+
 struct UseMap {
     aliases: HashMap<String, Vec<String>>,
 }
@@ -427,11 +500,12 @@ fn check_function(
     stdlib: &StdlibIndex,
     module_name: &str,
 ) -> Result<(), TypeError> {
-    let mut locals = HashMap::new();
+    let mut params_map = HashMap::new();
     for param in &func.params {
         let ty = lower_type(&param.ty, use_map, stdlib)?;
-        locals.insert(param.name.item.clone(), ty);
+        params_map.insert(param.name.item.clone(), ty);
     }
+    let mut scopes = Scopes::from_flat_map(params_map);
 
     let ret_ty = lower_type(&func.ret, use_map, stdlib)?;
     let mut has_return = false;
@@ -441,7 +515,7 @@ fn check_function(
             stmt,
             &ret_ty,
             functions,
-            &mut locals,
+            &mut scopes,
             use_map,
             struct_map,
             enum_map,
@@ -465,7 +539,7 @@ fn check_stmt(
     stmt: &Stmt,
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
-    locals: &mut HashMap<String, Ty>,
+    scopes: &mut Scopes,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -475,10 +549,11 @@ fn check_stmt(
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
+            let locals_flat = scopes.to_flat_map();
             let expr_ty = check_expr(
                 &let_stmt.expr,
                 functions,
-                locals,
+                &locals_flat,
                 use_map,
                 struct_map,
                 enum_map,
@@ -498,19 +573,21 @@ fn check_stmt(
             } else {
                 expr_ty
             };
-            locals.insert(let_stmt.name.item.clone(), final_ty);
+            scopes.insert_local(let_stmt.name.item.clone(), final_ty);
         }
         Stmt::Assign(assign) => {
-            let Some(existing) = locals.get(&assign.name.item) else {
+            let Some(existing) = scopes.lookup(&assign.name.item) else {
                 return Err(TypeError::new(
                     format!("unknown identifier `{}`", assign.name.item),
                     assign.name.span,
                 ));
             };
+            let existing = existing.clone();
+            let locals_flat = scopes.to_flat_map();
             let expr_ty = check_expr(
                 &assign.expr,
                 functions,
-                locals,
+                &locals_flat,
                 use_map,
                 struct_map,
                 enum_map,
@@ -518,7 +595,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
             )?;
-            if &expr_ty != existing {
+            if expr_ty != existing {
                 return Err(TypeError::new(
                     format!(
                         "assignment type mismatch: expected {existing:?}, found {expr_ty:?}"
@@ -526,13 +603,15 @@ fn check_stmt(
                     assign.span,
                 ));
             }
+            scopes.assign(&assign.name.item, expr_ty);
         }
         Stmt::Return(ret_stmt) => {
+            let locals_flat = scopes.to_flat_map();
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
                 check_expr(
                     expr,
                     functions,
-                    locals,
+                    &locals_flat,
                     use_map,
                     struct_map,
                     enum_map,
@@ -552,10 +631,11 @@ fn check_stmt(
             *has_return = true;
         }
         Stmt::If(if_stmt) => {
+            let locals_flat = scopes.to_flat_map();
             let cond_ty = check_expr(
                 &if_stmt.cond,
                 functions,
-                locals,
+                &locals_flat,
                 use_map,
                 struct_map,
                 enum_map,
@@ -573,7 +653,7 @@ fn check_stmt(
                 &if_stmt.then_block,
                 ret_ty,
                 functions,
-                locals,
+                scopes,
                 use_map,
                 struct_map,
                 enum_map,
@@ -586,7 +666,7 @@ fn check_stmt(
                     block,
                     ret_ty,
                     functions,
-                    locals,
+                    scopes,
                     use_map,
                     struct_map,
                     enum_map,
@@ -597,10 +677,11 @@ fn check_stmt(
             }
         }
         Stmt::While(while_stmt) => {
+            let locals_flat = scopes.to_flat_map();
             let cond_ty = check_expr(
                 &while_stmt.cond,
                 functions,
-                locals,
+                &locals_flat,
                 use_map,
                 struct_map,
                 enum_map,
@@ -618,7 +699,7 @@ fn check_stmt(
                 &while_stmt.body,
                 ret_ty,
                 functions,
-                locals,
+                scopes,
                 use_map,
                 struct_map,
                 enum_map,
@@ -628,12 +709,13 @@ fn check_stmt(
             )?;
         }
         Stmt::Expr(expr_stmt) => {
+            let locals_flat = scopes.to_flat_map();
             if let Expr::Match(match_expr) = &expr_stmt.expr {
                 let mut any_return = false;
                 let _ = check_match_stmt(
                     match_expr,
                     functions,
-                    locals,
+                    &locals_flat,
                     use_map,
                     struct_map,
                     enum_map,
@@ -649,7 +731,7 @@ fn check_stmt(
                 check_expr(
                     &expr_stmt.expr,
                     functions,
-                    locals,
+                    &locals_flat,
                     use_map,
                     struct_map,
                     enum_map,
@@ -668,7 +750,7 @@ fn check_block(
     block: &Block,
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
-    locals: &mut HashMap<String, Ty>,
+    scopes: &mut Scopes,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -676,12 +758,13 @@ fn check_block(
     module_name: &str,
     has_return: &mut bool,
 ) -> Result<(), TypeError> {
+    scopes.push_scope();
     for stmt in &block.stmts {
         check_stmt(
             stmt,
             ret_ty,
             functions,
-            locals,
+            scopes,
             use_map,
             struct_map,
             enum_map,
@@ -690,6 +773,7 @@ fn check_block(
             has_return,
         )?;
     }
+    scopes.pop_scope();
     Ok(())
 }
 
@@ -940,15 +1024,16 @@ fn check_match_stmt(
         module_name,
     )?;
     let mut saw_return = false;
+    let mut parent_scopes = Scopes::from_flat_map(locals.clone());
     for arm in &match_expr.arms {
-        let mut arm_locals = locals.clone();
-        bind_pattern(&arm.pattern, &match_ty, &mut arm_locals, use_map, enum_map)?;
+        parent_scopes.push_scope();
+        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map)?;
         let mut arm_return = false;
         check_block(
             &arm.body,
             ret_ty,
             functions,
-            &mut arm_locals,
+            &mut parent_scopes,
             use_map,
             struct_map,
             enum_map,
@@ -956,6 +1041,7 @@ fn check_match_stmt(
             module_name,
             &mut arm_return,
         )?;
+        parent_scopes.pop_scope();
         if arm_return {
             saw_return = true;
         }
@@ -989,13 +1075,14 @@ fn check_match_expr_value(
         module_name,
     )?;
     let mut result_ty: Option<Ty> = None;
+    let mut parent_scopes = Scopes::from_flat_map(locals.clone());
     for arm in &match_expr.arms {
-        let mut arm_locals = locals.clone();
-        bind_pattern(&arm.pattern, &match_ty, &mut arm_locals, use_map, enum_map)?;
+        parent_scopes.push_scope();
+        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map)?;
         let arm_ty = check_match_arm_value(
             &arm.body,
             functions,
-            &mut arm_locals,
+            &mut parent_scopes,
             use_map,
             struct_map,
             enum_map,
@@ -1003,6 +1090,7 @@ fn check_match_expr_value(
             ret_ty,
             module_name,
         )?;
+        parent_scopes.pop_scope();
         if let Some(prev) = &result_ty {
             if prev != &arm_ty {
                 return Err(TypeError::new(
@@ -1020,7 +1108,7 @@ fn check_match_expr_value(
 fn check_match_arm_value(
     block: &Block,
     functions: &HashMap<String, FunctionSig>,
-    locals: &mut HashMap<String, Ty>,
+    scopes: &mut Scopes,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1040,7 +1128,7 @@ fn check_match_arm_value(
             stmt,
             ret_ty,
             functions,
-            locals,
+            scopes,
             use_map,
             struct_map,
             enum_map,
@@ -1055,11 +1143,12 @@ fn check_match_arm_value(
             ));
         }
     }
+    let locals_flat = scopes.to_flat_map();
     match last {
         Stmt::Expr(expr_stmt) => check_expr(
             &expr_stmt.expr,
             functions,
-            locals,
+            &locals_flat,
             use_map,
             struct_map,
             enum_map,
@@ -1147,7 +1236,7 @@ fn check_struct_literal(
 fn bind_pattern(
     pattern: &Pattern,
     match_ty: &Ty,
-    locals: &mut HashMap<String, Ty>,
+    scopes: &mut Scopes,
     use_map: &UseMap,
     enum_map: &HashMap<String, EnumInfo>,
 ) -> Result<(), TypeError> {
@@ -1171,7 +1260,7 @@ fn bind_pattern(
                     } else {
                         return Ok(());
                     };
-                    locals.insert(binding.item.clone(), ty);
+                    scopes.insert_local(binding.item.clone(), ty);
                     return Ok(());
                 }
             }
@@ -1181,7 +1270,7 @@ fn bind_pattern(
             ))
         }
         Pattern::Binding(ident) => {
-            locals.insert(ident.item.clone(), match_ty.clone());
+            scopes.insert_local(ident.item.clone(), match_ty.clone());
             Ok(())
         }
         Pattern::Path(path) => {

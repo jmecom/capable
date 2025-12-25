@@ -374,3 +374,31 @@ fn run_early_return_while() {
     assert!(!stdout.contains("SHOULD NOT PRINT"), "stdout was: {stdout:?}");
 }
 
+#[test]
+fn run_scoping_let_block() {
+    let out_dir = make_out_dir("scoping_let_block");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/scoping_let_block.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("scoping let block test ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_scoping_assign() {
+    let out_dir = make_out_dir("scoping_assign");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/scoping_assign.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("scoping assign test ok"), "stdout was: {stdout:?}");
+}
+
