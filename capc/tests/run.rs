@@ -273,3 +273,31 @@ fn run_string_split() {
     assert_eq!(code, 0);
     assert!(stdout.contains("split ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_unit_return() {
+    let out_dir = make_out_dir("unit_return");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/unit_return.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("unit return ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_unit_match_arm() {
+    let out_dir = make_out_dir("unit_match_arm");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/unit_match_arm.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("unit match arm ok"), "stdout was: {stdout:?}");
+}

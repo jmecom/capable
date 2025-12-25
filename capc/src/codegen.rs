@@ -120,6 +120,7 @@ struct ResultShape {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ResultKind {
+    Unit,
     Single,
     Pair,
 }
@@ -224,7 +225,8 @@ pub fn build_object(
                     )?;
                 }
 
-                if info.sig.ret == TyKind::Unit {
+                // Only add implicit unit return if function body doesn't end with return
+                if info.sig.ret == TyKind::Unit && !block_ends_with_return(&func.body) {
                     builder.ins().return_(&[]);
                 }
 
@@ -1729,7 +1731,8 @@ fn emit_expr(
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
-                    ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+                    // ok_ty is Unit, so return ValueRepr::Unit (zero-sized)
+                    ValueRepr::Unit
                 };
                 let err_val = if let Some((slot, ty)) = err_slot {
                     let addr = builder
@@ -1738,7 +1741,8 @@ fn emit_expr(
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
-                    ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+                    // err_ty is Unit, so return ValueRepr::Unit (zero-sized)
+                    ValueRepr::Unit
                 };
                 match &info.sig.ret {
                     TyKind::Result(_, _) => Ok(ValueRepr::Result {
@@ -1926,7 +1930,9 @@ fn emit_match_stmt(
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
-        ValueRepr::Unit => return Err(CodegenError::Unsupported("match on unit".to_string())),
+        // Unit has only one value, so we use a dummy for pattern matching.
+        // Only wildcard/binding patterns should match unit.
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I8, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -2025,7 +2031,9 @@ fn emit_match_expr(
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
-        ValueRepr::Unit => return Err(CodegenError::Unsupported("match on unit".to_string())),
+        // Unit has only one value, so we use a dummy for pattern matching.
+        // Only wildcard/binding patterns should match unit.
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I8, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -2099,11 +2107,7 @@ fn emit_match_expr(
         let values = match &arm_value {
             ValueRepr::Single(val) => vec![*val],
             ValueRepr::Pair(a, b) => vec![*a, *b],
-            ValueRepr::Unit => {
-                return Err(CodegenError::Unsupported(
-                    "match arm returns unit".to_string(),
-                ))
-            }
+            ValueRepr::Unit => vec![],
             ValueRepr::Result { .. } => {
                 return Err(CodegenError::Unsupported("match result value".to_string()))
             }
@@ -2123,6 +2127,7 @@ fn emit_match_expr(
             }
             result_shape = Some(ResultShape {
                 kind: match &arm_value {
+                    ValueRepr::Unit => ResultKind::Unit,
                     ValueRepr::Single(_) => ResultKind::Single,
                     ValueRepr::Pair(_, _) => ResultKind::Pair,
                     _ => ResultKind::Single,
@@ -2160,6 +2165,7 @@ fn emit_match_expr(
         loaded.push(builder.ins().stack_load(*ty, *slot, 0));
     }
     let result = match shape.kind {
+        ResultKind::Unit => ValueRepr::Unit,
         ResultKind::Single => ValueRepr::Single(loaded[0]),
         ResultKind::Pair => ValueRepr::Pair(loaded[0], loaded[1]),
     };
@@ -2448,8 +2454,10 @@ fn value_from_params(
                 err: Box::new(err_val),
             }
         }
-        TyKind::ResultOut(_, _) => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
-        TyKind::ResultString => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
+        // ResultOut and ResultString are ABI-level return types, not input types.
+        // They should never appear as function parameters.
+        TyKind::ResultOut(_, _) => ValueRepr::Unit,
+        TyKind::ResultString => ValueRepr::Unit,
     }
 }
 
