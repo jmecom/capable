@@ -156,24 +156,32 @@ Module {
                                 ty: None,
                                 expr: Call(
                                     CallExpr {
-                                        callee: Path(
-                                            Path {
-                                                segments: [
-                                                    Spanned {
-                                                        item: "system",
+                                        callee: FieldAccess(
+                                            FieldAccessExpr {
+                                                object: Path(
+                                                    Path {
+                                                        segments: [
+                                                            Spanned {
+                                                                item: "system",
+                                                                span: Span {
+                                                                    start: 89,
+                                                                    end: 95,
+                                                                },
+                                                            },
+                                                        ],
                                                         span: Span {
                                                             start: 89,
                                                             end: 95,
                                                         },
                                                     },
-                                                    Spanned {
-                                                        item: "console",
-                                                        span: Span {
-                                                            start: 96,
-                                                            end: 103,
-                                                        },
+                                                ),
+                                                field: Spanned {
+                                                    item: "console",
+                                                    span: Span {
+                                                        start: 96,
+                                                        end: 103,
                                                     },
-                                                ],
+                                                },
                                                 span: Span {
                                                     start: 89,
                                                     end: 103,
@@ -215,24 +223,32 @@ Module {
                             ExprStmt {
                                 expr: Call(
                                     CallExpr {
-                                        callee: Path(
-                                            Path {
-                                                segments: [
-                                                    Spanned {
-                                                        item: "console",
+                                        callee: FieldAccess(
+                                            FieldAccessExpr {
+                                                object: Path(
+                                                    Path {
+                                                        segments: [
+                                                            Spanned {
+                                                                item: "console",
+                                                                span: Span {
+                                                                    start: 111,
+                                                                    end: 118,
+                                                                },
+                                                            },
+                                                        ],
                                                         span: Span {
                                                             start: 111,
                                                             end: 118,
                                                         },
                                                     },
-                                                    Spanned {
-                                                        item: "println",
-                                                        span: Span {
-                                                            start: 119,
-                                                            end: 126,
-                                                        },
+                                                ),
+                                                field: Spanned {
+                                                    item: "println",
+                                                    span: Span {
+                                                        start: 119,
+                                                        end: 126,
                                                     },
-                                                ],
+                                                },
                                                 span: Span {
                                                     start: 111,
                                                     end: 126,

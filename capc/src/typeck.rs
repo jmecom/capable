@@ -808,6 +808,22 @@ fn check_block(
     Ok(())
 }
 
+// Helper function to convert a FieldAccess chain (or Path) to a Path.
+// This is used for function calls where foo.bar.baz() should be treated as a module-qualified call.
+fn expr_to_path(expr: &Expr) -> Option<Path> {
+    match expr {
+        Expr::Path(path) => Some(path.clone()),
+        Expr::FieldAccess(field_access) => {
+            // Recursively convert the object to a path, then append the field
+            let mut base_path = expr_to_path(&field_access.object)?;
+            base_path.segments.push(field_access.field.clone());
+            base_path.span = Span::new(base_path.span.start, field_access.field.span.end);
+            Some(base_path)
+        }
+        _ => None,
+    }
+}
+
 fn check_expr(
     expr: &Expr,
     functions: &HashMap<String, FunctionSig>,
@@ -842,49 +858,51 @@ fn check_expr(
                 path.span,
             ))
         }
-        Expr::Call(call) => match &*call.callee {
-            Expr::Path(path) => {
-                let resolved = resolve_path(path, use_map);
-                let key = resolved.join(".");
-                let sig = functions.get(&key).ok_or_else(|| {
-                    TypeError::new(format!("unknown function `{key}`"), path.span)
-                })?;
-                if sig.params.len() != call.args.len() {
+        Expr::Call(call) => {
+            // Convert the callee (Path or FieldAccess chain) to a Path for function lookup
+            let path = expr_to_path(&call.callee).ok_or_else(|| {
+                TypeError::new(
+                    "call target must be a function path".to_string(),
+                    call.callee.span(),
+                )
+            })?;
+
+            let resolved = resolve_path(&path, use_map);
+            let key = resolved.join(".");
+            let sig = functions.get(&key).ok_or_else(|| {
+                TypeError::new(format!("unknown function `{key}`"), path.span)
+            })?;
+            if sig.params.len() != call.args.len() {
+                return Err(TypeError::new(
+                    format!(
+                        "argument count mismatch: expected {}, found {}",
+                        sig.params.len(),
+                        call.args.len()
+                    ),
+                    call.span,
+                ));
+            }
+            for (arg, expected) in call.args.iter().zip(&sig.params) {
+                let arg_ty = check_expr(
+                    arg,
+                    functions,
+                    locals,
+                    use_map,
+                    struct_map,
+                    enum_map,
+                    stdlib,
+                    ret_ty,
+                    module_name,
+                )?;
+                if &arg_ty != expected {
                     return Err(TypeError::new(
-                        format!(
-                            "argument count mismatch: expected {}, found {}",
-                            sig.params.len(),
-                            call.args.len()
-                        ),
-                        call.span,
+                        format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
+                        arg.span(),
                     ));
                 }
-                for (arg, expected) in call.args.iter().zip(&sig.params) {
-                    let arg_ty = check_expr(
-                        arg,
-                        functions,
-                        locals,
-                        use_map,
-                        struct_map,
-                        enum_map,
-                        stdlib,
-                        ret_ty,
-                        module_name,
-                    )?;
-                    if &arg_ty != expected {
-                        return Err(TypeError::new(
-                            format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
-                            arg.span(),
-                        ));
-                    }
-                }
-                Ok(sig.ret.clone())
             }
-            _ => Err(TypeError::new(
-                "call target must be a function path".to_string(),
-                call.callee.span(),
-            )),
-        },
+            Ok(sig.ret.clone())
+        }
         Expr::StructLiteral(lit) => check_struct_literal(
             lit,
             functions,
@@ -1028,6 +1046,57 @@ fn check_expr(
             ret_ty,
             module_name,
         ),
+        Expr::FieldAccess(field_access) => {
+            // First, try to convert the FieldAccess chain to a Path and resolve as an enum variant
+            // This handles cases like fs.FsErr.InvalidPath
+            if let Some(path) = expr_to_path(&Expr::FieldAccess(field_access.clone())) {
+                if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map) {
+                    return Ok(ty);
+                }
+            }
+
+            // If not an enum variant, treat as actual field access on a struct
+            let object_ty = check_expr(
+                &field_access.object,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
+
+            // The object must be a struct type (represented as Ty::Path)
+            let struct_name = match &object_ty {
+                Ty::Path(name, _) => name,
+                _ => {
+                    return Err(TypeError::new(
+                        format!("field access on non-struct type: {object_ty:?}"),
+                        field_access.object.span(),
+                    ));
+                }
+            };
+
+            // Look up the struct and find the field
+            let struct_info = struct_map.get(struct_name).ok_or_else(|| {
+                TypeError::new(
+                    format!("unknown struct type: {struct_name}"),
+                    field_access.span,
+                )
+            })?;
+
+            let field_name = &field_access.field.item;
+            let field_ty = struct_info.fields.get(field_name).ok_or_else(|| {
+                TypeError::new(
+                    format!("struct `{struct_name}` has no field `{field_name}`"),
+                    field_access.field.span,
+                )
+            })?;
+
+            Ok(field_ty.clone())
+        }
     }
 }
 
@@ -1391,6 +1460,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::FieldAccess(field) => field.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

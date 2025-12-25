@@ -1571,6 +1571,22 @@ fn emit_stmt(
     Ok(Flow::Continues)
 }
 
+// Helper function to convert a FieldAccess chain (or Path) to a Path.
+// This is used for function calls where foo.bar.baz() should be treated as a module-qualified call.
+fn expr_to_path(expr: &Expr) -> Option<crate::ast::Path> {
+    match expr {
+        Expr::Path(path) => Some(path.clone()),
+        Expr::FieldAccess(field_access) => {
+            // Recursively convert the object to a path, then append the field
+            let mut base_path = expr_to_path(&field_access.object)?;
+            base_path.segments.push(field_access.field.clone());
+            base_path.span = crate::ast::Span::new(base_path.span.start, field_access.field.span.end);
+            Some(base_path)
+        }
+        _ => None,
+    }
+}
+
 fn emit_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
@@ -1611,10 +1627,10 @@ fn emit_expr(
             Err(CodegenError::UnknownVariable(path.to_string()))
         }
         Expr::Call(call) => {
-            let callee_path = match &*call.callee {
-                Expr::Path(path) => resolve_call_path(path, module_name, use_map),
-                _ => return Err(CodegenError::Unsupported("call target".to_string())),
-            };
+            // Convert the callee (Path or FieldAccess chain) to a Path for function lookup
+            let path = expr_to_path(&call.callee)
+                .ok_or_else(|| CodegenError::Unsupported("call target".to_string()))?;
+            let callee_path = resolve_call_path(&path, module_name, use_map);
             let info = fn_map
                 .get(&callee_path)
                 .ok_or_else(|| CodegenError::UnknownFunction(callee_path.clone()))?
@@ -1926,7 +1942,21 @@ fn emit_expr(
             module,
             data_counter,
         ),
-        Expr::StructLiteral(_) => Err(CodegenError::Unsupported("expression".to_string())),
+        Expr::FieldAccess(field_access) => {
+            // Try to convert the FieldAccess chain to a Path and resolve as an enum variant
+            // This handles cases like fs.FsErr.InvalidPath
+            if let Some(path) = expr_to_path(&Expr::FieldAccess(field_access.clone())) {
+                if let Some(index) = resolve_enum_variant(&path, use_map, enum_index) {
+                    return Ok(ValueRepr::Single(
+                        builder.ins().iconst(ir::types::I32, i64::from(index)),
+                    ));
+                }
+            }
+
+            // If not an enum variant, we don't support actual struct field access yet
+            Err(CodegenError::Unsupported("field access on struct values".to_string()))
+        }
+        Expr::StructLiteral(_) => Err(CodegenError::Unsupported("struct literal expression".to_string())),
     }
 }
 

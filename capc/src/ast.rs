@@ -190,6 +190,7 @@ pub enum Expr {
     Literal(LiteralExpr),
     Path(Path),
     Call(CallExpr),
+    FieldAccess(FieldAccessExpr),
     StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
@@ -256,6 +257,13 @@ impl fmt::Display for Path {
 pub struct CallExpr {
     pub callee: Box<Expr>,
     pub args: Vec<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldAccessExpr {
+    pub object: Box<Expr>,
+    pub field: Ident,
     pub span: Span,
 }
 
