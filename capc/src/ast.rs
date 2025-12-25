@@ -172,6 +172,19 @@ pub struct AssignStmt {
     pub span: Span,
 }
 
+impl Stmt {
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Let(s) => s.span,
+            Stmt::Assign(s) => s.span,
+            Stmt::Return(s) => s.span,
+            Stmt::If(s) => s.span,
+            Stmt::While(s) => s.span,
+            Stmt::Expr(s) => s.span,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Literal(LiteralExpr),
