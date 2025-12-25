@@ -202,7 +202,7 @@ pub fn build_object(
                 let params = builder.block_params(block).to_vec();
                 let mut param_index = 0;
                 for param in &func.params {
-                    let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index);
+                    let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index)?;
                     let value =
                         value_from_params(&mut builder, &ty_kind, &params, &mut param_index);
                     let local = store_local(&mut builder, value);
@@ -1226,8 +1226,8 @@ fn register_user_functions(
                         .params
                         .iter()
                         .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
-                        .collect(),
-                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index),
+                        .collect::<Result<Vec<TyKind>, CodegenError>>()?,
+                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
                 };
                 let key = format!("{module_name}.{}", func.name.item);
                 let symbol = if module_name == entry.name.to_string() && func.name.item == "main" {
@@ -1251,8 +1251,8 @@ fn register_user_functions(
                         .params
                         .iter()
                         .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
-                        .collect(),
-                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index),
+                        .collect::<Result<Vec<TyKind>, CodegenError>>()?,
+                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
                 };
                 let key = format!("{module_name}.{}", func.name.item);
                 map.insert(
@@ -2556,37 +2556,37 @@ fn lower_ty(
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     enum_index: &EnumIndex,
-) -> TyKind {
+) -> Result<TyKind, CodegenError> {
     let resolved = match ty {
         AstType::Ptr { .. } => {
-            return TyKind::Ptr;
+            return Ok(TyKind::Ptr);
         }
         AstType::Path { path, .. } => resolve_type_name(path, use_map, stdlib),
     };
     if resolved == "i32" {
-        return TyKind::I32;
+        return Ok(TyKind::I32);
     }
     if resolved == "u32" {
-        return TyKind::U32;
+        return Ok(TyKind::U32);
     }
     if resolved == "u8" {
-        return TyKind::U8;
+        return Ok(TyKind::U8);
     }
     if resolved == "bool" {
-        return TyKind::Bool;
+        return Ok(TyKind::Bool);
     }
     if resolved == "unit" {
-        return TyKind::Unit;
+        return Ok(TyKind::Unit);
     }
     if resolved == "string" {
-        return TyKind::String;
+        return Ok(TyKind::String);
     }
     if resolved == "Result" {
         if let AstType::Path { args, .. } = ty {
             if args.len() == 2 {
-                let ok = lower_ty(&args[0], use_map, stdlib, enum_index);
-                let err = lower_ty(&args[1], use_map, stdlib, enum_index);
-                return TyKind::Result(Box::new(ok), Box::new(err));
+                let ok = lower_ty(&args[0], use_map, stdlib, enum_index)?;
+                let err = lower_ty(&args[1], use_map, stdlib, enum_index)?;
+                return Ok(TyKind::Result(Box::new(ok), Box::new(err)));
             }
         }
     }
@@ -2601,12 +2601,14 @@ fn lower_ty(
         || resolved == "sys.vec.VecI32"
         || resolved == "sys.vec.VecString"
     {
-        return TyKind::Handle;
+        return Ok(TyKind::Handle);
     }
     if enum_index.variants.contains_key(&resolved) {
-        return TyKind::I32;
+        return Ok(TyKind::I32);
     }
-    TyKind::Unit
+    return Err(CodegenError::Unsupported(format!(
+        "unknown type `{resolved}`"
+    )));
 }
 
 fn resolve_type_name(path: &AstPath, use_map: &UseMap, stdlib: &StdlibIndex) -> String {
