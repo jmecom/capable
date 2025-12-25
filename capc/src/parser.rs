@@ -62,10 +62,10 @@ impl Parser {
             let safety = match self.bump_kind()? {
                 TokenKind::Safe => PackageSafety::Safe,
                 TokenKind::Unsafe => PackageSafety::Unsafe,
-                _other => {
+                other => {
                     return Err(self.error_at(
                         pkg_span,
-                        format!("expected `safe` or `unsafe`, found {{other:?}}"),
+                        format!("expected `safe` or `unsafe`, found {other:?}"),
                     ));
                 }
             };
@@ -583,8 +583,8 @@ impl Parser {
             }
             Some(TokenKind::Str) => {
                 let token = self.bump().unwrap();
-                let value = unescape_string(&token.text).map_err(|_message| {
-                    self.error_at(token.span, format!("invalid string literal: {{message}}"))
+                let value = unescape_string(&token.text).map_err(|message| {
+                    self.error_at(token.span, format!("invalid string literal: {message}"))
                 })?;
                 Ok(Expr::Literal(LiteralExpr {
                     value: Literal::String(value),
@@ -945,8 +945,8 @@ fn unescape_string(text: &str) -> Result<String, String> {
                 't' => '\t',
                 '\\' => '\\',
                 '"' => '"',
-                _other => {
-                    return Err(format!("unsupported escape \\{{other}}"));
+                other => {
+                    return Err(format!("unsupported escape \\{other}"));
                 }
             };
             out.push(escaped);
