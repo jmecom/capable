@@ -1571,22 +1571,6 @@ fn emit_stmt(
     Ok(Flow::Continues)
 }
 
-// Helper function to convert a FieldAccess chain (or Path) to a Path.
-// This is used for function calls where foo.bar.baz() should be treated as a module-qualified call.
-fn expr_to_path(expr: &Expr) -> Option<crate::ast::Path> {
-    match expr {
-        Expr::Path(path) => Some(path.clone()),
-        Expr::FieldAccess(field_access) => {
-            // Recursively convert the object to a path, then append the field
-            let mut base_path = expr_to_path(&field_access.object)?;
-            base_path.segments.push(field_access.field.clone());
-            base_path.span = crate::ast::Span::new(base_path.span.start, field_access.field.span.end);
-            Some(base_path)
-        }
-        _ => None,
-    }
-}
-
 fn emit_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
@@ -1628,7 +1612,7 @@ fn emit_expr(
         }
         Expr::Call(call) => {
             // Convert the callee (Path or FieldAccess chain) to a Path for function lookup
-            let path = expr_to_path(&call.callee)
+            let path = call.callee.to_path()
                 .ok_or_else(|| CodegenError::Unsupported("call target".to_string()))?;
             let callee_path = resolve_call_path(&path, module_name, use_map);
             let info = fn_map
@@ -1943,13 +1927,33 @@ fn emit_expr(
             data_counter,
         ),
         Expr::FieldAccess(field_access) => {
-            // Try to convert the FieldAccess chain to a Path and resolve as an enum variant
-            // This handles cases like fs.FsErr.InvalidPath
-            if let Some(path) = expr_to_path(&Expr::FieldAccess(field_access.clone())) {
-                if let Some(index) = resolve_enum_variant(&path, use_map, enum_index) {
-                    return Ok(ValueRepr::Single(
-                        builder.ins().iconst(ir::types::I32, i64::from(index)),
-                    ));
+            // First, check if the base is a local variable by finding the leftmost segment
+            // If so, this is field access on a value, not a module/enum path
+            fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => {
+                        Some(&path.segments[0].item)
+                    }
+                    Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
+                    _ => None,
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                locals.contains_key(base_name)
+            } else {
+                true  // Not a simple path chain, conservatively assume it's field access
+            };
+
+            if !base_is_local {
+                // Try to convert the FieldAccess chain to a Path and resolve as an enum variant
+                // This handles cases like fs.FsErr.InvalidPath where fs is a module, not a local
+                if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
+                    if let Some(index) = resolve_enum_variant(&path, use_map, enum_index) {
+                        return Ok(ValueRepr::Single(
+                            builder.ins().iconst(ir::types::I32, i64::from(index)),
+                        ));
+                    }
                 }
             }
 

@@ -808,22 +808,6 @@ fn check_block(
     Ok(())
 }
 
-// Helper function to convert a FieldAccess chain (or Path) to a Path.
-// This is used for function calls where foo.bar.baz() should be treated as a module-qualified call.
-fn expr_to_path(expr: &Expr) -> Option<Path> {
-    match expr {
-        Expr::Path(path) => Some(path.clone()),
-        Expr::FieldAccess(field_access) => {
-            // Recursively convert the object to a path, then append the field
-            let mut base_path = expr_to_path(&field_access.object)?;
-            base_path.segments.push(field_access.field.clone());
-            base_path.span = Span::new(base_path.span.start, field_access.field.span.end);
-            Some(base_path)
-        }
-        _ => None,
-    }
-}
-
 fn check_expr(
     expr: &Expr,
     functions: &HashMap<String, FunctionSig>,
@@ -860,7 +844,7 @@ fn check_expr(
         }
         Expr::Call(call) => {
             // Convert the callee (Path or FieldAccess chain) to a Path for function lookup
-            let path = expr_to_path(&call.callee).ok_or_else(|| {
+            let path = call.callee.to_path().ok_or_else(|| {
                 TypeError::new(
                     "call target must be a function path".to_string(),
                     call.callee.span(),
@@ -1047,55 +1031,40 @@ fn check_expr(
             module_name,
         ),
         Expr::FieldAccess(field_access) => {
-            // First, try to convert the FieldAccess chain to a Path and resolve as an enum variant
-            // This handles cases like fs.FsErr.InvalidPath
-            if let Some(path) = expr_to_path(&Expr::FieldAccess(field_access.clone())) {
-                if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map) {
-                    return Ok(ty);
+            // First, check if the base is a local variable by finding the leftmost segment
+            // If so, this is field access on a value, not a module/enum path
+            fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => {
+                        Some(&path.segments[0].item)
+                    }
+                    Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
+                    _ => None,
                 }
             }
 
-            // If not an enum variant, treat as actual field access on a struct
-            let object_ty = check_expr(
-                &field_access.object,
-                functions,
-                locals,
-                use_map,
-                struct_map,
-                enum_map,
-                stdlib,
-                ret_ty,
-                module_name,
-            )?;
-
-            // The object must be a struct type (represented as Ty::Path)
-            let struct_name = match &object_ty {
-                Ty::Path(name, _) => name,
-                _ => {
-                    return Err(TypeError::new(
-                        format!("field access on non-struct type: {object_ty:?}"),
-                        field_access.object.span(),
-                    ));
-                }
+            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                locals.contains_key(base_name)
+            } else {
+                true  // Not a simple path chain, conservatively assume it's field access
             };
 
-            // Look up the struct and find the field
-            let struct_info = struct_map.get(struct_name).ok_or_else(|| {
-                TypeError::new(
-                    format!("unknown struct type: {struct_name}"),
-                    field_access.span,
-                )
-            })?;
+            if !base_is_local {
+                // Try to convert the FieldAccess chain to a Path and resolve as an enum variant
+                // This handles cases like fs.FsErr.InvalidPath where fs is a module, not a local
+                if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
+                    if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map) {
+                        return Ok(ty);
+                    }
+                }
+            }
 
-            let field_name = &field_access.field.item;
-            let field_ty = struct_info.fields.get(field_name).ok_or_else(|| {
-                TypeError::new(
-                    format!("struct `{struct_name}` has no field `{field_name}`"),
-                    field_access.field.span,
-                )
-            })?;
-
-            Ok(field_ty.clone())
+            // Real struct field access is not yet implemented in codegen
+            // Reject it here to avoid typechecking programs that will fail codegen
+            Err(TypeError::new(
+                "struct field access not yet implemented".to_string(),
+                field_access.span,
+            ))
         }
     }
 }

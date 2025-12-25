@@ -470,7 +470,8 @@ impl Parser {
                                 };
                                 path.segments.push(field);
                                 path.span = Span::new(path.span.start, path.segments.last().unwrap().span.end);
-                                return self.parse_struct_literal(path);
+                                lhs = self.parse_struct_literal(path)?;
+                                continue;
                             }
 
                             lhs = Expr::FieldAccess(FieldAccessExpr {

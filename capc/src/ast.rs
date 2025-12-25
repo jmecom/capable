@@ -345,3 +345,22 @@ impl Type {
         }
     }
 }
+
+impl Expr {
+    /// Converts an expression to a Path if possible.
+    /// This handles converting FieldAccess chains and single Paths.
+    /// Used for resolving module-qualified names and enum variants.
+    pub fn to_path(&self) -> Option<Path> {
+        match self {
+            Expr::Path(path) => Some(path.clone()),
+            Expr::FieldAccess(field_access) => {
+                // Recursively convert the object to a path, then append the field
+                let mut base_path = field_access.object.to_path()?;
+                base_path.segments.push(field_access.field.clone());
+                base_path.span = Span::new(base_path.span.start, field_access.field.span.end);
+                Some(base_path)
+            }
+            _ => None,
+        }
+    }
+}
