@@ -2,7 +2,7 @@
 
 Capable is a small systems language with "capabilities". It currently targets native code via Cranelift and links against a minimal runtime.
 
-This is an experimental and toy project.
+This is an experimental and toy project. Inspired by [Austral](https://austral-lang.org/).
 
 ```capable
 fn main(rc: RootCap) {
