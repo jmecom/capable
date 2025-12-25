@@ -1382,7 +1382,7 @@ fn emit_stmt(
         }
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
-                emit_match_stmt(
+                return emit_match_stmt(
                     builder,
                     match_expr,
                     locals,
@@ -1393,7 +1393,7 @@ fn emit_stmt(
                     enum_index,
                     module,
                     data_counter,
-                )?;
+                );
             } else {
                 let _ = emit_expr(
                     builder,
@@ -1941,7 +1941,7 @@ fn emit_match_stmt(
     enum_index: &EnumIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
-) -> Result<(), CodegenError> {
+) -> Result<Flow, CodegenError> {
     let value = emit_expr(
         builder,
         &match_expr.expr,
@@ -2050,14 +2050,18 @@ fn emit_match_stmt(
     }
 
     if all_terminated {
+        // All arms terminated - merge block has no predecessors (only branch targets).
+        // Switch to it and emit trap to satisfy Cranelift's verifier.
+        // The trap is unreachable since Flow::Terminated stops further emission.
         builder.switch_to_block(merge_block);
         builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
         builder.seal_block(merge_block);
+        Ok(Flow::Terminated)
     } else {
         builder.switch_to_block(merge_block);
         builder.seal_block(merge_block);
+        Ok(Flow::Continues)
     }
-    Ok(())
 }
 
 fn emit_match_expr(

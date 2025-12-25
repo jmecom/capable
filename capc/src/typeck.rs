@@ -491,6 +491,41 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
     None
 }
 
+/// Check if a statement is syntactically total (always returns).
+/// This is a purely syntactic check, not real control-flow analysis.
+fn stmt_is_total(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(ret_stmt) => ret_stmt.expr.is_some(),
+        Stmt::Expr(expr_stmt) => {
+            if let Expr::Match(match_expr) = &expr_stmt.expr {
+                // Match is total if all arms end with return
+                match_is_total(match_expr)
+            } else {
+                false
+            }
+        }
+        Stmt::If(if_stmt) => {
+            // If is total if it has else and both branches end with return
+            if let Some(else_block) = &if_stmt.else_block {
+                block_ends_with_return(&if_stmt.then_block) && block_ends_with_return(else_block)
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Check if a block ends with a syntactically total statement.
+fn block_ends_with_return(block: &Block) -> bool {
+    block.stmts.last().map_or(false, stmt_is_total)
+}
+
+/// Check if a match expression is syntactically total (all arms end with return).
+fn match_is_total(match_expr: &MatchExpr) -> bool {
+    !match_expr.arms.is_empty() && match_expr.arms.iter().all(|arm| block_ends_with_return(&arm.body))
+}
+
 fn check_function(
     func: &Function,
     functions: &HashMap<String, FunctionSig>,
@@ -508,7 +543,6 @@ fn check_function(
     let mut scopes = Scopes::from_flat_map(params_map);
 
     let ret_ty = lower_type(&func.ret, use_map, stdlib)?;
-    let mut has_return = false;
 
     for stmt in &func.body.stmts {
         check_stmt(
@@ -521,15 +555,24 @@ fn check_function(
             enum_map,
             stdlib,
             module_name,
-            &mut has_return,
         )?;
     }
 
-    if ret_ty != Ty::Builtin(BuiltinType::Unit) && !has_return {
-        return Err(TypeError::new(
-            "missing return statement".to_string(),
-            func.body.span,
-        ));
+    // For non-unit functions, require that the last statement is syntactically total
+    if ret_ty != Ty::Builtin(BuiltinType::Unit) {
+        if let Some(last_stmt) = func.body.stmts.last() {
+            if !stmt_is_total(last_stmt) {
+                return Err(TypeError::new(
+                    "expected return <expr>; as the final statement of this function".to_string(),
+                    last_stmt.span(),
+                ));
+            }
+        } else {
+            return Err(TypeError::new(
+                "expected return <expr>; as the final statement of this function".to_string(),
+                func.body.span,
+            ));
+        }
     }
 
     Ok(())
@@ -545,7 +588,6 @@ fn check_stmt(
     enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
-    has_return: &mut bool,
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
@@ -628,7 +670,6 @@ fn check_stmt(
                     ret_stmt.span,
                 ));
             }
-            *has_return = true;
         }
         Stmt::If(if_stmt) => {
             let locals_flat = scopes.to_flat_map();
@@ -659,7 +700,6 @@ fn check_stmt(
                 enum_map,
                 stdlib,
                 module_name,
-                has_return,
             )?;
             if let Some(block) = &if_stmt.else_block {
                 check_block(
@@ -672,7 +712,6 @@ fn check_stmt(
                     enum_map,
                     stdlib,
                     module_name,
-                    has_return,
                 )?;
             }
         }
@@ -705,13 +744,11 @@ fn check_stmt(
                 enum_map,
                 stdlib,
                 module_name,
-                has_return,
             )?;
         }
         Stmt::Expr(expr_stmt) => {
             let locals_flat = scopes.to_flat_map();
             if let Expr::Match(match_expr) = &expr_stmt.expr {
-                let mut any_return = false;
                 let _ = check_match_stmt(
                     match_expr,
                     functions,
@@ -722,11 +759,7 @@ fn check_stmt(
                     stdlib,
                     ret_ty,
                     module_name,
-                    Some(&mut any_return),
                 )?;
-                if any_return {
-                    *has_return = true;
-                }
             } else {
                 check_expr(
                     &expr_stmt.expr,
@@ -756,7 +789,6 @@ fn check_block(
     enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
-    has_return: &mut bool,
 ) -> Result<(), TypeError> {
     scopes.push_scope();
     for stmt in &block.stmts {
@@ -770,7 +802,6 @@ fn check_block(
             enum_map,
             stdlib,
             module_name,
-            has_return,
         )?;
     }
     scopes.pop_scope();
@@ -1010,7 +1041,6 @@ fn check_match_stmt(
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
-    any_return: Option<&mut bool>,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
@@ -1023,12 +1053,10 @@ fn check_match_stmt(
         ret_ty,
         module_name,
     )?;
-    let mut saw_return = false;
     let mut parent_scopes = Scopes::from_flat_map(locals.clone());
     for arm in &match_expr.arms {
         parent_scopes.push_scope();
         bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map)?;
-        let mut arm_return = false;
         check_block(
             &arm.body,
             ret_ty,
@@ -1039,15 +1067,8 @@ fn check_match_stmt(
             enum_map,
             stdlib,
             module_name,
-            &mut arm_return,
         )?;
         parent_scopes.pop_scope();
-        if arm_return {
-            saw_return = true;
-        }
-    }
-    if let Some(flag) = any_return {
-        *flag = saw_return;
     }
     Ok(Ty::Builtin(BuiltinType::Unit))
 }
@@ -1122,8 +1143,14 @@ fn check_match_arm_value(
             block.span,
         ));
     };
-    let mut saw_return = false;
     for stmt in prefix {
+        // Match expression arms cannot contain return statements
+        if matches!(stmt, Stmt::Return(_)) {
+            return Err(TypeError::new(
+                "match arm cannot return in expression context".to_string(),
+                block.span,
+            ));
+        }
         check_stmt(
             stmt,
             ret_ty,
@@ -1134,14 +1161,7 @@ fn check_match_arm_value(
             enum_map,
             stdlib,
             module_name,
-            &mut saw_return,
         )?;
-        if saw_return {
-            return Err(TypeError::new(
-                "match arm cannot return in expression context".to_string(),
-                block.span,
-            ));
-        }
     }
     let locals_flat = scopes.to_flat_map();
     match last {
