@@ -287,9 +287,9 @@ fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
             }
         }
         TyKind::ResultString => {
-            signature.params.push(AbiParam::new(ir::types::I64)); // out_ptr
-            signature.params.push(AbiParam::new(ir::types::I64)); // out_len
-            signature.params.push(AbiParam::new(ir::types::I64)); // out_err
+            signature.params.push(AbiParam::new(ptr_ty)); // out_ptr
+            signature.params.push(AbiParam::new(ptr_ty)); // out_len
+            signature.params.push(AbiParam::new(ptr_ty)); // out_err
         }
     }
 }
@@ -1392,6 +1392,9 @@ fn emit_stmt(
             }
         }
         Stmt::If(if_stmt) => {
+            // Snapshot locals so branch-scoped lets don't leak.
+            let saved_locals = locals.clone();
+
             let then_block = builder.create_block();
             let merge_block = builder.create_block();
             let else_block = if if_stmt.else_block.is_some() {
@@ -1399,6 +1402,7 @@ fn emit_stmt(
             } else {
                 merge_block
             };
+
             let cond_val = emit_expr(
                 builder,
                 &if_stmt.cond,
@@ -1416,12 +1420,14 @@ fn emit_stmt(
                 .ins()
                 .brif(cond_b1, then_block, &[], else_block, &[]);
 
+            // THEN branch with its own locals
             builder.switch_to_block(then_block);
+            let mut then_locals = saved_locals.clone();
             for stmt in &if_stmt.then_block.stmts {
                 emit_stmt(
                     builder,
                     stmt,
-                    locals,
+                    &mut then_locals,
                     fn_map,
                     use_map,
                     module_name,
@@ -1436,13 +1442,15 @@ fn emit_stmt(
             }
             builder.seal_block(then_block);
 
+            // ELSE branch with its own locals
             if let Some(else_block_ast) = &if_stmt.else_block {
                 builder.switch_to_block(else_block);
+                let mut else_locals = saved_locals.clone();
                 for stmt in &else_block_ast.stmts {
                     emit_stmt(
                         builder,
                         stmt,
-                        locals,
+                        &mut else_locals,
                         fn_map,
                         use_map,
                         module_name,
@@ -1458,16 +1466,24 @@ fn emit_stmt(
                 builder.seal_block(else_block);
             }
 
+            // After the if, restore the pre-if locals snapshot.
+            *locals = saved_locals;
+
             builder.switch_to_block(merge_block);
             builder.seal_block(merge_block);
         }
+
         Stmt::While(while_stmt) => {
+            // Snapshot locals so loop-body lets don't leak out of the loop.
+            let saved_locals = locals.clone();
+
             let header_block = builder.create_block();
             let body_block = builder.create_block();
             let exit_block = builder.create_block();
 
             builder.ins().jump(header_block, &[]);
             builder.switch_to_block(header_block);
+
             let cond_val = emit_expr(
                 builder,
                 &while_stmt.cond,
@@ -1486,11 +1502,15 @@ fn emit_stmt(
                 .brif(cond_b1, body_block, &[], exit_block, &[]);
 
             builder.switch_to_block(body_block);
+
+            // Loop body gets its own locals (starts from the pre-loop snapshot each iteration in terms of
+            // compilation scope; runtime mutations of existing vars still work because Assign targets Slot).
+            let mut body_locals = saved_locals.clone();
             for stmt in &while_stmt.body.stmts {
                 emit_stmt(
                     builder,
                     stmt,
-                    locals,
+                    &mut body_locals,
                     fn_map,
                     use_map,
                     module_name,
@@ -1500,14 +1520,19 @@ fn emit_stmt(
                     data_counter,
                 )?;
             }
+
             if !block_ends_with_return(&while_stmt.body) {
                 builder.ins().jump(header_block, &[]);
             }
+
             builder.seal_block(body_block);
             builder.seal_block(header_block);
 
             builder.switch_to_block(exit_block);
             builder.seal_block(exit_block);
+
+            // After the loop, restore the pre-loop locals snapshot.
+            *locals = saved_locals;
         }
     }
     Ok(())
@@ -1585,9 +1610,11 @@ fn emit_expr(
             let mut result_out = None;
             let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
             if abi_sig.ret == TyKind::ResultString {
+                let ptr_ty = module.isa().pointer_type();
+
                 let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
-                    8,
+                    ptr_ty.bytes() as u32,
                 ));
                 let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
@@ -1597,18 +1624,15 @@ fn emit_expr(
                     ir::StackSlotKind::ExplicitSlot,
                     4,
                 ));
-                let ptr_ptr = builder
-                    .ins()
-                    .stack_addr(module.isa().pointer_type(), slot_ptr, 0);
-                let len_ptr = builder
-                    .ins()
-                    .stack_addr(module.isa().pointer_type(), slot_len, 0);
-                let err_ptr = builder
-                    .ins()
-                    .stack_addr(module.isa().pointer_type(), slot_err, 0);
+
+                let ptr_ptr = builder.ins().stack_addr(ptr_ty, slot_ptr, 0);
+                let len_ptr = builder.ins().stack_addr(ptr_ty, slot_len, 0);
+                let err_ptr = builder.ins().stack_addr(ptr_ty, slot_err, 0);
+
                 args.push(ptr_ptr);
                 args.push(len_ptr);
                 args.push(err_ptr);
+
                 out_slots = Some((slot_ptr, slot_len, slot_err));
             }
             if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
