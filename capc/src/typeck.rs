@@ -901,23 +901,16 @@ fn check_expr(
             // In Step 4, we'll add proper method resolution based on receiver type
             // This handles the case where `module.function(args)` parses as a MethodCall
 
-            // Convert receiver.method to a path
-            let mut path_segments = Vec::new();
-            if let Expr::Path(path) = &*method_call.receiver {
-                path_segments.extend(path.segments.clone());
-            } else {
-                // If receiver is not a simple path (e.g., an expression), this is a real method call
-                // For now, reject it - we'll implement this in Step 4
-                return Err(TypeError::new(
-                    "method calls on expressions not yet supported".to_string(),
+            // Convert receiver.method to a path using to_path()
+            // This handles both simple paths and FieldAccess chains (e.g., sys.console.println)
+            let mut path = method_call.receiver.to_path().ok_or_else(|| {
+                TypeError::new(
+                    "method calls on non-path expressions not yet supported".to_string(),
                     method_call.receiver.span(),
-                ));
-            }
-            path_segments.push(method_call.method.clone());
-            let path = Path {
-                segments: path_segments,
-                span: method_call.span,
-            };
+                )
+            })?;
+            path.segments.push(method_call.method.clone());
+            path.span = Span::new(path.span.start, method_call.method.span.end);
 
             let resolved = resolve_path(&path, use_map);
             let key = resolved.join(".");

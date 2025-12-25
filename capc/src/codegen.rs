@@ -13,8 +13,8 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, CallExpr, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Stmt,
-    Type as AstType, UnaryOp,
+    BinaryOp, CallExpr, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Span,
+    Stmt, Type as AstType, UnaryOp,
 };
 
 #[derive(Debug, Error)]
@@ -1929,17 +1929,12 @@ fn emit_expr(
         Expr::MethodCall(method_call) => {
             // For now, convert MethodCall to Call and reuse existing logic
             // This handles module.function(args) which now parses as MethodCall
-            let mut path_segments = Vec::new();
-            if let Expr::Path(path) = &*method_call.receiver {
-                path_segments.extend(path.segments.clone());
-            } else {
-                return Err(CodegenError::Unsupported("method calls on non-path receivers".to_string()));
-            }
-            path_segments.push(method_call.method.clone());
-            let callee = Expr::Path(AstPath {
-                segments: path_segments,
-                span: method_call.span,
-            });
+            // Use to_path() to handle both simple paths and FieldAccess chains
+            let mut path = method_call.receiver.to_path()
+                .ok_or_else(|| CodegenError::Unsupported("method calls on non-path receivers".to_string()))?;
+            path.segments.push(method_call.method.clone());
+            path.span = Span::new(path.span.start, method_call.method.span.end);
+            let callee = Expr::Path(path);
 
             // Convert to Call and reuse existing logic
             let call = CallExpr {
