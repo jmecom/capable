@@ -1,6 +1,6 @@
 # Capable
 
-Capable is a small systems language with "capabilities". It currently targets native code via Cranelift and links against a minimal runtime.
+Capable is a small systems language built around capabilities: values that explicitly grant permission to perform privileged operations. It currently targets native code via Cranelift and links against a minimal runtime.
 
 This is an experimental and toy project. Inspired by [Austral](https://austral-lang.org/).
 
@@ -22,3 +22,7 @@ fn main(rc: RootCap) {
   }
 }
 ```
+
+Capabilities are explicit values that grant permission to perform privileged operations (filesystem, network, clock, etc.). This is a response to ambient authority: in many ecosystems, any code running in your process can reach the outside world by default via global APIs and the process’s privileges, which makes dependency behavior difficult to constrain or even reason about.
+
+Capable aims to reduce supply-chain risk by making authority non-ambient: if a dependency didn’t receive a capability value, it can’t do the thing. The compiler enforces this by requiring capabilities at call sites for privileged operations, and the runtime can enforce attenuation (for example, a filesystem capability scoped to a root directory that cannot be escaped). The result is a smaller blast radius and fewer “surprising” dependency updates, because new code can’t silently acquire new powers—you have to explicitly hand them over.
