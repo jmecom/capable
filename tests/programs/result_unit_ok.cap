@@ -1,0 +1,28 @@
+package safe
+module result_unit_ok
+use sys.system
+use sys.console
+use sys.buffer
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  let alloc = buffer.alloc_default()
+  match buffer.buffer_new(alloc, 1) {
+    Ok(b) => {
+      match buffer.buffer_push(b, 42u8) {
+        Ok(unit_val) => {
+          console.println(c, "result unit ok - got Ok(unit)")
+        }
+        Err(e) => {
+          console.println(c, "result unit err - unexpected")
+        }
+      }
+      buffer.buffer_free(alloc, b)
+      return 0
+    }
+    Err(e) => {
+      console.println(c, "buffer new failed")
+      return 1
+    }
+  }
+}

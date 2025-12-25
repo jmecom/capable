@@ -205,7 +205,7 @@ pub fn build_object(
                 for param in &func.params {
                     let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index)?;
                     let value =
-                        value_from_params(&mut builder, &ty_kind, &params, &mut param_index);
+                        value_from_params(&mut builder, &ty_kind, &params, &mut param_index)?;
                     let local = store_local(&mut builder, value);
                     locals.insert(param.name.item.clone(), local);
                 }
@@ -1927,11 +1927,35 @@ fn emit_match_stmt(
         module,
         data_counter,
     )?;
+
+    // Special handling for matching on Unit
+    let is_unit_match = matches!(value, ValueRepr::Unit);
+    if is_unit_match {
+        // When matching on unit, only wildcard (_), binding, or unit literal patterns are valid.
+        // The typechecker should enforce this, but we validate in codegen as a safety check.
+        for arm in &match_expr.arms {
+            match &arm.pattern {
+                Pattern::Wildcard(_) | Pattern::Binding(_) => {
+                    // These are always valid for unit
+                }
+                Pattern::Literal(Literal::Unit) => {
+                    // Unit literal pattern is valid for unit
+                }
+                _ => {
+                    return Err(CodegenError::Codegen(format!(
+                        "Invalid pattern for unit match: {:?}. Only _, binding, or () patterns are allowed.",
+                        arm.pattern
+                    )));
+                }
+            }
+        }
+    }
+
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         // Unit has only one value, so we use a dummy for pattern matching.
-        // Only wildcard/binding patterns should match unit.
+        // Pattern validation above ensures only wildcard/binding/unit-literal patterns are used.
         ValueRepr::Unit => (builder.ins().iconst(ir::types::I8, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
@@ -2028,11 +2052,35 @@ fn emit_match_expr(
         module,
         data_counter,
     )?;
+
+    // Special handling for matching on Unit
+    let is_unit_match = matches!(value, ValueRepr::Unit);
+    if is_unit_match {
+        // When matching on unit, only wildcard (_), binding, or unit literal patterns are valid.
+        // The typechecker should enforce this, but we validate in codegen as a safety check.
+        for arm in &match_expr.arms {
+            match &arm.pattern {
+                Pattern::Wildcard(_) | Pattern::Binding(_) => {
+                    // These are always valid for unit
+                }
+                Pattern::Literal(Literal::Unit) => {
+                    // Unit literal pattern is valid for unit
+                }
+                _ => {
+                    return Err(CodegenError::Codegen(format!(
+                        "Invalid pattern for unit match: {:?}. Only _, binding, or () patterns are allowed.",
+                        arm.pattern
+                    )));
+                }
+            }
+        }
+    }
+
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         // Unit has only one value, so we use a dummy for pattern matching.
-        // Only wildcard/binding patterns should match unit.
+        // Pattern validation above ensures only wildcard/binding/unit-literal patterns are used.
         ValueRepr::Unit => (builder.ins().iconst(ir::types::I8, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
@@ -2429,35 +2477,43 @@ fn value_from_params(
     ty: &TyKind,
     params: &[ir::Value],
     idx: &mut usize,
-) -> ValueRepr {
+) -> Result<ValueRepr, CodegenError> {
     match ty {
-        TyKind::Unit => ValueRepr::Unit,
+        TyKind::Unit => Ok(ValueRepr::Unit),
         TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
             let val = params[*idx];
             *idx += 1;
-            ValueRepr::Single(val)
+            Ok(ValueRepr::Single(val))
         }
         TyKind::String => {
             let ptr = params[*idx];
             let len = params[*idx + 1];
             *idx += 2;
-            ValueRepr::Pair(ptr, len)
+            Ok(ValueRepr::Pair(ptr, len))
         }
         TyKind::Result(ok, err) => {
             let tag = params[*idx];
             *idx += 1;
-            let ok_val = value_from_params(builder, ok, params, idx);
-            let err_val = value_from_params(builder, err, params, idx);
-            ValueRepr::Result {
+            let ok_val = value_from_params(builder, ok, params, idx)?;
+            let err_val = value_from_params(builder, err, params, idx)?;
+            Ok(ValueRepr::Result {
                 tag,
                 ok: Box::new(ok_val),
                 err: Box::new(err_val),
-            }
+            })
         }
         // ResultOut and ResultString are ABI-level return types, not input types.
         // They should never appear as function parameters.
-        TyKind::ResultOut(_, _) => ValueRepr::Unit,
-        TyKind::ResultString => ValueRepr::Unit,
+        TyKind::ResultOut(ok, err) => {
+            Err(CodegenError::Codegen(format!(
+                "ResultOut<{ok:?}, {err:?}> cannot be a parameter type (ABI return type only)"
+            )))
+        }
+        TyKind::ResultString => {
+            Err(CodegenError::Codegen(
+                "ResultString cannot be a parameter type (ABI return type only)".to_string()
+            ))
+        }
     }
 }
 
