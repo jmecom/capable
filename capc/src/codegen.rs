@@ -31,6 +31,16 @@ pub enum CodegenError {
     Codegen(String),
 }
 
+/// Tracks control flow state during code emission.
+/// Used to stop emitting statements after a terminator (return/jump).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Flow {
+    /// Control flow continues normally; more statements can be emitted.
+    Continues,
+    /// Block is terminated (return/unconditional jump); no more statements should be emitted.
+    Terminated,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TyKind {
     I32,
@@ -210,8 +220,9 @@ pub fn build_object(
                     locals.insert(param.name.item.clone(), local);
                 }
 
+                let mut terminated = false;
                 for stmt in &func.body.stmts {
-                    emit_stmt(
+                    let flow = emit_stmt(
                         &mut builder,
                         stmt,
                         &mut locals,
@@ -223,10 +234,14 @@ pub fn build_object(
                         &mut module,
                         &mut data_counter,
                     )?;
+                    if flow == Flow::Terminated {
+                        terminated = true;
+                        break;
+                    }
                 }
 
-                // Only add implicit unit return if function body doesn't end with return
-                if info.sig.ret == TyKind::Unit && !block_ends_with_return(&func.body) {
+                // Only add implicit unit return if function body doesn't terminate
+                if info.sig.ret == TyKind::Unit && !terminated {
                     builder.ins().return_(&[]);
                 }
 
@@ -1292,7 +1307,7 @@ fn emit_stmt(
     enum_index: &EnumIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
-) -> Result<(), CodegenError> {
+) -> Result<Flow, CodegenError> {
     match stmt {
         Stmt::Let(let_stmt) => {
             let value = emit_expr(
@@ -1363,6 +1378,7 @@ fn emit_stmt(
             } else {
                 builder.ins().return_(&[]);
             }
+            return Ok(Flow::Terminated);
         }
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
@@ -1425,8 +1441,9 @@ fn emit_stmt(
             // THEN branch with its own locals
             builder.switch_to_block(then_block);
             let mut then_locals = saved_locals.clone();
+            let mut then_terminated = false;
             for stmt in &if_stmt.then_block.stmts {
-                emit_stmt(
+                let flow = emit_stmt(
                     builder,
                     stmt,
                     &mut then_locals,
@@ -1438,8 +1455,12 @@ fn emit_stmt(
                     module,
                     data_counter,
                 )?;
+                if flow == Flow::Terminated {
+                    then_terminated = true;
+                    break;
+                }
             }
-            if !block_ends_with_return(&if_stmt.then_block) {
+            if !then_terminated {
                 builder.ins().jump(merge_block, &[]);
             }
             builder.seal_block(then_block);
@@ -1448,8 +1469,9 @@ fn emit_stmt(
             if let Some(else_block_ast) = &if_stmt.else_block {
                 builder.switch_to_block(else_block);
                 let mut else_locals = saved_locals.clone();
+                let mut else_terminated = false;
                 for stmt in &else_block_ast.stmts {
-                    emit_stmt(
+                    let flow = emit_stmt(
                         builder,
                         stmt,
                         &mut else_locals,
@@ -1461,8 +1483,12 @@ fn emit_stmt(
                         module,
                         data_counter,
                     )?;
+                    if flow == Flow::Terminated {
+                        else_terminated = true;
+                        break;
+                    }
                 }
-                if !block_ends_with_return(else_block_ast) {
+                if !else_terminated {
                     builder.ins().jump(merge_block, &[]);
                 }
                 builder.seal_block(else_block);
@@ -1508,8 +1534,9 @@ fn emit_stmt(
             // Loop body gets its own locals (starts from the pre-loop snapshot each iteration in terms of
             // compilation scope; runtime mutations of existing vars still work because Assign targets Slot).
             let mut body_locals = saved_locals.clone();
+            let mut body_terminated = false;
             for stmt in &while_stmt.body.stmts {
-                emit_stmt(
+                let flow = emit_stmt(
                     builder,
                     stmt,
                     &mut body_locals,
@@ -1521,9 +1548,13 @@ fn emit_stmt(
                     module,
                     data_counter,
                 )?;
+                if flow == Flow::Terminated {
+                    body_terminated = true;
+                    break;
+                }
             }
 
-            if !block_ends_with_return(&while_stmt.body) {
+            if !body_terminated {
                 builder.ins().jump(header_block, &[]);
             }
 
@@ -1537,11 +1568,7 @@ fn emit_stmt(
             *locals = saved_locals;
         }
     }
-    Ok(())
-}
-
-fn block_ends_with_return(block: &crate::ast::Block) -> bool {
-    matches!(block.stmts.last(), Some(Stmt::Return(_)))
+    Ok(Flow::Continues)
 }
 
 fn emit_expr(
@@ -1972,13 +1999,7 @@ fn emit_match_stmt(
         .current_block()
         .ok_or_else(|| CodegenError::Codegen("no current block for match".to_string()))?;
 
-    let mut all_return = true;
-    for arm in &match_expr.arms {
-        if !matches!(arm.body.stmts.last(), Some(Stmt::Return(_))) {
-            all_return = false;
-            break;
-        }
-    }
+    let mut all_terminated = true;
 
     for (idx, arm) in match_expr.arms.iter().enumerate() {
         let is_last = idx + 1 == match_expr.arms.len();
@@ -1997,8 +2018,9 @@ fn emit_match_stmt(
 
         builder.switch_to_block(arm_block);
         bind_match_pattern_value(builder, &arm.pattern, &value, match_result.as_ref(), locals)?;
+        let mut arm_terminated = false;
         for stmt in &arm.body.stmts {
-            emit_stmt(
+            let flow = emit_stmt(
                 builder,
                 stmt,
                 locals,
@@ -2010,8 +2032,13 @@ fn emit_match_stmt(
                 module,
                 data_counter,
             )?;
+            if flow == Flow::Terminated {
+                arm_terminated = true;
+                break;
+            }
         }
-        if !matches!(arm.body.stmts.last(), Some(Stmt::Return(_))) {
+        if !arm_terminated {
+            all_terminated = false;
             builder.ins().jump(merge_block, &[]);
         }
         builder.seal_block(arm_block);
@@ -2022,7 +2049,7 @@ fn emit_match_stmt(
         current_block = next_block;
     }
 
-    if all_return {
+    if all_terminated {
         builder.switch_to_block(merge_block);
         builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
         builder.seal_block(merge_block);
@@ -2131,8 +2158,9 @@ fn emit_match_expr(
         let Some((last, prefix)) = arm.body.stmts.split_last() else {
             return Err(CodegenError::Unsupported("empty match arm".to_string()));
         };
+        let mut prefix_terminated = false;
         for stmt in prefix {
-            emit_stmt(
+            let flow = emit_stmt(
                 builder,
                 stmt,
                 &mut arm_locals,
@@ -2144,7 +2172,19 @@ fn emit_match_expr(
                 module,
                 data_counter,
             )?;
+            if flow == Flow::Terminated {
+                prefix_terminated = true;
+                break;
+            }
         }
+
+        // If prefix terminated, we can't emit the final expression
+        if prefix_terminated {
+            return Err(CodegenError::Unsupported(
+                "match expression arm terminated before final expression".to_string(),
+            ));
+        }
+
         let Stmt::Expr(expr_stmt) = last else {
             return Err(CodegenError::Unsupported(
                 "match arm must end with expression".to_string(),

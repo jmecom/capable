@@ -343,3 +343,34 @@ fn run_unit_match_bind() {
     assert_eq!(code, 0);
     assert!(stdout.contains("unit match bind ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_early_return_block() {
+    let out_dir = make_out_dir("early_return_block");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/early_return_block.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("early return test ok"), "stdout was: {stdout:?}");
+    assert!(!stdout.contains("SHOULD NOT PRINT"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_early_return_while() {
+    let out_dir = make_out_dir("early_return_while");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/early_return_while.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("early return while test ok"), "stdout was: {stdout:?}");
+    assert!(!stdout.contains("SHOULD NOT PRINT"), "stdout was: {stdout:?}");
+}
+
