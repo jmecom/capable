@@ -1938,6 +1938,10 @@ fn emit_match_stmt(
                 Pattern::Wildcard(_) | Pattern::Binding(_) => {
                     // These are always valid for unit
                 }
+                Pattern::Path(path) if path.segments.len() == 1 => {
+                    // Single-segment paths are effectively bindings in the current parser
+                    // (used for match arm binding patterns like `match () { x => ... }`)
+                }
                 Pattern::Literal(Literal::Unit) => {
                     // Unit literal pattern is valid for unit
                 }
@@ -1956,7 +1960,8 @@ fn emit_match_stmt(
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         // Unit has only one value, so we use a dummy for pattern matching.
         // Pattern validation above ensures only wildcard/binding/unit-literal patterns are used.
-        ValueRepr::Unit => (builder.ins().iconst(ir::types::I8, 0), None),
+        // Use I32 to match enum variant dispatch type (most common case).
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -2063,6 +2068,10 @@ fn emit_match_expr(
                 Pattern::Wildcard(_) | Pattern::Binding(_) => {
                     // These are always valid for unit
                 }
+                Pattern::Path(path) if path.segments.len() == 1 => {
+                    // Single-segment paths are effectively bindings in the current parser
+                    // (used for match arm binding patterns like `match () { x => ... }`)
+                }
                 Pattern::Literal(Literal::Unit) => {
                     // Unit literal pattern is valid for unit
                 }
@@ -2081,7 +2090,8 @@ fn emit_match_expr(
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         // Unit has only one value, so we use a dummy for pattern matching.
         // Pattern validation above ensures only wildcard/binding/unit-literal patterns are used.
-        ValueRepr::Unit => (builder.ins().iconst(ir::types::I8, 0), None),
+        // Use I32 to match enum variant dispatch type (most common case).
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -2267,6 +2277,12 @@ fn match_pattern_cond(
             Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
         }
         Pattern::Path(path) => {
+            // Single-segment paths are binding patterns (always match)
+            if path.segments.len() == 1 {
+                let one = builder.ins().iconst(ir::types::I8, 1);
+                return Ok(builder.ins().icmp_imm(IntCC::NotEqual, one, 0));
+            }
+            // Multi-segment paths are enum variant patterns
             let Some(index) = resolve_enum_variant(path, use_map, enum_index) else {
                 return Err(CodegenError::Unsupported("path pattern".to_string()));
             };
@@ -2291,6 +2307,20 @@ fn bind_match_pattern_value(
             _ => {
                 locals.insert(ident.item.clone(), store_local(builder, value.clone()));
                 Ok(())
+            }
+        },
+        Pattern::Path(path) if path.segments.len() == 1 => {
+            // Single-segment paths are used as binding patterns by the parser
+            // (e.g., `match () { x => ... }`)
+            let ident = &path.segments[0];
+            match value {
+                ValueRepr::Result { .. } => Err(CodegenError::Unsupported(
+                    "binding result value".to_string(),
+                )),
+                _ => {
+                    locals.insert(ident.item.clone(), store_local(builder, value.clone()));
+                    Ok(())
+                }
             }
         },
         Pattern::Call { path, binding, .. } => {
