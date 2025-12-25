@@ -2,19 +2,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, MemFlags, Signature, Type};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{Configurable, Flags};
-use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{DataDescription, Linkage, Module as ModuleTrait};
-use cranelift_object::{ObjectBuilder, ObjectModule};
 use cranelift_native;
+use cranelift_object::{ObjectBuilder, ObjectModule};
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Stmt, Type as AstType,
-    UnaryOp,
+    BinaryOp, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Stmt,
+    Type as AstType, UnaryOp,
 };
 
 #[derive(Debug, Error)]
@@ -95,6 +95,7 @@ struct EnumIndex {
 
 #[derive(Clone, Debug)]
 enum ValueRepr {
+    Unit,
     Single(ir::Value),
     Pair(ir::Value, ir::Value),
     Result {
@@ -139,12 +140,8 @@ pub fn build_object(
         .map_err(|err| CodegenError::Codegen(err.to_string()))?;
 
     let mut module = ObjectModule::new(
-        ObjectBuilder::new(
-            isa,
-            "capable",
-            cranelift_module::default_libcall_names(),
-        )
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?,
+        ObjectBuilder::new(isa, "capable", cranelift_module::default_libcall_names())
+            .map_err(|err| CodegenError::Codegen(err.to_string()))?,
     );
 
     let stdlib_index = build_stdlib_index(stdlib);
@@ -182,7 +179,11 @@ pub fn build_object(
                     continue;
                 }
                 let func_id = module
-                    .declare_function(&info.symbol, Linkage::Export, &sig_to_clif(&info.sig, module.isa().pointer_type()))
+                    .declare_function(
+                        &info.symbol,
+                        Linkage::Export,
+                        &sig_to_clif(&info.sig, module.isa().pointer_type()),
+                    )
                     .map_err(|err| CodegenError::Codegen(err.to_string()))?;
                 let mut ctx = module.make_context();
                 ctx.func = Function::with_name_signature(
@@ -201,7 +202,7 @@ pub fn build_object(
                 let params = builder.block_params(block).to_vec();
                 let mut param_index = 0;
                 for param in &func.params {
-                    let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index);
+                    let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index)?;
                     let value =
                         value_from_params(&mut builder, &ty_kind, &params, &mut param_index);
                     let local = store_local(&mut builder, value);
@@ -230,9 +231,7 @@ pub fn build_object(
                 builder.seal_all_blocks();
                 builder.finalize();
                 if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
-                    return Err(CodegenError::Codegen(format!(
-                        "verifier errors: {err}"
-                    )));
+                    return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
                 }
                 module
                     .define_function(func_id, &mut ctx)
@@ -242,8 +241,13 @@ pub fn build_object(
     }
 
     let object = module.finish();
-    fs::write(out_path, object.emit().map_err(|err| CodegenError::Codegen(err.to_string()))?)
-        .map_err(|err| CodegenError::Io(err.to_string()))?;
+    fs::write(
+        out_path,
+        object
+            .emit()
+            .map_err(|err| CodegenError::Codegen(err.to_string()))?,
+    )
+    .map_err(|err| CodegenError::Io(err.to_string()))?;
     Ok(())
 }
 
@@ -283,9 +287,9 @@ fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
             }
         }
         TyKind::ResultString => {
-            signature.params.push(AbiParam::new(ir::types::I64)); // out_ptr
-            signature.params.push(AbiParam::new(ir::types::I64)); // out_len
-            signature.params.push(AbiParam::new(ir::types::I64)); // out_err
+            signature.params.push(AbiParam::new(ptr_ty)); // out_ptr
+            signature.params.push(AbiParam::new(ptr_ty)); // out_len
+            signature.params.push(AbiParam::new(ptr_ty)); // out_err
         }
     }
 }
@@ -419,11 +423,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
     };
     let args_at_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultString,
-        ],
+        params: vec![TyKind::Handle, TyKind::I32, TyKind::ResultString],
         ret: TyKind::ResultString,
     };
     let io_read_stdin = FnSig {
@@ -1226,8 +1226,8 @@ fn register_user_functions(
                         .params
                         .iter()
                         .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
-                        .collect(),
-                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index),
+                        .collect::<Result<Vec<TyKind>, CodegenError>>()?,
+                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
                 };
                 let key = format!("{module_name}.{}", func.name.item);
                 let symbol = if module_name == entry.name.to_string() && func.name.item == "main" {
@@ -1251,8 +1251,8 @@ fn register_user_functions(
                         .params
                         .iter()
                         .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
-                        .collect(),
-                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index),
+                        .collect::<Result<Vec<TyKind>, CodegenError>>()?,
+                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
                 };
                 let key = format!("{module_name}.{}", func.name.item);
                 map.insert(
@@ -1351,6 +1351,7 @@ fn emit_stmt(
                     data_counter,
                 )?;
                 match value {
+                    ValueRepr::Unit => builder.ins().return_(&[]),
                     ValueRepr::Single(val) => builder.ins().return_(&[val]),
                     ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
                         let values = flatten_value(&value);
@@ -1391,6 +1392,9 @@ fn emit_stmt(
             }
         }
         Stmt::If(if_stmt) => {
+            // Snapshot locals so branch-scoped lets don't leak.
+            let saved_locals = locals.clone();
+
             let then_block = builder.create_block();
             let merge_block = builder.create_block();
             let else_block = if if_stmt.else_block.is_some() {
@@ -1398,6 +1402,7 @@ fn emit_stmt(
             } else {
                 merge_block
             };
+
             let cond_val = emit_expr(
                 builder,
                 &if_stmt.cond,
@@ -1411,14 +1416,18 @@ fn emit_stmt(
                 data_counter,
             )?;
             let cond_b1 = to_b1(builder, cond_val)?;
-            builder.ins().brif(cond_b1, then_block, &[], else_block, &[]);
+            builder
+                .ins()
+                .brif(cond_b1, then_block, &[], else_block, &[]);
 
+            // THEN branch with its own locals
             builder.switch_to_block(then_block);
+            let mut then_locals = saved_locals.clone();
             for stmt in &if_stmt.then_block.stmts {
                 emit_stmt(
                     builder,
                     stmt,
-                    locals,
+                    &mut then_locals,
                     fn_map,
                     use_map,
                     module_name,
@@ -1433,13 +1442,15 @@ fn emit_stmt(
             }
             builder.seal_block(then_block);
 
+            // ELSE branch with its own locals
             if let Some(else_block_ast) = &if_stmt.else_block {
                 builder.switch_to_block(else_block);
+                let mut else_locals = saved_locals.clone();
                 for stmt in &else_block_ast.stmts {
                     emit_stmt(
                         builder,
                         stmt,
-                        locals,
+                        &mut else_locals,
                         fn_map,
                         use_map,
                         module_name,
@@ -1455,16 +1466,24 @@ fn emit_stmt(
                 builder.seal_block(else_block);
             }
 
+            // After the if, restore the pre-if locals snapshot.
+            *locals = saved_locals;
+
             builder.switch_to_block(merge_block);
             builder.seal_block(merge_block);
         }
+
         Stmt::While(while_stmt) => {
+            // Snapshot locals so loop-body lets don't leak out of the loop.
+            let saved_locals = locals.clone();
+
             let header_block = builder.create_block();
             let body_block = builder.create_block();
             let exit_block = builder.create_block();
 
             builder.ins().jump(header_block, &[]);
             builder.switch_to_block(header_block);
+
             let cond_val = emit_expr(
                 builder,
                 &while_stmt.cond,
@@ -1478,14 +1497,20 @@ fn emit_stmt(
                 data_counter,
             )?;
             let cond_b1 = to_b1(builder, cond_val)?;
-            builder.ins().brif(cond_b1, body_block, &[], exit_block, &[]);
+            builder
+                .ins()
+                .brif(cond_b1, body_block, &[], exit_block, &[]);
 
             builder.switch_to_block(body_block);
+
+            // Loop body gets its own locals (starts from the pre-loop snapshot each iteration in terms of
+            // compilation scope; runtime mutations of existing vars still work because Assign targets Slot).
+            let mut body_locals = saved_locals.clone();
             for stmt in &while_stmt.body.stmts {
                 emit_stmt(
                     builder,
                     stmt,
-                    locals,
+                    &mut body_locals,
                     fn_map,
                     use_map,
                     module_name,
@@ -1495,14 +1520,19 @@ fn emit_stmt(
                     data_counter,
                 )?;
             }
+
             if !block_ends_with_return(&while_stmt.body) {
                 builder.ins().jump(header_block, &[]);
             }
+
             builder.seal_block(body_block);
             builder.seal_block(header_block);
 
             builder.switch_to_block(exit_block);
             builder.seal_block(exit_block);
+
+            // After the loop, restore the pre-loop locals snapshot.
+            *locals = saved_locals;
         }
     }
     Ok(())
@@ -1526,11 +1556,17 @@ fn emit_expr(
 ) -> Result<ValueRepr, CodegenError> {
     match expr {
         Expr::Literal(lit) => match &lit.value {
-            Literal::Int(value) => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, *value as i64))),
-            Literal::U8(value) => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, *value as i64))),
-            Literal::Bool(value) => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, *value as i64))),
+            Literal::Int(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I32, *value as i64),
+            )),
+            Literal::U8(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I8, *value as i64),
+            )),
+            Literal::Bool(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I8, *value as i64),
+            )),
             Literal::String(value) => emit_string(builder, value, module, data_counter),
-            Literal::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
+            Literal::Unit => Ok(ValueRepr::Unit),
         },
         Expr::Path(path) => {
             if path.segments.len() == 1 {
@@ -1548,11 +1584,7 @@ fn emit_expr(
         Expr::Call(call) => {
             let callee_path = match &*call.callee {
                 Expr::Path(path) => resolve_call_path(path, module_name, use_map),
-                _ => {
-                    return Err(CodegenError::Unsupported(
-                        "call target".to_string(),
-                    ))
-                }
+                _ => return Err(CodegenError::Unsupported("call target".to_string())),
             };
             let info = fn_map
                 .get(&callee_path)
@@ -1578,9 +1610,11 @@ fn emit_expr(
             let mut result_out = None;
             let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
             if abi_sig.ret == TyKind::ResultString {
+                let ptr_ty = module.isa().pointer_type();
+
                 let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
-                    8,
+                    ptr_ty.bytes() as u32,
                 ));
                 let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
@@ -1590,12 +1624,15 @@ fn emit_expr(
                     ir::StackSlotKind::ExplicitSlot,
                     4,
                 ));
-                let ptr_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
-                let len_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
-                let err_ptr = builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
+
+                let ptr_ptr = builder.ins().stack_addr(ptr_ty, slot_ptr, 0);
+                let len_ptr = builder.ins().stack_addr(ptr_ty, slot_len, 0);
+                let err_ptr = builder.ins().stack_addr(ptr_ty, slot_err, 0);
+
                 args.push(ptr_ptr);
                 args.push(len_ptr);
                 args.push(err_ptr);
+
                 out_slots = Some((slot_ptr, slot_len, slot_err));
             }
             if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
@@ -1645,28 +1682,31 @@ fn emit_expr(
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
-                let (slot_ptr, slot_len, slot_err) = out_slots
-                    .ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
-                let ptr_addr =
-                    builder.ins().stack_addr(module.isa().pointer_type(), slot_ptr, 0);
-                let len_addr =
-                    builder.ins().stack_addr(module.isa().pointer_type(), slot_len, 0);
-                let err_addr =
-                    builder.ins().stack_addr(module.isa().pointer_type(), slot_err, 0);
-                let ptr = builder.ins().load(
-                    module.isa().pointer_type(),
-                    MemFlags::new(),
-                    ptr_addr,
-                    0,
-                );
-                let len = builder.ins().load(ir::types::I64, MemFlags::new(), len_addr, 0);
-                let err = builder.ins().load(ir::types::I32, MemFlags::new(), err_addr, 0);
+                let (slot_ptr, slot_len, slot_err) =
+                    out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
+                let ptr_addr = builder
+                    .ins()
+                    .stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+                let len_addr = builder
+                    .ins()
+                    .stack_addr(module.isa().pointer_type(), slot_len, 0);
+                let err_addr = builder
+                    .ins()
+                    .stack_addr(module.isa().pointer_type(), slot_err, 0);
+                let ptr =
+                    builder
+                        .ins()
+                        .load(module.isa().pointer_type(), MemFlags::new(), ptr_addr, 0);
+                let len = builder
+                    .ins()
+                    .load(ir::types::I64, MemFlags::new(), len_addr, 0);
+                let err = builder
+                    .ins()
+                    .load(ir::types::I32, MemFlags::new(), err_addr, 0);
                 match &info.sig.ret {
                     TyKind::Result(ok_ty, err_ty) => {
                         if **ok_ty != TyKind::String || **err_ty != TyKind::I32 {
-                            return Err(CodegenError::Unsupported(
-                                "result out params".to_string(),
-                            ));
+                            return Err(CodegenError::Unsupported("result out params".to_string()));
                         }
                         Ok(ValueRepr::Result {
                             tag: *tag,
@@ -1683,14 +1723,18 @@ fn emit_expr(
                 let (ok_slot, err_slot, ok_ty, err_ty) = result_out
                     .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
                 let ok_val = if let Some((slot, ty)) = ok_slot {
-                    let addr = builder.ins().stack_addr(module.isa().pointer_type(), slot, 0);
+                    let addr = builder
+                        .ins()
+                        .stack_addr(module.isa().pointer_type(), slot, 0);
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
                     ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
                 };
                 let err_val = if let Some((slot, ty)) = err_slot {
-                    let addr = builder.ins().stack_addr(module.isa().pointer_type(), slot, 0);
+                    let addr = builder
+                        .ins()
+                        .stack_addr(module.isa().pointer_type(), slot, 0);
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
@@ -1727,8 +1771,13 @@ fn emit_expr(
             if matches!(binary.op, BinaryOp::And | BinaryOp::Or) {
                 let lhs_val = match lhs {
                     ValueRepr::Single(v) => v,
+                    ValueRepr::Unit => {
+                        return Err(CodegenError::Unsupported("boolean op on unit".to_string()))
+                    }
                     ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
-                        return Err(CodegenError::Unsupported("boolean op on string".to_string()))
+                        return Err(CodegenError::Unsupported(
+                            "boolean op on string".to_string(),
+                        ))
                     }
                 };
                 return emit_short_circuit_expr(
@@ -1824,7 +1873,9 @@ fn emit_expr(
                 data_counter,
             )?;
             match (&unary.op, value) {
-                (UnaryOp::Neg, ValueRepr::Single(v)) => Ok(ValueRepr::Single(builder.ins().ineg(v))),
+                (UnaryOp::Neg, ValueRepr::Single(v)) => {
+                    Ok(ValueRepr::Single(builder.ins().ineg(v)))
+                }
                 (UnaryOp::Not, ValueRepr::Single(v)) => {
                     let one = builder.ins().iconst(ir::types::I8, 1);
                     Ok(ValueRepr::Single(builder.ins().bxor(v, one)))
@@ -1875,15 +1926,16 @@ fn emit_match_stmt(
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
+        ValueRepr::Unit => return Err(CodegenError::Unsupported("match on unit".to_string())),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
     };
 
     let merge_block = builder.create_block();
-    let mut current_block = builder.current_block().ok_or_else(|| {
-        CodegenError::Codegen("no current block for match".to_string())
-    })?;
+    let mut current_block = builder
+        .current_block()
+        .ok_or_else(|| CodegenError::Codegen("no current block for match".to_string()))?;
 
     let mut all_return = true;
     for arm in &match_expr.arms {
@@ -1973,15 +2025,16 @@ fn emit_match_expr(
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
+        ValueRepr::Unit => return Err(CodegenError::Unsupported("match on unit".to_string())),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
     };
 
     let merge_block = builder.create_block();
-    let mut current_block = builder.current_block().ok_or_else(|| {
-        CodegenError::Codegen("no current block for match".to_string())
-    })?;
+    let mut current_block = builder
+        .current_block()
+        .ok_or_else(|| CodegenError::Codegen("no current block for match".to_string()))?;
 
     let mut result_shape: Option<ResultShape> = None;
 
@@ -2046,6 +2099,11 @@ fn emit_match_expr(
         let values = match &arm_value {
             ValueRepr::Single(val) => vec![*val],
             ValueRepr::Pair(a, b) => vec![*a, *b],
+            ValueRepr::Unit => {
+                return Err(CodegenError::Unsupported(
+                    "match arm returns unit".to_string(),
+                ))
+            }
             ValueRepr::Result { .. } => {
                 return Err(CodegenError::Unsupported("match result value".to_string()))
             }
@@ -2073,11 +2131,13 @@ fn emit_match_expr(
                 types,
             });
         }
-        let shape = result_shape.as_ref().ok_or_else(|| {
-            CodegenError::Codegen("missing match result shape".to_string())
-        })?;
+        let shape = result_shape
+            .as_ref()
+            .ok_or_else(|| CodegenError::Codegen("missing match result shape".to_string()))?;
         if values.len() != shape.types.len() {
-            return Err(CodegenError::Unsupported("mismatched match arm".to_string()));
+            return Err(CodegenError::Unsupported(
+                "mismatched match arm".to_string(),
+            ));
         }
         for (idx, val) in values.iter().enumerate() {
             builder.ins().stack_store(*val, shape.slots[idx], 0);
@@ -2093,9 +2153,8 @@ fn emit_match_expr(
 
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
-    let shape = result_shape.ok_or_else(|| {
-        CodegenError::Codegen("missing match result value".to_string())
-    })?;
+    let shape = result_shape
+        .ok_or_else(|| CodegenError::Codegen("missing match result value".to_string()))?;
     let mut loaded = Vec::new();
     for (slot, ty) in shape.slots.iter().zip(shape.types.iter()) {
         loaded.push(builder.ins().stack_load(*ty, *slot, 0));
@@ -2135,8 +2194,18 @@ fn match_pattern_cond(
             _ => Err(CodegenError::Unsupported("literal pattern".to_string())),
         },
         Pattern::Call { path, .. } => {
-            let name = path.segments.last().map(|seg| seg.item.as_str()).unwrap_or("");
-            let tag_value = if name == "Ok" { 0 } else if name == "Err" { 1 } else { 2 };
+            let name = path
+                .segments
+                .last()
+                .map(|seg| seg.item.as_str())
+                .unwrap_or("");
+            let tag_value = if name == "Ok" {
+                0
+            } else if name == "Err" {
+                1
+            } else {
+                2
+            };
             if tag_value == 2 {
                 return Err(CodegenError::Unsupported("call pattern".to_string()));
             }
@@ -2162,16 +2231,20 @@ fn bind_match_pattern_value(
 ) -> Result<(), CodegenError> {
     match pattern {
         Pattern::Binding(ident) => match value {
-            ValueRepr::Result { .. } => {
-                Err(CodegenError::Unsupported("binding result value".to_string()))
-            }
+            ValueRepr::Result { .. } => Err(CodegenError::Unsupported(
+                "binding result value".to_string(),
+            )),
             _ => {
                 locals.insert(ident.item.clone(), store_local(builder, value.clone()));
                 Ok(())
             }
         },
         Pattern::Call { path, binding, .. } => {
-            let name = path.segments.last().map(|seg| seg.item.as_str()).unwrap_or("");
+            let name = path
+                .segments
+                .last()
+                .map(|seg| seg.item.as_str())
+                .unwrap_or("");
             let Some((ok_val, err_val)) = result else {
                 return Err(CodegenError::Unsupported("call pattern".to_string()));
             };
@@ -2194,6 +2267,7 @@ fn bind_match_pattern_value(
 fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, CodegenError> {
     match value {
         ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
+        ValueRepr::Unit => Err(CodegenError::Unsupported("unit condition".to_string())),
         ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
             Err(CodegenError::Unsupported("string condition".to_string()))
         }
@@ -2229,13 +2303,17 @@ fn emit_short_circuit_expr(
 
     let lhs_cond = builder.ins().icmp_imm(IntCC::NotEqual, lhs, 0);
     if is_and {
-        builder.ins().brif(lhs_cond, rhs_block, &[], merge_block, &[lhs]);
+        builder
+            .ins()
+            .brif(lhs_cond, rhs_block, &[], merge_block, &[lhs]);
     } else {
-        builder.ins().brif(lhs_cond, merge_block, &[lhs], rhs_block, &[]);
+        builder
+            .ins()
+            .brif(lhs_cond, merge_block, &[lhs], rhs_block, &[]);
     }
-    let _current = builder.current_block().ok_or_else(|| {
-        CodegenError::Codegen("no block for short-circuit".to_string())
-    })?;
+    let _current = builder
+        .current_block()
+        .ok_or_else(|| CodegenError::Codegen("no block for short-circuit".to_string()))?;
 
     builder.switch_to_block(rhs_block);
     let rhs_value = emit_expr(
@@ -2252,8 +2330,11 @@ fn emit_short_circuit_expr(
     )?;
     let rhs_val = match rhs_value {
         ValueRepr::Single(v) => v,
+        ValueRepr::Unit => return Err(CodegenError::Unsupported("boolean op on unit".to_string())),
         ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
-            return Err(CodegenError::Unsupported("boolean op on string".to_string()))
+            return Err(CodegenError::Unsupported(
+                "boolean op on string".to_string(),
+            ))
         }
     };
     builder.ins().jump(merge_block, &[rhs_val]);
@@ -2282,13 +2363,16 @@ fn emit_string(
         .define_data(data_id, &data_ctx)
         .map_err(|err| CodegenError::Codegen(err.to_string()))?;
     let global = module.declare_data_in_func(data_id, builder.func);
-    let ptr = builder.ins().global_value(module.isa().pointer_type(), global);
+    let ptr = builder
+        .ins()
+        .global_value(module.isa().pointer_type(), global);
     let len = builder.ins().iconst(ir::types::I64, value.len() as i64);
     Ok(ValueRepr::Pair(ptr, len))
 }
 
 fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
     match value {
+        ValueRepr::Unit => vec![],
         ValueRepr::Single(val) => vec![*val],
         ValueRepr::Pair(a, b) => vec![*a, *b],
         ValueRepr::Result { tag, ok, err } => {
@@ -2302,6 +2386,7 @@ fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
 
 fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
     match value {
+        ValueRepr::Unit => LocalValue::Value(ValueRepr::Unit),
         ValueRepr::Single(val) => {
             let ty = builder.func.dfg.value_type(val);
             let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
@@ -2317,9 +2402,7 @@ fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
 
 fn load_local(builder: &mut FunctionBuilder, local: &LocalValue) -> ValueRepr {
     match local {
-        LocalValue::Slot(slot, ty) => {
-            ValueRepr::Single(builder.ins().stack_load(*ty, *slot, 0))
-        }
+        LocalValue::Slot(slot, ty) => ValueRepr::Single(builder.ins().stack_load(*ty, *slot, 0)),
         LocalValue::Value(value) => value.clone(),
     }
 }
@@ -2342,13 +2425,8 @@ fn value_from_params(
     idx: &mut usize,
 ) -> ValueRepr {
     match ty {
-        TyKind::Unit => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
-        TyKind::I32
-        | TyKind::U32
-        | TyKind::U8
-        | TyKind::Bool
-        | TyKind::Handle
-        | TyKind::Ptr => {
+        TyKind::Unit => ValueRepr::Unit,
+        TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
             let val = params[*idx];
             *idx += 1;
             ValueRepr::Single(val)
@@ -2370,9 +2448,7 @@ fn value_from_params(
                 err: Box::new(err_val),
             }
         }
-        TyKind::ResultOut(_, _) => {
-            ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
-        }
+        TyKind::ResultOut(_, _) => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
         TyKind::ResultString => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
     }
 }
@@ -2384,13 +2460,8 @@ fn value_from_results(
     idx: &mut usize,
 ) -> Result<ValueRepr, CodegenError> {
     match ty {
-        TyKind::Unit => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
-        TyKind::I32
-        | TyKind::U32
-        | TyKind::U8
-        | TyKind::Bool
-        | TyKind::Handle
-        | TyKind::Ptr => {
+        TyKind::Unit => Ok(ValueRepr::Unit),
+        TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
             let val = results
                 .get(*idx)
                 .ok_or_else(|| CodegenError::Codegen("missing return value".to_string()))?;
@@ -2447,11 +2518,7 @@ fn resolve_path(path: &AstPath, use_map: &UseMap) -> Vec<String> {
     path.segments.iter().map(|seg| seg.item.clone()).collect()
 }
 
-fn resolve_enum_variant(
-    path: &AstPath,
-    use_map: &UseMap,
-    enum_index: &EnumIndex,
-) -> Option<i32> {
+fn resolve_enum_variant(path: &AstPath, use_map: &UseMap, enum_index: &EnumIndex) -> Option<i32> {
     let resolved = resolve_path(path, use_map);
     if resolved.len() < 2 {
         return None;
@@ -2513,37 +2580,37 @@ fn lower_ty(
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     enum_index: &EnumIndex,
-) -> TyKind {
+) -> Result<TyKind, CodegenError> {
     let resolved = match ty {
         AstType::Ptr { .. } => {
-            return TyKind::Ptr;
+            return Ok(TyKind::Ptr);
         }
         AstType::Path { path, .. } => resolve_type_name(path, use_map, stdlib),
     };
     if resolved == "i32" {
-        return TyKind::I32;
+        return Ok(TyKind::I32);
     }
     if resolved == "u32" {
-        return TyKind::U32;
+        return Ok(TyKind::U32);
     }
     if resolved == "u8" {
-        return TyKind::U8;
+        return Ok(TyKind::U8);
     }
     if resolved == "bool" {
-        return TyKind::Bool;
+        return Ok(TyKind::Bool);
     }
     if resolved == "unit" {
-        return TyKind::Unit;
+        return Ok(TyKind::Unit);
     }
     if resolved == "string" {
-        return TyKind::String;
+        return Ok(TyKind::String);
     }
     if resolved == "Result" {
         if let AstType::Path { args, .. } = ty {
             if args.len() == 2 {
-                let ok = lower_ty(&args[0], use_map, stdlib, enum_index);
-                let err = lower_ty(&args[1], use_map, stdlib, enum_index);
-                return TyKind::Result(Box::new(ok), Box::new(err));
+                let ok = lower_ty(&args[0], use_map, stdlib, enum_index)?;
+                let err = lower_ty(&args[1], use_map, stdlib, enum_index)?;
+                return Ok(TyKind::Result(Box::new(ok), Box::new(err)));
             }
         }
     }
@@ -2558,12 +2625,14 @@ fn lower_ty(
         || resolved == "sys.vec.VecI32"
         || resolved == "sys.vec.VecString"
     {
-        return TyKind::Handle;
+        return Ok(TyKind::Handle);
     }
     if enum_index.variants.contains_key(&resolved) {
-        return TyKind::I32;
+        return Ok(TyKind::I32);
     }
-    TyKind::Unit
+    return Err(CodegenError::Unsupported(format!(
+        "unknown type `{resolved}`"
+    )));
 }
 
 fn resolve_type_name(path: &AstPath, use_map: &UseMap, stdlib: &StdlibIndex) -> String {
