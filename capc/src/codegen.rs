@@ -2239,8 +2239,9 @@ fn match_pattern_cond(
 ) -> Result<ir::Value, CodegenError> {
     match pattern {
         Pattern::Wildcard(_) | Pattern::Binding(_) => {
-            let one = builder.ins().iconst(ir::types::I8, 1);
-            Ok(builder.ins().icmp_imm(IntCC::NotEqual, one, 0))
+            // Wildcard and binding patterns always match - return a constant true condition
+            let one = builder.ins().iconst(ir::types::I32, 1);
+            Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1))
         }
         Pattern::Literal(lit) => match lit {
             Literal::Bool(value) => {
@@ -2279,8 +2280,9 @@ fn match_pattern_cond(
         Pattern::Path(path) => {
             // Single-segment paths are binding patterns (always match)
             if path.segments.len() == 1 {
-                let one = builder.ins().iconst(ir::types::I8, 1);
-                return Ok(builder.ins().icmp_imm(IntCC::NotEqual, one, 0));
+                // Return a constant true condition
+                let one = builder.ins().iconst(ir::types::I32, 1);
+                return Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1));
             }
             // Multi-segment paths are enum variant patterns
             let Some(index) = resolve_enum_variant(path, use_map, enum_index) else {
@@ -2300,29 +2302,19 @@ fn bind_match_pattern_value(
     locals: &mut HashMap<String, LocalValue>,
 ) -> Result<(), CodegenError> {
     match pattern {
-        Pattern::Binding(ident) => match value {
-            ValueRepr::Result { .. } => Err(CodegenError::Unsupported(
-                "binding result value".to_string(),
-            )),
-            _ => {
-                locals.insert(ident.item.clone(), store_local(builder, value.clone()));
-                Ok(())
-            }
-        },
+        Pattern::Binding(ident) => {
+            // Bind any value type - store_local handles all ValueRepr variants
+            locals.insert(ident.item.clone(), store_local(builder, value.clone()));
+            Ok(())
+        }
         Pattern::Path(path) if path.segments.len() == 1 => {
             // Single-segment paths are used as binding patterns by the parser
             // (e.g., `match () { x => ... }`)
             let ident = &path.segments[0];
-            match value {
-                ValueRepr::Result { .. } => Err(CodegenError::Unsupported(
-                    "binding result value".to_string(),
-                )),
-                _ => {
-                    locals.insert(ident.item.clone(), store_local(builder, value.clone()));
-                    Ok(())
-                }
-            }
-        },
+            // Bind any value type - store_local handles all ValueRepr variants
+            locals.insert(ident.item.clone(), store_local(builder, value.clone()));
+            Ok(())
+        }
         Pattern::Call { path, binding, .. } => {
             let name = path
                 .segments
