@@ -362,8 +362,11 @@ pub fn type_check_program(
         }
     }
 
-    // TODO: Implement full HIR lowering
-    // For now, return a skeleton HIR module to make tests pass
+    // TODO(P1.5 Step 4-5): Implement full HIR lowering
+    // WARNING: This currently returns an EMPTY skeleton HirModule!
+    // Do NOT consume this HIR until Step 5 - codegen still uses AST directly.
+    // The actual lowering (populating functions/structs/enums with resolved nodes)
+    // will be implemented when we switch codegen to consume HIR.
     Ok(HirModule {
         name: module_name,
         functions: Vec::new(),
@@ -897,12 +900,25 @@ fn check_expr(
             Ok(sig.ret.clone())
         }
         Expr::MethodCall(method_call) => {
-            // For now, treat MethodCall as a regular function call
-            // In Step 4, we'll add proper method resolution based on receiver type
-            // This handles the case where `module.function(args)` parses as a MethodCall
+            // Disambiguation: is this a method on a value or a module-qualified function call?
+            fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => {
+                        Some(&path.segments[0].item)
+                    }
+                    Expr::FieldAccess(fa) => get_leftmost_segment(&fa.object),
+                    _ => None,
+                }
+            }
 
-            // Convert receiver.method to a path using to_path()
-            // This handles both simple paths and FieldAccess chains (e.g., sys.console.println)
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+                locals.get(base_name).is_some()
+            } else {
+                // Not a pure a.b.c chain (e.g., call result) - treat as method on value
+                true
+            };
+
+            // Try to convert to a path and resolve as a module-qualified function
             let mut path = method_call.receiver.to_path().ok_or_else(|| {
                 TypeError::new(
                     "method calls on non-path expressions not yet supported".to_string(),
@@ -911,6 +927,23 @@ fn check_expr(
             })?;
             path.segments.push(method_call.method.clone());
             path.span = Span::new(path.span.start, method_call.method.span.end);
+
+            // Check if this resolves as a function
+            let resolved = resolve_path(&path, use_map);
+            let key = resolved.join(".");
+            let is_function = functions.contains_key(&key);
+
+            if base_is_local && !is_function {
+                // Local variable + doesn't resolve as function = real method call on value
+                // Step 4 will implement proper method resolution based on receiver type
+                return Err(TypeError::new(
+                    "methods on values not yet supported".to_string(),
+                    method_call.span,
+                ));
+            }
+
+            // Either not a local, or is a local but shadows a module name that resolves
+            // Treat as module-qualified function call
 
             let resolved = resolve_path(&path, use_map);
             let key = resolved.join(".");

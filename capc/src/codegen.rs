@@ -1927,13 +1927,41 @@ fn emit_expr(
             data_counter,
         ),
         Expr::MethodCall(method_call) => {
-            // For now, convert MethodCall to Call and reuse existing logic
-            // This handles module.function(args) which now parses as MethodCall
-            // Use to_path() to handle both simple paths and FieldAccess chains
+            // Disambiguation: is this a method on a value or a module-qualified function call?
+            fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => {
+                        Some(&path.segments[0].item)
+                    }
+                    Expr::FieldAccess(fa) => get_leftmost_segment(&fa.object),
+                    _ => None,
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+                locals.contains_key(base_name)
+            } else {
+                // Not a pure a.b.c chain (e.g., call result) - treat as method on value
+                true
+            };
+
+            // Try to convert to a path and resolve as a module-qualified function
             let mut path = method_call.receiver.to_path()
                 .ok_or_else(|| CodegenError::Unsupported("method calls on non-path receivers".to_string()))?;
             path.segments.push(method_call.method.clone());
             path.span = Span::new(path.span.start, method_call.method.span.end);
+
+            // Check if this resolves as a function
+            let callee_path = resolve_call_path(&path, module_name, use_map);
+            let is_function = fn_map.contains_key(&callee_path);
+
+            if base_is_local && !is_function {
+                // Local variable + doesn't resolve as function = real method call on value
+                return Err(CodegenError::Unsupported("methods on values not yet supported".to_string()));
+            }
+
+            // Either not a local, or is a local but shadows a module name that resolves
+            // Treat as module-qualified function call
             let callee = Expr::Path(path);
 
             // Convert to Call and reuse existing logic

@@ -1,5 +1,6 @@
 ---
 source: capc/tests/parser.rs
+assertion_line: 23
 expression: module
 ---
 Module {
@@ -182,40 +183,32 @@ Module {
                                     },
                                 },
                                 ty: None,
-                                expr: Call(
-                                    CallExpr {
-                                        callee: FieldAccess(
-                                            FieldAccessExpr {
-                                                object: Path(
-                                                    Path {
-                                                        segments: [
-                                                            Spanned {
-                                                                item: "system",
-                                                                span: Span {
-                                                                    start: 102,
-                                                                    end: 108,
-                                                                },
-                                                            },
-                                                        ],
+                                expr: MethodCall(
+                                    MethodCallExpr {
+                                        receiver: Path(
+                                            Path {
+                                                segments: [
+                                                    Spanned {
+                                                        item: "system",
                                                         span: Span {
                                                             start: 102,
                                                             end: 108,
                                                         },
                                                     },
-                                                ),
-                                                field: Spanned {
-                                                    item: "console",
-                                                    span: Span {
-                                                        start: 109,
-                                                        end: 116,
-                                                    },
-                                                },
+                                                ],
                                                 span: Span {
                                                     start: 102,
-                                                    end: 116,
+                                                    end: 108,
                                                 },
                                             },
                                         ),
+                                        method: Spanned {
+                                            item: "console",
+                                            span: Span {
+                                                start: 109,
+                                                end: 116,
+                                            },
+                                        },
                                         args: [
                                             Path(
                                                 Path {
@@ -257,40 +250,32 @@ Module {
                                     },
                                 },
                                 ty: None,
-                                expr: Call(
-                                    CallExpr {
-                                        callee: FieldAccess(
-                                            FieldAccessExpr {
-                                                object: Path(
-                                                    Path {
-                                                        segments: [
-                                                            Spanned {
-                                                                item: "system",
-                                                                span: Span {
-                                                                    start: 134,
-                                                                    end: 140,
-                                                                },
-                                                            },
-                                                        ],
+                                expr: MethodCall(
+                                    MethodCallExpr {
+                                        receiver: Path(
+                                            Path {
+                                                segments: [
+                                                    Spanned {
+                                                        item: "system",
                                                         span: Span {
                                                             start: 134,
                                                             end: 140,
                                                         },
                                                     },
-                                                ),
-                                                field: Spanned {
-                                                    item: "fs_read",
-                                                    span: Span {
-                                                        start: 141,
-                                                        end: 148,
-                                                    },
-                                                },
+                                                ],
                                                 span: Span {
                                                     start: 134,
-                                                    end: 148,
+                                                    end: 140,
                                                 },
                                             },
                                         ),
+                                        method: Spanned {
+                                            item: "fs_read",
+                                            span: Span {
+                                                start: 141,
+                                                end: 148,
+                                            },
+                                        },
                                         args: [
                                             Path(
                                                 Path {
@@ -337,40 +322,32 @@ Module {
                             ExprStmt {
                                 expr: Match(
                                     MatchExpr {
-                                        expr: Call(
-                                            CallExpr {
-                                                callee: FieldAccess(
-                                                    FieldAccessExpr {
-                                                        object: Path(
-                                                            Path {
-                                                                segments: [
-                                                                    Spanned {
-                                                                        item: "fs",
-                                                                        span: Span {
-                                                                            start: 175,
-                                                                            end: 177,
-                                                                        },
-                                                                    },
-                                                                ],
+                                        expr: MethodCall(
+                                            MethodCallExpr {
+                                                receiver: Path(
+                                                    Path {
+                                                        segments: [
+                                                            Spanned {
+                                                                item: "fs",
                                                                 span: Span {
                                                                     start: 175,
                                                                     end: 177,
                                                                 },
                                                             },
-                                                        ),
-                                                        field: Spanned {
-                                                            item: "read_to_string",
-                                                            span: Span {
-                                                                start: 178,
-                                                                end: 192,
-                                                            },
-                                                        },
+                                                        ],
                                                         span: Span {
                                                             start: 175,
-                                                            end: 192,
+                                                            end: 177,
                                                         },
                                                     },
                                                 ),
+                                                method: Spanned {
+                                                    item: "read_to_string",
+                                                    span: Span {
+                                                        start: 178,
+                                                        end: 192,
+                                                    },
+                                                },
                                                 args: [
                                                     Path(
                                                         Path {
@@ -443,40 +420,32 @@ Module {
                                                     stmts: [
                                                         Expr(
                                                             ExprStmt {
-                                                                expr: Call(
-                                                                    CallExpr {
-                                                                        callee: FieldAccess(
-                                                                            FieldAccessExpr {
-                                                                                object: Path(
-                                                                                    Path {
-                                                                                        segments: [
-                                                                                            Spanned {
-                                                                                                item: "console",
-                                                                                                span: Span {
-                                                                                                    start: 226,
-                                                                                                    end: 233,
-                                                                                                },
-                                                                                            },
-                                                                                        ],
+                                                                expr: MethodCall(
+                                                                    MethodCallExpr {
+                                                                        receiver: Path(
+                                                                            Path {
+                                                                                segments: [
+                                                                                    Spanned {
+                                                                                        item: "console",
                                                                                         span: Span {
                                                                                             start: 226,
                                                                                             end: 233,
                                                                                         },
                                                                                     },
-                                                                                ),
-                                                                                field: Spanned {
-                                                                                    item: "println",
-                                                                                    span: Span {
-                                                                                        start: 234,
-                                                                                        end: 241,
-                                                                                    },
-                                                                                },
+                                                                                ],
                                                                                 span: Span {
                                                                                     start: 226,
-                                                                                    end: 241,
+                                                                                    end: 233,
                                                                                 },
                                                                             },
                                                                         ),
+                                                                        method: Spanned {
+                                                                            item: "println",
+                                                                            span: Span {
+                                                                                start: 234,
+                                                                                end: 241,
+                                                                            },
+                                                                        },
                                                                         args: [
                                                                             Path(
                                                                                 Path {
@@ -592,40 +561,32 @@ Module {
                                                     stmts: [
                                                         Expr(
                                                             ExprStmt {
-                                                                expr: Call(
-                                                                    CallExpr {
-                                                                        callee: FieldAccess(
-                                                                            FieldAccessExpr {
-                                                                                object: Path(
-                                                                                    Path {
-                                                                                        segments: [
-                                                                                            Spanned {
-                                                                                                item: "console",
-                                                                                                span: Span {
-                                                                                                    start: 276,
-                                                                                                    end: 283,
-                                                                                                },
-                                                                                            },
-                                                                                        ],
+                                                                expr: MethodCall(
+                                                                    MethodCallExpr {
+                                                                        receiver: Path(
+                                                                            Path {
+                                                                                segments: [
+                                                                                    Spanned {
+                                                                                        item: "console",
                                                                                         span: Span {
                                                                                             start: 276,
                                                                                             end: 283,
                                                                                         },
                                                                                     },
-                                                                                ),
-                                                                                field: Spanned {
-                                                                                    item: "println",
-                                                                                    span: Span {
-                                                                                        start: 284,
-                                                                                        end: 291,
-                                                                                    },
-                                                                                },
+                                                                                ],
                                                                                 span: Span {
                                                                                     start: 276,
-                                                                                    end: 291,
+                                                                                    end: 283,
                                                                                 },
                                                                             },
                                                                         ),
+                                                                        method: Spanned {
+                                                                            item: "println",
+                                                                            span: Span {
+                                                                                start: 284,
+                                                                                end: 291,
+                                                                            },
+                                                                        },
                                                                         args: [
                                                                             Path(
                                                                                 Path {
