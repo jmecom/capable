@@ -120,6 +120,7 @@ struct ResultShape {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ResultKind {
+    Unit,
     Single,
     Pair,
 }
@@ -204,7 +205,7 @@ pub fn build_object(
                 for param in &func.params {
                     let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index)?;
                     let value =
-                        value_from_params(&mut builder, &ty_kind, &params, &mut param_index);
+                        value_from_params(&mut builder, &ty_kind, &params, &mut param_index)?;
                     let local = store_local(&mut builder, value);
                     locals.insert(param.name.item.clone(), local);
                 }
@@ -224,7 +225,8 @@ pub fn build_object(
                     )?;
                 }
 
-                if info.sig.ret == TyKind::Unit {
+                // Only add implicit unit return if function body doesn't end with return
+                if info.sig.ret == TyKind::Unit && !block_ends_with_return(&func.body) {
                     builder.ins().return_(&[]);
                 }
 
@@ -1729,7 +1731,8 @@ fn emit_expr(
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
-                    ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+                    // ok_ty is Unit, so return ValueRepr::Unit (zero-sized)
+                    ValueRepr::Unit
                 };
                 let err_val = if let Some((slot, ty)) = err_slot {
                     let addr = builder
@@ -1738,7 +1741,8 @@ fn emit_expr(
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
-                    ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))
+                    // err_ty is Unit, so return ValueRepr::Unit (zero-sized)
+                    ValueRepr::Unit
                 };
                 match &info.sig.ret {
                     TyKind::Result(_, _) => Ok(ValueRepr::Result {
@@ -1923,10 +1927,41 @@ fn emit_match_stmt(
         module,
         data_counter,
     )?;
+
+    // Special handling for matching on Unit
+    let is_unit_match = matches!(value, ValueRepr::Unit);
+    if is_unit_match {
+        // When matching on unit, only wildcard (_), binding, or unit literal patterns are valid.
+        // The typechecker should enforce this, but we validate in codegen as a safety check.
+        for arm in &match_expr.arms {
+            match &arm.pattern {
+                Pattern::Wildcard(_) | Pattern::Binding(_) => {
+                    // These are always valid for unit
+                }
+                Pattern::Path(path) if path.segments.len() == 1 => {
+                    // Single-segment paths are effectively bindings in the current parser
+                    // (used for match arm binding patterns like `match () { x => ... }`)
+                }
+                Pattern::Literal(Literal::Unit) => {
+                    // Unit literal pattern is valid for unit
+                }
+                _ => {
+                    return Err(CodegenError::Codegen(format!(
+                        "Invalid pattern for unit match: {:?}. Only _, binding, or () patterns are allowed.",
+                        arm.pattern
+                    )));
+                }
+            }
+        }
+    }
+
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
-        ValueRepr::Unit => return Err(CodegenError::Unsupported("match on unit".to_string())),
+        // Unit has only one value, so we use a dummy for pattern matching.
+        // Pattern validation above ensures only wildcard/binding/unit-literal patterns are used.
+        // Use I32 to match enum variant dispatch type (most common case).
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -2022,10 +2057,41 @@ fn emit_match_expr(
         module,
         data_counter,
     )?;
+
+    // Special handling for matching on Unit
+    let is_unit_match = matches!(value, ValueRepr::Unit);
+    if is_unit_match {
+        // When matching on unit, only wildcard (_), binding, or unit literal patterns are valid.
+        // The typechecker should enforce this, but we validate in codegen as a safety check.
+        for arm in &match_expr.arms {
+            match &arm.pattern {
+                Pattern::Wildcard(_) | Pattern::Binding(_) => {
+                    // These are always valid for unit
+                }
+                Pattern::Path(path) if path.segments.len() == 1 => {
+                    // Single-segment paths are effectively bindings in the current parser
+                    // (used for match arm binding patterns like `match () { x => ... }`)
+                }
+                Pattern::Literal(Literal::Unit) => {
+                    // Unit literal pattern is valid for unit
+                }
+                _ => {
+                    return Err(CodegenError::Codegen(format!(
+                        "Invalid pattern for unit match: {:?}. Only _, binding, or () patterns are allowed.",
+                        arm.pattern
+                    )));
+                }
+            }
+        }
+    }
+
     let (match_val, match_result) = match value.clone() {
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
-        ValueRepr::Unit => return Err(CodegenError::Unsupported("match on unit".to_string())),
+        // Unit has only one value, so we use a dummy for pattern matching.
+        // Pattern validation above ensures only wildcard/binding/unit-literal patterns are used.
+        // Use I32 to match enum variant dispatch type (most common case).
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
         ValueRepr::Pair(_, _) => {
             return Err(CodegenError::Unsupported("match on string".to_string()))
         }
@@ -2099,11 +2165,7 @@ fn emit_match_expr(
         let values = match &arm_value {
             ValueRepr::Single(val) => vec![*val],
             ValueRepr::Pair(a, b) => vec![*a, *b],
-            ValueRepr::Unit => {
-                return Err(CodegenError::Unsupported(
-                    "match arm returns unit".to_string(),
-                ))
-            }
+            ValueRepr::Unit => vec![],
             ValueRepr::Result { .. } => {
                 return Err(CodegenError::Unsupported("match result value".to_string()))
             }
@@ -2123,6 +2185,7 @@ fn emit_match_expr(
             }
             result_shape = Some(ResultShape {
                 kind: match &arm_value {
+                    ValueRepr::Unit => ResultKind::Unit,
                     ValueRepr::Single(_) => ResultKind::Single,
                     ValueRepr::Pair(_, _) => ResultKind::Pair,
                     _ => ResultKind::Single,
@@ -2160,6 +2223,7 @@ fn emit_match_expr(
         loaded.push(builder.ins().stack_load(*ty, *slot, 0));
     }
     let result = match shape.kind {
+        ResultKind::Unit => ValueRepr::Unit,
         ResultKind::Single => ValueRepr::Single(loaded[0]),
         ResultKind::Pair => ValueRepr::Pair(loaded[0], loaded[1]),
     };
@@ -2175,8 +2239,9 @@ fn match_pattern_cond(
 ) -> Result<ir::Value, CodegenError> {
     match pattern {
         Pattern::Wildcard(_) | Pattern::Binding(_) => {
-            let one = builder.ins().iconst(ir::types::I8, 1);
-            Ok(builder.ins().icmp_imm(IntCC::NotEqual, one, 0))
+            // Wildcard and binding patterns always match - return a constant true condition
+            let one = builder.ins().iconst(ir::types::I32, 1);
+            Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1))
         }
         Pattern::Literal(lit) => match lit {
             Literal::Bool(value) => {
@@ -2213,6 +2278,13 @@ fn match_pattern_cond(
             Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
         }
         Pattern::Path(path) => {
+            // Single-segment paths are binding patterns (always match)
+            if path.segments.len() == 1 {
+                // Return a constant true condition
+                let one = builder.ins().iconst(ir::types::I32, 1);
+                return Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1));
+            }
+            // Multi-segment paths are enum variant patterns
             let Some(index) = resolve_enum_variant(path, use_map, enum_index) else {
                 return Err(CodegenError::Unsupported("path pattern".to_string()));
             };
@@ -2230,15 +2302,19 @@ fn bind_match_pattern_value(
     locals: &mut HashMap<String, LocalValue>,
 ) -> Result<(), CodegenError> {
     match pattern {
-        Pattern::Binding(ident) => match value {
-            ValueRepr::Result { .. } => Err(CodegenError::Unsupported(
-                "binding result value".to_string(),
-            )),
-            _ => {
-                locals.insert(ident.item.clone(), store_local(builder, value.clone()));
-                Ok(())
-            }
-        },
+        Pattern::Binding(ident) => {
+            // Bind any value type - store_local handles all ValueRepr variants
+            locals.insert(ident.item.clone(), store_local(builder, value.clone()));
+            Ok(())
+        }
+        Pattern::Path(path) if path.segments.len() == 1 => {
+            // Single-segment paths are used as binding patterns by the parser
+            // (e.g., `match () { x => ... }`)
+            let ident = &path.segments[0];
+            // Bind any value type - store_local handles all ValueRepr variants
+            locals.insert(ident.item.clone(), store_local(builder, value.clone()));
+            Ok(())
+        }
         Pattern::Call { path, binding, .. } => {
             let name = path
                 .segments
@@ -2423,33 +2499,43 @@ fn value_from_params(
     ty: &TyKind,
     params: &[ir::Value],
     idx: &mut usize,
-) -> ValueRepr {
+) -> Result<ValueRepr, CodegenError> {
     match ty {
-        TyKind::Unit => ValueRepr::Unit,
+        TyKind::Unit => Ok(ValueRepr::Unit),
         TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
             let val = params[*idx];
             *idx += 1;
-            ValueRepr::Single(val)
+            Ok(ValueRepr::Single(val))
         }
         TyKind::String => {
             let ptr = params[*idx];
             let len = params[*idx + 1];
             *idx += 2;
-            ValueRepr::Pair(ptr, len)
+            Ok(ValueRepr::Pair(ptr, len))
         }
         TyKind::Result(ok, err) => {
             let tag = params[*idx];
             *idx += 1;
-            let ok_val = value_from_params(builder, ok, params, idx);
-            let err_val = value_from_params(builder, err, params, idx);
-            ValueRepr::Result {
+            let ok_val = value_from_params(builder, ok, params, idx)?;
+            let err_val = value_from_params(builder, err, params, idx)?;
+            Ok(ValueRepr::Result {
                 tag,
                 ok: Box::new(ok_val),
                 err: Box::new(err_val),
-            }
+            })
         }
-        TyKind::ResultOut(_, _) => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
-        TyKind::ResultString => ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)),
+        // ResultOut and ResultString are ABI-level return types, not input types.
+        // They should never appear as function parameters.
+        TyKind::ResultOut(ok, err) => {
+            Err(CodegenError::Codegen(format!(
+                "ResultOut<{ok:?}, {err:?}> cannot be a parameter type (ABI return type only)"
+            )))
+        }
+        TyKind::ResultString => {
+            Err(CodegenError::Codegen(
+                "ResultString cannot be a parameter type (ABI return type only)".to_string()
+            ))
+        }
     }
 }
 

@@ -1,0 +1,14 @@
+module unit_return
+use sys.system
+use sys.console
+
+fn helper() -> unit {
+  return ()
+}
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  helper()
+  console.println(c, "unit return ok")
+  return 0
+}

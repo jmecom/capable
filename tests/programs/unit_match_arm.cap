@@ -1,0 +1,12 @@
+module unit_match_arm
+use sys.system
+use sys.console
+
+pub fn main(sys: System) -> i32 {
+  let c = system.console(sys)
+  match true {
+    true => { console.println(c, "unit match arm ok") }
+    false => { console.println(c, "wrong branch") }
+  }
+  return 0
+}
