@@ -17,7 +17,7 @@ fn main(rc: RootCap) {
 
   // Attempt to read beyond the capability's scopes: this will print "blocked".
   match fs.read_to_string("../etc/passwd") {
-    Ok(_)  => console.println("BUG: escaped sandbox"),
+    Ok(_)  => console.println("BUG: escaped"),
     Err(_) => console.println("blocked"),
   }
 }
