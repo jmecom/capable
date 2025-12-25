@@ -1927,22 +1927,27 @@ fn emit_expr(
             data_counter,
         ),
         Expr::FieldAccess(field_access) => {
-            // First, check if the base is a local variable by finding the leftmost segment
-            // If so, this is field access on a value, not a module/enum path
+            // Disambiguation rule: enum/module paths vs value field access
+            // If the leftmost segment is a local variable, treat as field access.
+            // If it's not a pure identifier.identifier... chain, treat as field access.
             fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
                 match expr {
+                    // Note: After P0.5, parse_primary creates single-segment Paths only.
+                    // Multi-segment paths don't exist in expressions anymore (dots become FieldAccess).
                     Expr::Path(path) if path.segments.len() == 1 => {
                         Some(&path.segments[0].item)
                     }
                     Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
-                    _ => None,
+                    _ => None,  // Not a simple chain (e.g., call result, literal, etc.)
                 }
             }
 
             let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
                 locals.contains_key(base_name)
             } else {
-                true  // Not a simple path chain, conservatively assume it's field access
+                // Language rule: if it's not a pure a.b.c chain (e.g., f().x or 123.x),
+                // treat as value field access, not a module/enum path
+                true
             };
 
             if !base_is_local {
