@@ -1611,10 +1611,10 @@ fn emit_expr(
             Err(CodegenError::UnknownVariable(path.to_string()))
         }
         Expr::Call(call) => {
-            let callee_path = match &*call.callee {
-                Expr::Path(path) => resolve_call_path(path, module_name, use_map),
-                _ => return Err(CodegenError::Unsupported("call target".to_string())),
-            };
+            // Convert the callee (Path or FieldAccess chain) to a Path for function lookup
+            let path = call.callee.to_path()
+                .ok_or_else(|| CodegenError::Unsupported("call target".to_string()))?;
+            let callee_path = resolve_call_path(&path, module_name, use_map);
             let info = fn_map
                 .get(&callee_path)
                 .ok_or_else(|| CodegenError::UnknownFunction(callee_path.clone()))?
@@ -1926,7 +1926,46 @@ fn emit_expr(
             module,
             data_counter,
         ),
-        Expr::StructLiteral(_) => Err(CodegenError::Unsupported("expression".to_string())),
+        Expr::FieldAccess(field_access) => {
+            // Disambiguation rule: enum/module paths vs value field access
+            // If the leftmost segment is a local variable, treat as field access.
+            // If it's not a pure identifier.identifier... chain, treat as field access.
+            fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    // Note: After P0.5, parse_primary creates single-segment Paths only.
+                    // Multi-segment paths don't exist in expressions anymore (dots become FieldAccess).
+                    Expr::Path(path) if path.segments.len() == 1 => {
+                        Some(&path.segments[0].item)
+                    }
+                    Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
+                    _ => None,  // Not a simple chain (e.g., call result, literal, etc.)
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                locals.contains_key(base_name)
+            } else {
+                // Language rule: if it's not a pure a.b.c chain (e.g., f().x or 123.x),
+                // treat as value field access, not a module/enum path
+                true
+            };
+
+            if !base_is_local {
+                // Try to convert the FieldAccess chain to a Path and resolve as an enum variant
+                // This handles cases like fs.FsErr.InvalidPath where fs is a module, not a local
+                if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
+                    if let Some(index) = resolve_enum_variant(&path, use_map, enum_index) {
+                        return Ok(ValueRepr::Single(
+                            builder.ins().iconst(ir::types::I32, i64::from(index)),
+                        ));
+                    }
+                }
+            }
+
+            // If not an enum variant, we don't support actual struct field access yet
+            Err(CodegenError::Unsupported("field access on struct values".to_string()))
+        }
+        Expr::StructLiteral(_) => Err(CodegenError::Unsupported("struct literal expression".to_string())),
     }
 }
 

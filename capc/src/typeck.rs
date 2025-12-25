@@ -842,49 +842,51 @@ fn check_expr(
                 path.span,
             ))
         }
-        Expr::Call(call) => match &*call.callee {
-            Expr::Path(path) => {
-                let resolved = resolve_path(path, use_map);
-                let key = resolved.join(".");
-                let sig = functions.get(&key).ok_or_else(|| {
-                    TypeError::new(format!("unknown function `{key}`"), path.span)
-                })?;
-                if sig.params.len() != call.args.len() {
+        Expr::Call(call) => {
+            // Convert the callee (Path or FieldAccess chain) to a Path for function lookup
+            let path = call.callee.to_path().ok_or_else(|| {
+                TypeError::new(
+                    "call target must be a function path".to_string(),
+                    call.callee.span(),
+                )
+            })?;
+
+            let resolved = resolve_path(&path, use_map);
+            let key = resolved.join(".");
+            let sig = functions.get(&key).ok_or_else(|| {
+                TypeError::new(format!("unknown function `{key}`"), path.span)
+            })?;
+            if sig.params.len() != call.args.len() {
+                return Err(TypeError::new(
+                    format!(
+                        "argument count mismatch: expected {}, found {}",
+                        sig.params.len(),
+                        call.args.len()
+                    ),
+                    call.span,
+                ));
+            }
+            for (arg, expected) in call.args.iter().zip(&sig.params) {
+                let arg_ty = check_expr(
+                    arg,
+                    functions,
+                    locals,
+                    use_map,
+                    struct_map,
+                    enum_map,
+                    stdlib,
+                    ret_ty,
+                    module_name,
+                )?;
+                if &arg_ty != expected {
                     return Err(TypeError::new(
-                        format!(
-                            "argument count mismatch: expected {}, found {}",
-                            sig.params.len(),
-                            call.args.len()
-                        ),
-                        call.span,
+                        format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
+                        arg.span(),
                     ));
                 }
-                for (arg, expected) in call.args.iter().zip(&sig.params) {
-                    let arg_ty = check_expr(
-                        arg,
-                        functions,
-                        locals,
-                        use_map,
-                        struct_map,
-                        enum_map,
-                        stdlib,
-                        ret_ty,
-                        module_name,
-                    )?;
-                    if &arg_ty != expected {
-                        return Err(TypeError::new(
-                            format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
-                            arg.span(),
-                        ));
-                    }
-                }
-                Ok(sig.ret.clone())
             }
-            _ => Err(TypeError::new(
-                "call target must be a function path".to_string(),
-                call.callee.span(),
-            )),
-        },
+            Ok(sig.ret.clone())
+        }
         Expr::StructLiteral(lit) => check_struct_literal(
             lit,
             functions,
@@ -1028,6 +1030,47 @@ fn check_expr(
             ret_ty,
             module_name,
         ),
+        Expr::FieldAccess(field_access) => {
+            // Disambiguation rule: enum/module paths vs value field access
+            // If the leftmost segment is a local variable, treat as field access.
+            // If it's not a pure identifier.identifier... chain, treat as field access.
+            fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    // Note: After P0.5, parse_primary creates single-segment Paths only.
+                    // Multi-segment paths don't exist in expressions anymore (dots become FieldAccess).
+                    Expr::Path(path) if path.segments.len() == 1 => {
+                        Some(&path.segments[0].item)
+                    }
+                    Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
+                    _ => None,  // Not a simple chain (e.g., call result, literal, etc.)
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                locals.contains_key(base_name)
+            } else {
+                // Language rule: if it's not a pure a.b.c chain (e.g., f().x or 123.x),
+                // treat as value field access, not a module/enum path
+                true
+            };
+
+            if !base_is_local {
+                // Try to convert the FieldAccess chain to a Path and resolve as an enum variant
+                // This handles cases like fs.FsErr.InvalidPath where fs is a module, not a local
+                if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
+                    if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map) {
+                        return Ok(ty);
+                    }
+                }
+            }
+
+            // Real struct field access is not yet implemented in codegen
+            // Reject it here to avoid typechecking programs that will fail codegen
+            Err(TypeError::new(
+                "struct field access not yet implemented".to_string(),
+                field_access.span,
+            ))
+        }
     }
 }
 
@@ -1391,6 +1434,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::FieldAccess(field) => field.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

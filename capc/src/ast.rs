@@ -190,6 +190,7 @@ pub enum Expr {
     Literal(LiteralExpr),
     Path(Path),
     Call(CallExpr),
+    FieldAccess(FieldAccessExpr),
     StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
@@ -256,6 +257,13 @@ impl fmt::Display for Path {
 pub struct CallExpr {
     pub callee: Box<Expr>,
     pub args: Vec<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldAccessExpr {
+    pub object: Box<Expr>,
+    pub field: Ident,
     pub span: Span,
 }
 
@@ -334,6 +342,25 @@ impl Type {
         match self {
             Type::Path { span, .. } => *span,
             Type::Ptr { span, .. } => *span,
+        }
+    }
+}
+
+impl Expr {
+    /// Converts an expression to a Path if possible.
+    /// This handles converting FieldAccess chains and single Paths.
+    /// Used for resolving module-qualified names and enum variants.
+    pub fn to_path(&self) -> Option<Path> {
+        match self {
+            Expr::Path(path) => Some(path.clone()),
+            Expr::FieldAccess(field_access) => {
+                // Recursively convert the object to a path, then append the field
+                let mut base_path = field_access.object.to_path()?;
+                base_path.segments.push(field_access.field.clone());
+                base_path.span = Span::new(base_path.span.start, field_access.field.span.end);
+                Some(base_path)
+            }
+            _ => None,
         }
     }
 }

@@ -443,6 +443,54 @@ impl Parser {
         let mut lhs = self.parse_prefix()?;
 
         loop {
+            // First, check for postfix operators
+            if let Some(kind) = self.peek_kind() {
+                if let Some(bp) = postfix_binding_power(&kind) {
+                    if bp < min_bp {
+                        break;
+                    }
+
+                    match kind {
+                        TokenKind::Dot => {
+                            let start = lhs.span().start;
+                            self.bump(); // consume '.'
+                            let field = self.expect_ident()?;
+                            let span = Span::new(start, field.span.end);
+
+                            // Check if this is a struct literal (followed by '{')
+                            if self.peek_kind() == Some(TokenKind::LBrace) {
+                                // Convert the lhs and field into a path for the struct literal
+                                let mut path = match lhs {
+                                    Expr::Path(p) => p,
+                                    Expr::FieldAccess(ref fa) => {
+                                        // Convert FieldAccess chain to Path
+                                        self.field_access_to_path(fa)?
+                                    }
+                                    _ => return Err(self.error_current("expected path before struct literal".to_string())),
+                                };
+                                path.segments.push(field);
+                                path.span = Span::new(path.span.start, path.segments.last().unwrap().span.end);
+                                lhs = self.parse_struct_literal(path)?;
+                                continue;
+                            }
+
+                            lhs = Expr::FieldAccess(FieldAccessExpr {
+                                object: Box::new(lhs),
+                                field,
+                                span,
+                            });
+                            continue;
+                        }
+                        TokenKind::LParen => {
+                            lhs = self.finish_call(lhs)?;
+                            continue;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+
+            // Then, check for binary operators
             let op = match self.peek_kind() {
                 Some(TokenKind::OrOr) => BinaryOp::Or,
                 Some(TokenKind::AndAnd) => BinaryOp::And,
@@ -456,10 +504,6 @@ impl Parser {
                 Some(TokenKind::Minus) => BinaryOp::Sub,
                 Some(TokenKind::Star) => BinaryOp::Mul,
                 Some(TokenKind::Slash) => BinaryOp::Div,
-                Some(TokenKind::LParen) => {
-                    lhs = self.finish_call(lhs)?;
-                    continue;
-                }
                 _ => break,
             };
 
@@ -579,7 +623,11 @@ impl Parser {
                 }
             }
             Some(TokenKind::Ident) => {
-                let path = self.parse_path()?;
+                let ident = self.expect_ident()?;
+                let path = Path {
+                    segments: vec![ident.clone()],
+                    span: ident.span,
+                };
                 if self.peek_kind() == Some(TokenKind::LBrace) {
                     self.parse_struct_literal(path)
                 } else {
@@ -677,6 +725,38 @@ impl Parser {
             segments.push(self.expect_ident()?);
         }
         let end = segments.last().map(|s| s.span.end).unwrap_or(start);
+        Ok(Path {
+            segments,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn field_access_to_path(&self, field_access: &FieldAccessExpr) -> Result<Path, ParseError> {
+        let mut segments = Vec::new();
+
+        // Recursively collect segments from the object
+        fn collect_segments(expr: &Expr, segments: &mut Vec<Ident>) -> Option<()> {
+            match expr {
+                Expr::Path(path) => {
+                    segments.extend(path.segments.clone());
+                    Some(())
+                }
+                Expr::FieldAccess(fa) => {
+                    collect_segments(&fa.object, segments)?;
+                    segments.push(fa.field.clone());
+                    Some(())
+                }
+                _ => None,
+            }
+        }
+
+        collect_segments(&field_access.object, &mut segments)
+            .ok_or_else(|| self.error_at(field_access.span, "expected path or field access".to_string()))?;
+        segments.push(field_access.field.clone());
+
+        let start = segments.first().map(|s| s.span.start).unwrap_or(field_access.span.start);
+        let end = segments.last().map(|s| s.span.end).unwrap_or(field_access.span.end);
+
         Ok(Path {
             segments,
             span: Span::new(start, end),
@@ -843,6 +923,13 @@ fn infix_binding_power(op: &BinaryOp) -> (u8, u8) {
     }
 }
 
+fn postfix_binding_power(kind: &TokenKind) -> Option<u8> {
+    match kind {
+        TokenKind::Dot | TokenKind::LParen => Some(13),
+        _ => None,
+    }
+}
+
 fn unescape_string(text: &str) -> Result<String, String> {
     let mut chars = text.chars();
     if chars.next() != Some('"') || text.len() < 2 {
@@ -885,6 +972,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::FieldAccess(field) => field.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

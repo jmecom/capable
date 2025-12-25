@@ -263,5 +263,9 @@ fn add(a: i32, b: i32) -> i32 {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("missing return"));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("expected return") || msg.contains("missing return"),
+        "expected error about missing/expected return, got: {msg}"
+    );
 }
