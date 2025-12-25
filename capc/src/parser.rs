@@ -455,7 +455,6 @@ impl Parser {
                             let start = lhs.span().start;
                             self.bump(); // consume '.'
                             let field = self.expect_ident()?;
-                            let span = Span::new(start, field.span.end);
 
                             // Check if this is a struct literal (followed by '{')
                             if self.peek_kind() == Some(TokenKind::LBrace) {
@@ -474,6 +473,30 @@ impl Parser {
                                 continue;
                             }
 
+                            // Check if this is a method call (followed by '(')
+                            if self.peek_kind() == Some(TokenKind::LParen) {
+                                self.bump(); // consume '('
+                                let mut args = Vec::new();
+                                if self.peek_kind() != Some(TokenKind::RParen) {
+                                    loop {
+                                        args.push(self.parse_expr()?);
+                                        if self.maybe_consume(TokenKind::Comma).is_none() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                let end = self.expect(TokenKind::RParen)?.span.end;
+                                lhs = Expr::MethodCall(MethodCallExpr {
+                                    receiver: Box::new(lhs),
+                                    method: field,
+                                    args,
+                                    span: Span::new(start, end),
+                                });
+                                continue;
+                            }
+
+                            // Otherwise, it's a field access
+                            let span = Span::new(start, field.span.end);
                             lhs = Expr::FieldAccess(FieldAccessExpr {
                                 object: Box::new(lhs),
                                 field,
@@ -972,6 +995,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::MethodCall(method_call) => method_call.span,
             Expr::FieldAccess(field) => field.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,

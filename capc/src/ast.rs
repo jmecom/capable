@@ -190,6 +190,7 @@ pub enum Expr {
     Literal(LiteralExpr),
     Path(Path),
     Call(CallExpr),
+    MethodCall(MethodCallExpr),
     FieldAccess(FieldAccessExpr),
     StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
@@ -264,6 +265,14 @@ pub struct CallExpr {
 pub struct FieldAccessExpr {
     pub object: Box<Expr>,
     pub field: Ident,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodCallExpr {
+    pub receiver: Box<Expr>,
+    pub method: Ident,
+    pub args: Vec<Expr>,
     pub span: Span,
 }
 

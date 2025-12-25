@@ -13,7 +13,7 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use thiserror::Error;
 
 use crate::ast::{
-    BinaryOp, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Stmt,
+    BinaryOp, CallExpr, Expr, Item, Literal, Module as AstModule, Path as AstPath, Pattern, Stmt,
     Type as AstType, UnaryOp,
 };
 
@@ -1926,6 +1926,29 @@ fn emit_expr(
             module,
             data_counter,
         ),
+        Expr::MethodCall(method_call) => {
+            // For now, convert MethodCall to Call and reuse existing logic
+            // This handles module.function(args) which now parses as MethodCall
+            let mut path_segments = Vec::new();
+            if let Expr::Path(path) = &*method_call.receiver {
+                path_segments.extend(path.segments.clone());
+            } else {
+                return Err(CodegenError::Unsupported("method calls on non-path receivers".to_string()));
+            }
+            path_segments.push(method_call.method.clone());
+            let callee = Expr::Path(AstPath {
+                segments: path_segments,
+                span: method_call.span,
+            });
+
+            // Convert to Call and reuse existing logic
+            let call = CallExpr {
+                callee: Box::new(callee),
+                args: method_call.args.clone(),
+                span: method_call.span,
+            };
+            emit_expr(builder, &Expr::Call(call), locals, fn_map, use_map, module_name, stdlib, enum_index, module, data_counter)
+        }
         Expr::FieldAccess(field_access) => {
             // Disambiguation rule: enum/module paths vs value field access
             // If the leftmost segment is a local variable, treat as field access.
