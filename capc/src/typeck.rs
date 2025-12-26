@@ -25,6 +25,8 @@ pub enum BuiltinType {
 struct FunctionSig {
     params: Vec<Ty>,
     ret: Ty,
+    module: String,
+    is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +154,53 @@ fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
     path.segments.iter().map(|seg| seg.item.clone()).collect()
 }
 
+fn resolve_method_target(
+    receiver_ty: &Ty,
+    module_name: &str,
+    struct_map: &HashMap<String, StructInfo>,
+    span: Span,
+) -> Result<(String, String, Vec<Ty>), TypeError> {
+    let Ty::Path(receiver_name, receiver_args) = receiver_ty else {
+        return Err(TypeError::new(
+            "method receiver must be a struct value".to_string(),
+            span,
+        ));
+    };
+
+    if let Some(info) = struct_map.get(receiver_name) {
+        let type_name = receiver_name
+            .rsplit_once('.')
+            .map(|(_, t)| t)
+            .unwrap_or(receiver_name)
+            .to_string();
+        return Ok((info.module.clone(), type_name, receiver_args.clone()));
+    }
+
+    if receiver_name.contains('.') {
+        let (mod_part, type_part) = receiver_name.rsplit_once('.').ok_or_else(|| {
+            TypeError::new("invalid type path".to_string(), span)
+        })?;
+        return Ok((
+            mod_part.to_string(),
+            type_part.to_string(),
+            receiver_args.clone(),
+        ));
+    }
+
+    if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
+        return Ok((
+            info.module.clone(),
+            receiver_name.clone(),
+            receiver_args.clone(),
+        ));
+    }
+
+    Err(TypeError::new(
+        format!("unknown struct `{receiver_name}`"),
+        span,
+    ))
+}
+
 fn build_stdlib_index(stdlib: &[Module]) -> Result<StdlibIndex, TypeError> {
     let mut types = HashMap::new();
     for module in stdlib {
@@ -205,17 +254,28 @@ fn collect_functions(
                     .map(|p| lower_type(&p.ty, &local_use, stdlib))
                     .collect::<Result<_, _>>()?,
                 ret: lower_type(ret, &local_use, stdlib)?,
+                module: module_name.clone(),
+                is_pub: match item {
+                    Item::Function(func) => func.is_pub,
+                    Item::ExternFunction(func) => func.is_pub,
+                    _ => false,
+                },
             };
-            let key = if module_name == entry_name {
-                name.item.clone()
-            } else {
-                format!("{module_name}.{}", name.item)
-            };
-            if functions.insert(key.clone(), sig).is_some() {
+            let qualified_key = format!("{module_name}.{}", name.item);
+            if functions.insert(qualified_key.clone(), sig.clone()).is_some() {
                 return Err(TypeError::new(
-                    format!("duplicate function `{key}`"),
+                    format!("duplicate function `{qualified_key}`"),
                     span,
                 ));
+            }
+            if module_name == entry_name {
+                let key = name.item.clone();
+                if functions.insert(key.clone(), sig).is_some() {
+                    return Err(TypeError::new(
+                        format!("duplicate function `{key}`"),
+                        span,
+                    ));
+                }
             }
         }
     }
@@ -950,6 +1010,12 @@ fn check_expr(
             } else {
                 return Err(TypeError::new(format!("unknown function `{key}`"), path.span));
             };
+            if sig.module != module_name && !sig.is_pub {
+                return Err(TypeError::new(
+                    format!("function `{}` is private", key),
+                    call.span,
+                ));
+            }
             if sig.params.len() != call.args.len() {
                 return Err(TypeError::new(
                     format!(
@@ -1021,6 +1087,12 @@ fn check_expr(
                 let sig = functions.get(&key).ok_or_else(|| {
                     TypeError::new(format!("unknown function `{key}`"), path.span)
                 })?;
+                if sig.module != module_name && !sig.is_pub {
+                    return Err(TypeError::new(
+                        format!("function `{key}` is private"),
+                        method_call.span,
+                    ));
+                }
                 if sig.params.len() != method_call.args.len() {
                     return Err(TypeError::new(
                         format!(
@@ -1067,34 +1139,12 @@ fn check_expr(
                 ret_ty,
                 module_name,
             )?;
-            let Ty::Path(receiver_name, _) = &receiver_ty else {
-                return Err(TypeError::new(
-                    "method receiver must be a struct value".to_string(),
-                    method_call.receiver.span(),
-                ));
-            };
-            let (method_module, type_name) = if let Some(info) = struct_map.get(receiver_name) {
-                (
-                    info.module.clone(),
-                    receiver_name
-                        .rsplit_once('.')
-                        .map(|(_, t)| t)
-                        .unwrap_or(receiver_name)
-                        .to_string(),
-                )
-            } else if receiver_name.contains('.') {
-                let (mod_part, type_part) = receiver_name
-                    .rsplit_once('.')
-                    .ok_or_else(|| TypeError::new("invalid type path".to_string(), method_call.span))?;
-                (mod_part.to_string(), type_part.to_string())
-            } else if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
-                (info.module.clone(), receiver_name.clone())
-            } else {
-                return Err(TypeError::new(
-                    format!("unknown struct `{receiver_name}`"),
-                    method_call.receiver.span(),
-                ));
-            };
+            let (method_module, type_name, receiver_args) = resolve_method_target(
+                &receiver_ty,
+                module_name,
+                struct_map,
+                method_call.receiver.span(),
+            )?;
             let method_fn = format!("{type_name}__{}", method_call.method.item);
             let qualified_key = format!("{method_module}.{method_fn}");
             let key = if functions.contains_key(&qualified_key) {
@@ -1110,6 +1160,12 @@ fn check_expr(
             let sig = functions
                 .get(&key)
                 .ok_or_else(|| TypeError::new(format!("unknown method `{key}`"), method_call.span))?;
+            if sig.module != module_name && !sig.is_pub {
+                return Err(TypeError::new(
+                    format!("method `{key}` is private"),
+                    method_call.span,
+                ));
+            }
             if sig.params.len() != method_call.args.len() + 1 {
                 return Err(TypeError::new(
                     format!(
@@ -1121,7 +1177,7 @@ fn check_expr(
                 ));
             }
             let receiver_ptr = Ty::Ptr(Box::new(receiver_ty.clone()));
-            let receiver_unqualified = Ty::Path(type_name.clone(), Vec::new());
+            let receiver_unqualified = Ty::Path(type_name.clone(), receiver_args);
             let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
             if sig.params[0] != receiver_ty
                 && sig.params[0] != receiver_ptr
@@ -2219,34 +2275,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
             let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
-            let Ty::Path(receiver_name, _) = &receiver_ty else {
-                return Err(TypeError::new(
-                    "method receiver must be a struct value".to_string(),
-                    method_call.receiver.span(),
-                ));
-            };
-            let (method_module, type_name) = if let Some(info) = ctx.structs.get(receiver_name) {
-                (
-                    info.module.clone(),
-                    receiver_name
-                        .rsplit_once('.')
-                        .map(|(_, t)| t)
-                        .unwrap_or(receiver_name)
-                        .to_string(),
-                )
-            } else if receiver_name.contains('.') {
-                let (mod_part, type_part) = receiver_name
-                    .rsplit_once('.')
-                    .ok_or_else(|| TypeError::new("invalid type path".to_string(), method_call.span))?;
-                (mod_part.to_string(), type_part.to_string())
-            } else if let Some(info) = ctx.structs.get(&format!("{}.{}", ctx.module_name, receiver_name)) {
-                (info.module.clone(), receiver_name.clone())
-            } else {
-                return Err(TypeError::new(
-                    format!("unknown struct `{receiver_name}`"),
-                    method_call.receiver.span(),
-                ));
-            };
+            let (method_module, type_name, _) = resolve_method_target(
+                &receiver_ty,
+                ctx.module_name,
+                ctx.structs,
+                method_call.receiver.span(),
+            )?;
             let method_fn = format!("{type_name}__{}", method_call.method.item);
             let key = format!("{method_module}.{method_fn}");
             let symbol = format!("capable_{}", key.replace('.', "_"));
