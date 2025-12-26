@@ -113,6 +113,7 @@ struct StructLayout {
     size: u32,
     align: u32,
     fields: HashMap<String, StructFieldLayout>,
+    field_order: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -143,7 +144,7 @@ enum ValueRepr {
 enum LocalValue {
     Value(ValueRepr),
     Slot(ir::StackSlot, Type),
-    StructSlot(ir::StackSlot, crate::typeck::Ty),
+    StructSlot(ir::StackSlot, crate::typeck::Ty, u32),
 }
 
 #[derive(Clone, Debug)]
@@ -1479,7 +1480,7 @@ fn emit_stmt(
                     };
                     builder.ins().stack_store(val, *slot, 0);
                 }
-                LocalValue::StructSlot(_, _) => {
+                LocalValue::StructSlot(_, _, _) => {
                     return Err(CodegenError::Unsupported("struct assignment".to_string()));
                 }
                 LocalValue::Value(_) => {
@@ -2524,14 +2525,18 @@ fn emit_hir_stmt(
             if let Some(layout) =
                 resolve_struct_layout(&let_stmt.ty, "", &struct_layouts.layouts)
             {
-                let slot_size = align_to(layout.size.max(1), layout.align.max(1));
+                let align = layout.align.max(1);
+                let slot_size = layout.size.max(1).saturating_add(align - 1);
                 let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
                     slot_size,
                 ));
-                let base_ptr = builder
-                    .ins()
-                    .stack_addr(module.isa().pointer_type(), slot, 0);
+                let base_ptr = aligned_stack_addr(
+                    builder,
+                    slot,
+                    align,
+                    module.isa().pointer_type(),
+                );
                 store_value_by_ty(
                     builder,
                     base_ptr,
@@ -2543,7 +2548,7 @@ fn emit_hir_stmt(
                 )?;
                 locals.insert(
                     let_stmt.name.clone(),
-                    LocalValue::StructSlot(slot, let_stmt.ty.clone()),
+                    LocalValue::StructSlot(slot, let_stmt.ty.clone(), align),
                 );
             } else {
                 let local = store_local(builder, value);
@@ -2571,10 +2576,13 @@ fn emit_hir_stmt(
                     };
                     builder.ins().stack_store(val, *slot, 0);
                 }
-                LocalValue::StructSlot(slot, ty) => {
-                    let base_ptr = builder
-                        .ins()
-                        .stack_addr(module.isa().pointer_type(), *slot, 0);
+                LocalValue::StructSlot(slot, ty, align) => {
+                    let base_ptr = aligned_stack_addr(
+                        builder,
+                        *slot,
+                        *align,
+                        module.isa().pointer_type(),
+                    );
                     store_value_by_ty(
                         builder,
                         base_ptr,
@@ -3265,12 +3273,13 @@ fn emit_hir_struct_literal(
             ))
         })?;
     let ptr_ty = module.isa().pointer_type();
-    let slot_size = align_to(layout.size.max(1), layout.align.max(1));
+    let align = layout.align.max(1);
+    let slot_size = layout.size.max(1).saturating_add(align - 1);
     let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
         ir::StackSlotKind::ExplicitSlot,
         slot_size,
     ));
-    let base_ptr = builder.ins().stack_addr(ptr_ty, slot, 0);
+    let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
 
     for field in &literal.fields {
         let Some(field_layout) = layout.fields.get(&field.name) else {
@@ -3437,15 +3446,18 @@ fn store_value_by_ty(
             }
 
             if let Some(layout) = resolve_struct_layout(ty, "", &struct_layouts.layouts) {
-                let ValueRepr::Single(src_ptr) = value else {
-                    return Err(CodegenError::Unsupported("store struct".to_string()));
-                };
-                for field in layout.fields.values() {
-                    let field_value = load_value_by_ty(
-                        builder,
-                        src_ptr,
-                        field.offset,
-                        &field.ty,
+    let ValueRepr::Single(src_ptr) = value else {
+        return Err(CodegenError::Unsupported("store struct".to_string()));
+    };
+    for name in &layout.field_order {
+        let Some(field) = layout.fields.get(name) else {
+            continue;
+        };
+        let field_value = load_value_by_ty(
+            builder,
+            src_ptr,
+            field.offset,
+            &field.ty,
                         struct_layouts,
                         module,
                     )?;
@@ -3595,6 +3607,21 @@ fn ptr_add(builder: &mut FunctionBuilder, base: ir::Value, offset: u32) -> ir::V
     } else {
         builder.ins().iadd_imm(base, i64::from(offset))
     }
+}
+
+fn aligned_stack_addr(
+    builder: &mut FunctionBuilder,
+    slot: ir::StackSlot,
+    align: u32,
+    ptr_ty: Type,
+) -> ir::Value {
+    let base = builder.ins().stack_addr(ptr_ty, slot, 0);
+    if align <= 1 {
+        return base;
+    }
+    let align_mask = !((align as i64) - 1);
+    let bumped = builder.ins().iadd_imm(base, i64::from(align - 1));
+    builder.ins().band_imm(bumped, align_mask)
 }
 
 fn string_offsets(ptr_ty: Type) -> (u32, u32) {
@@ -4347,8 +4374,8 @@ fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
 fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -> ValueRepr {
     match local {
         LocalValue::Slot(slot, ty) => ValueRepr::Single(builder.ins().stack_load(*ty, *slot, 0)),
-        LocalValue::StructSlot(slot, _) => {
-            let addr = builder.ins().stack_addr(ptr_ty, *slot, 0);
+        LocalValue::StructSlot(slot, _, align) => {
+            let addr = aligned_stack_addr(builder, *slot, *align, ptr_ty);
             ValueRepr::Single(addr)
         }
         LocalValue::Value(value) => value.clone(),
@@ -4673,6 +4700,7 @@ fn compute_struct_layout(
     }
 
     let mut fields = HashMap::new();
+    let mut field_order = Vec::new();
     let mut offset = 0u32;
     let mut align = 1u32;
     for field in &st.fields {
@@ -4686,6 +4714,7 @@ fn compute_struct_layout(
                 ty: field.ty.clone(),
             },
         );
+        field_order.push(field.name.clone());
         offset = offset.saturating_add(layout.size);
         align = align.max(layout.align);
     }
@@ -4693,7 +4722,12 @@ fn compute_struct_layout(
 
     layouts.insert(
         qualified.to_string(),
-        StructLayout { size, align, fields },
+        StructLayout {
+            size,
+            align,
+            fields,
+            field_order,
+        },
     );
     visiting.remove(qualified);
     Ok(())
