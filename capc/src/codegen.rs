@@ -136,9 +136,9 @@ enum ResultKind {
 }
 
 pub fn build_object(
-    entry: &AstModule,
-    user_modules: &[AstModule],
-    stdlib: &[AstModule],
+    entry: &crate::hir::HirModule,
+    user_modules: &[crate::hir::HirModule],
+    stdlib: &[crate::hir::HirModule],
     out_path: &Path,
 ) -> Result<(), CodegenError> {
     let mut flag_builder = cranelift_codegen::settings::builder();

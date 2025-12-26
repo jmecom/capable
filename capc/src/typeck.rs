@@ -323,7 +323,7 @@ fn collect_enums(
 
 use crate::hir::HirModule;
 
-pub fn type_check(module: &Module) -> Result<HirModule, TypeError> {
+pub fn type_check(module: &Module) -> Result<(HirModule, Vec<HirModule>, Vec<HirModule>), TypeError> {
     type_check_program(module, &[], &[])
 }
 
@@ -331,7 +331,7 @@ pub fn type_check_program(
     module: &Module,
     stdlib: &[Module],
     user_modules: &[Module],
-) -> Result<HirModule, TypeError> {
+) -> Result<(HirModule, Vec<HirModule>, Vec<HirModule>), TypeError> {
     let use_map = UseMap::new(module);
     let stdlib_index = build_stdlib_index(stdlib)?;
     let modules = stdlib
@@ -362,17 +362,36 @@ pub fn type_check_program(
         }
     }
 
-    // Lower to HIR (Step 4)
-    // WARNING: HIR lowering is incomplete - only handles literals and grouping currently
-    // Codegen still uses AST directly until Step 5
-    lower_module(
+    // Lower all modules to HIR (Step 5)
+    // Lower stdlib modules
+    let hir_stdlib: Result<Vec<HirModule>, TypeError> = stdlib
+        .iter()
+        .map(|m| {
+            let use_map = UseMap::new(m);
+            lower_module(m, &functions, &struct_map, &enum_map, &use_map, &stdlib_index)
+        })
+        .collect();
+
+    // Lower user modules
+    let hir_user_modules: Result<Vec<HirModule>, TypeError> = user_modules
+        .iter()
+        .map(|m| {
+            let use_map = UseMap::new(m);
+            lower_module(m, &functions, &struct_map, &enum_map, &use_map, &stdlib_index)
+        })
+        .collect();
+
+    // Lower entry module
+    let hir_entry = lower_module(
         module,
         &functions,
         &struct_map,
         &enum_map,
         &use_map,
         &stdlib_index,
-    )
+    )?;
+
+    Ok((hir_entry, hir_user_modules?, hir_stdlib?))
 }
 
 fn validate_package_safety(module: &Module) -> Result<(), TypeError> {

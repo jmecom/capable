@@ -85,7 +85,7 @@ fn main() -> Result<()> {
             if safe_only {
                 enforce_safe_only(&module, &user_modules, root)?;
             }
-            let _hir_module = type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
+            let (_hir_entry, _hir_user_modules, _hir_stdlib) = type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
                 let named = NamedSource::new(path.display().to_string(), source);
                 miette::Report::new(err).with_source_code(named)
             })?;
@@ -150,20 +150,19 @@ fn build_binary(
     if safe_only {
         enforce_safe_only(&module, &user_modules, root)?;
     }
-    let _hir_module = type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
+    let (hir_entry, hir_user_modules, hir_stdlib) = type_check_program(&module, &stdlib, &user_modules).map_err(|err| {
         let named = NamedSource::new(path.display().to_string(), source.clone());
         miette::Report::new(err).with_source_code(named)
     })?;
 
-    // TODO: Pass HIR to codegen in Step 5
-    // For now, codegen still uses AST
+    // Step 5: Pass HIR to codegen
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let build_dir = out_dir.unwrap_or_else(|| workspace_root.join("target").join("capc-out"));
     std::fs::create_dir_all(&build_dir).map_err(|err| {
         miette!("failed to create build dir {}: {err}", build_dir.display())
     })?;
     let obj_path = build_dir.join("program.o");
-    build_object(&module, &user_modules, &stdlib, &obj_path)
+    build_object(&hir_entry, &hir_user_modules, &hir_stdlib, &obj_path)
         .map_err(|err| miette!("codegen failed: {err}"))?;
 
     let status = std::process::Command::new("cargo")
