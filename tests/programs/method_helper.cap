@@ -1,0 +1,7 @@
+module method_helper
+
+pub struct Pair { left: i32, right: i32 }
+
+pub fn Pair__sum(self: Pair) -> i32 {
+  return self.left + self.right
+}

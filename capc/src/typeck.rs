@@ -1073,12 +1073,27 @@ fn check_expr(
                     method_call.receiver.span(),
                 ));
             };
-            let (method_module, type_name) = if let Some((mod_part, type_part)) =
-                receiver_name.rsplit_once('.')
-            {
+            let (method_module, type_name) = if let Some(info) = struct_map.get(receiver_name) {
+                (
+                    info.module.clone(),
+                    receiver_name
+                        .rsplit_once('.')
+                        .map(|(_, t)| t)
+                        .unwrap_or(receiver_name)
+                        .to_string(),
+                )
+            } else if receiver_name.contains('.') {
+                let (mod_part, type_part) = receiver_name
+                    .rsplit_once('.')
+                    .ok_or_else(|| TypeError::new("invalid type path".to_string(), method_call.span))?;
                 (mod_part.to_string(), type_part.to_string())
+            } else if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
+                (info.module.clone(), receiver_name.clone())
             } else {
-                (module_name.to_string(), receiver_name.clone())
+                return Err(TypeError::new(
+                    format!("unknown struct `{receiver_name}`"),
+                    method_call.receiver.span(),
+                ));
             };
             let method_fn = format!("{type_name}__{}", method_call.method.item);
             let qualified_key = format!("{method_module}.{method_fn}");
@@ -1106,7 +1121,13 @@ fn check_expr(
                 ));
             }
             let receiver_ptr = Ty::Ptr(Box::new(receiver_ty.clone()));
-            if sig.params[0] != receiver_ty && sig.params[0] != receiver_ptr {
+            let receiver_unqualified = Ty::Path(type_name.clone(), Vec::new());
+            let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
+            if sig.params[0] != receiver_ty
+                && sig.params[0] != receiver_ptr
+                && sig.params[0] != receiver_unqualified
+                && sig.params[0] != receiver_ptr_unqualified
+            {
                 return Err(TypeError::new(
                     format!(
                         "method receiver type mismatch: expected {expected:?}, found {receiver_ty:?}",
@@ -2204,12 +2225,27 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     method_call.receiver.span(),
                 ));
             };
-            let (method_module, type_name) = if let Some((mod_part, type_part)) =
-                receiver_name.rsplit_once('.')
-            {
+            let (method_module, type_name) = if let Some(info) = ctx.structs.get(receiver_name) {
+                (
+                    info.module.clone(),
+                    receiver_name
+                        .rsplit_once('.')
+                        .map(|(_, t)| t)
+                        .unwrap_or(receiver_name)
+                        .to_string(),
+                )
+            } else if receiver_name.contains('.') {
+                let (mod_part, type_part) = receiver_name
+                    .rsplit_once('.')
+                    .ok_or_else(|| TypeError::new("invalid type path".to_string(), method_call.span))?;
                 (mod_part.to_string(), type_part.to_string())
+            } else if let Some(info) = ctx.structs.get(&format!("{}.{}", ctx.module_name, receiver_name)) {
+                (info.module.clone(), receiver_name.clone())
             } else {
-                (ctx.module_name.to_string(), receiver_name.clone())
+                return Err(TypeError::new(
+                    format!("unknown struct `{receiver_name}`"),
+                    method_call.receiver.span(),
+                ));
             };
             let method_fn = format!("{type_name}__{}", method_call.method.item);
             let key = format!("{method_module}.{method_fn}");
