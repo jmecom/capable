@@ -1972,7 +1972,48 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 span: un.span,
             }))
         }
-        Expr::FieldAccess(_) | Expr::StructLiteral(_) | Expr::Match(_) => {
+        Expr::FieldAccess(field_access) => {
+            // Disambiguation: enum/module paths vs struct field access
+            // Same logic as check_expr to keep them in agreement
+            fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
+                    Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
+                    _ => None,
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                ctx.local_types.contains_key(base_name)
+            } else {
+                true  // Not a pure chain - treat as value field access
+            };
+
+            if !base_is_local {
+                // Try to convert to path and resolve as enum variant
+                if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
+                    if let Some(enum_ty) = resolve_enum_variant(&path, ctx.use_map, ctx.enums) {
+                        // It's an enum variant - extract variant name
+                        let variant_name = path.segments.last()
+                            .map(|s| s.item.clone())
+                            .unwrap_or_else(|| String::from("unknown"));
+
+                        return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                            enum_ty,
+                            variant_name,
+                            span: field_access.span,
+                        }));
+                    }
+                }
+            }
+
+            // Real struct field access not yet implemented
+            Err(TypeError::new(
+                "struct field access not yet implemented".to_string(),
+                field_access.span,
+            ))
+        }
+        Expr::StructLiteral(_) | Expr::Match(_) => {
             // TODO: Implement these when needed
             Err(TypeError::new(
                 format!("expression type not yet supported in HIR lowering"),
