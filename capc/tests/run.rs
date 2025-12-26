@@ -90,6 +90,20 @@ fn run_struct_field_access() {
 }
 
 #[test]
+fn run_method_calls() {
+    let out_dir = make_out_dir("method_calls");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/method_calls.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("7 11 13"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_result_construct() {
     let out_dir = make_out_dir("result_construct");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

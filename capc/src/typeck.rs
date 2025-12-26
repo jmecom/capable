@@ -1000,49 +1000,122 @@ fn check_expr(
                 true
             };
 
-            // Try to convert to a path and resolve as a module-qualified function
-            let mut path = method_call.receiver.to_path().ok_or_else(|| {
-                TypeError::new(
-                    "method calls on non-path expressions not yet supported".to_string(),
-                    method_call.receiver.span(),
-                )
-            })?;
-            path.segments.push(method_call.method.clone());
-            path.span = Span::new(path.span.start, method_call.method.span.end);
+            let path_call = method_call.receiver.to_path().map(|mut path| {
+                path.segments.push(method_call.method.clone());
+                path.span = Span::new(path.span.start, method_call.method.span.end);
+                path
+            });
 
-            // Check if this resolves as a function
-            let resolved = resolve_path(&path, use_map);
-            let key = resolved.join(".");
-            let is_function = functions.contains_key(&key);
+            let is_function = if let Some(path) = &path_call {
+                let resolved = resolve_path(path, use_map);
+                let key = resolved.join(".");
+                functions.contains_key(&key)
+            } else {
+                false
+            };
 
-            if base_is_local && !is_function {
-                // Local variable + doesn't resolve as function = real method call on value
-                // Step 4 will implement proper method resolution based on receiver type
-                return Err(TypeError::new(
-                    "methods on values not yet supported".to_string(),
-                    method_call.span,
-                ));
+            if !base_is_local && is_function {
+                let path = path_call.expect("path exists for function call");
+                let resolved = resolve_path(&path, use_map);
+                let key = resolved.join(".");
+                let sig = functions.get(&key).ok_or_else(|| {
+                    TypeError::new(format!("unknown function `{key}`"), path.span)
+                })?;
+                if sig.params.len() != method_call.args.len() {
+                    return Err(TypeError::new(
+                        format!(
+                            "argument count mismatch: expected {}, found {}",
+                            sig.params.len(),
+                            method_call.args.len()
+                        ),
+                        method_call.span,
+                    ));
+                }
+                for (arg, expected) in method_call.args.iter().zip(&sig.params) {
+                    let arg_ty = check_expr(
+                        arg,
+                        functions,
+                        locals,
+                        use_map,
+                        struct_map,
+                        enum_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                    )?;
+                    if &arg_ty != expected {
+                        return Err(TypeError::new(
+                            format!(
+                                "argument type mismatch: expected {expected:?}, found {arg_ty:?}"
+                            ),
+                            arg.span(),
+                        ));
+                    }
+                }
+                return Ok(sig.ret.clone());
             }
 
-            // Either not a local, or is a local but shadows a module name that resolves
-            // Treat as module-qualified function call
-
-            let resolved = resolve_path(&path, use_map);
-            let key = resolved.join(".");
-            let sig = functions.get(&key).ok_or_else(|| {
-                TypeError::new(format!("unknown function `{key}`"), path.span)
-            })?;
-            if sig.params.len() != method_call.args.len() {
+            // Method on a value: resolve to module.Type__method
+            let receiver_ty = check_expr(
+                &method_call.receiver,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
+            let Ty::Path(receiver_name, _) = &receiver_ty else {
+                return Err(TypeError::new(
+                    "method receiver must be a struct value".to_string(),
+                    method_call.receiver.span(),
+                ));
+            };
+            let (method_module, type_name) = if let Some((mod_part, type_part)) =
+                receiver_name.rsplit_once('.')
+            {
+                (mod_part.to_string(), type_part.to_string())
+            } else {
+                (module_name.to_string(), receiver_name.clone())
+            };
+            let method_fn = format!("{type_name}__{}", method_call.method.item);
+            let qualified_key = format!("{method_module}.{method_fn}");
+            let key = if functions.contains_key(&qualified_key) {
+                qualified_key
+            } else if method_module == module_name && functions.contains_key(&method_fn) {
+                method_fn.clone()
+            } else {
+                return Err(TypeError::new(
+                    format!("unknown method `{qualified_key}`"),
+                    method_call.span,
+                ));
+            };
+            let sig = functions
+                .get(&key)
+                .ok_or_else(|| TypeError::new(format!("unknown method `{key}`"), method_call.span))?;
+            if sig.params.len() != method_call.args.len() + 1 {
                 return Err(TypeError::new(
                     format!(
                         "argument count mismatch: expected {}, found {}",
-                        sig.params.len(),
+                        sig.params.len() - 1,
                         method_call.args.len()
                     ),
                     method_call.span,
                 ));
             }
-            for (arg, expected) in method_call.args.iter().zip(&sig.params) {
+            let receiver_ptr = Ty::Ptr(Box::new(receiver_ty.clone()));
+            if sig.params[0] != receiver_ty && sig.params[0] != receiver_ptr {
+                return Err(TypeError::new(
+                    format!(
+                        "method receiver type mismatch: expected {expected:?}, found {receiver_ty:?}",
+                        expected = sig.params[0]
+                    ),
+                    method_call.receiver.span(),
+                ));
+            }
+            for (arg, expected) in method_call.args.iter().zip(&sig.params[1..]) {
                 let arg_ty = check_expr(
                     arg,
                     functions,
@@ -2083,49 +2156,79 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 true
             };
 
-            // Convert to path: receiver.to_path() + method
-            let mut path = method_call.receiver.to_path().ok_or_else(|| {
-                TypeError::new(
-                    "method calls on non-path expressions not yet supported".to_string(),
-                    method_call.receiver.span(),
-                )
-            })?;
-            path.segments.push(method_call.method.clone());
-            path.span = Span::new(path.span.start, method_call.method.span.end);
+            let path_call = method_call.receiver.to_path().map(|mut path| {
+                path.segments.push(method_call.method.clone());
+                path.span = Span::new(path.span.start, method_call.method.span.end);
+                path
+            });
 
-            // Check if this resolves as a function
-            let resolved = resolve_path(&path, ctx.use_map);
-            let key = resolved.join(".");
-            let is_function = ctx.functions.contains_key(&key);
+            let is_function = if let Some(path) = &path_call {
+                let resolved = resolve_path(path, ctx.use_map);
+                let key = resolved.join(".");
+                ctx.functions.contains_key(&key)
+            } else {
+                false
+            };
 
-            if base_is_local && !is_function {
-                return Err(TypeError::new(
-                    "methods on values not yet supported".to_string(),
-                    method_call.span,
-                ));
+            if !base_is_local && is_function {
+                let path = path_call.expect("path exists for function call");
+                let resolved = resolve_path(&path, ctx.use_map);
+                let key = resolved.join(".");
+                let args: Result<Vec<HirExpr>, TypeError> = method_call
+                    .args
+                    .iter()
+                    .map(|arg| lower_expr(arg, ctx, ret_ty))
+                    .collect();
+
+                let module = resolved[..resolved.len() - 1].join(".");
+                let name = resolved.last().unwrap().clone();
+                let symbol = format!("capable_{}", key.replace('.', "_"));
+
+                return Ok(HirExpr::Call(HirCall {
+                    callee: ResolvedCallee::Function {
+                        module,
+                        name,
+                        symbol,
+                    },
+                    args: args?,
+                    ret_ty: ty,
+                    span: method_call.span,
+                }));
             }
 
-            // Treat as module-qualified function call
-            // Lower arguments (no receiver reordering - that's for later with real methods)
-            let args: Result<Vec<HirExpr>, TypeError> = method_call
-                .args
-                .iter()
-                .map(|arg| lower_expr(arg, ctx, ret_ty))
-                .collect();
-
-            // Build resolved callee
-            let module = resolved[..resolved.len() - 1].join(".");
-            let name = resolved.last().unwrap().clone();
+            let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
+            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let Ty::Path(receiver_name, _) = &receiver_ty else {
+                return Err(TypeError::new(
+                    "method receiver must be a struct value".to_string(),
+                    method_call.receiver.span(),
+                ));
+            };
+            let (method_module, type_name) = if let Some((mod_part, type_part)) =
+                receiver_name.rsplit_once('.')
+            {
+                (mod_part.to_string(), type_part.to_string())
+            } else {
+                (ctx.module_name.to_string(), receiver_name.clone())
+            };
+            let method_fn = format!("{type_name}__{}", method_call.method.item);
+            let key = format!("{method_module}.{method_fn}");
             let symbol = format!("capable_{}", key.replace('.', "_"));
+
+            let mut args = Vec::with_capacity(method_call.args.len() + 1);
+            args.push(receiver);
+            for arg in &method_call.args {
+                args.push(lower_expr(arg, ctx, ret_ty)?);
+            }
 
             Ok(HirExpr::Call(HirCall {
                 callee: ResolvedCallee::Function {
-                    module,
-                    name,
+                    module: method_module,
+                    name: method_fn,
                     symbol,
                 },
-                args: args?,
-                ret_ty: ty,  // Use type from check_expr
+                args,
+                ret_ty: ty,
                 span: method_call.span,
             }))
         }
