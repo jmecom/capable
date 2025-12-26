@@ -1523,7 +1523,7 @@ fn is_orderable_type(ty: &Ty) -> bool {
 // ============================================================================
 
 use crate::hir::{
-    HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirExpr, HirExprStmt, HirField,
+    HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirField,
     HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
     HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
     HirStructLiteralField, HirUnary, HirWhileStmt, HirAssignStmt, LocalId, ResolvedCallee,
@@ -1719,7 +1719,7 @@ fn lower_block(block: &Block, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirB
 fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt, TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
-            let expr = lower_expr(&let_stmt.expr, ctx)?;
+            let expr = lower_expr(&let_stmt.expr, ctx, ret_ty)?;
             let ty = expr_type(&expr);
             let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.clone());
 
@@ -1732,7 +1732,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
             }))
         }
         Stmt::Assign(assign) => {
-            let expr = lower_expr(&assign.expr, ctx)?;
+            let expr = lower_expr(&assign.expr, ctx, ret_ty)?;
             let local_id = ctx
                 .get_local(&assign.name.item)
                 .ok_or_else(|| TypeError::new("unknown variable".to_string(), assign.name.span))?;
@@ -1745,14 +1745,14 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
             }))
         }
         Stmt::Return(ret) => {
-            let expr = ret.expr.as_ref().map(|e| lower_expr(e, ctx)).transpose()?;
+            let expr = ret.expr.as_ref().map(|e| lower_expr(e, ctx, ret_ty)).transpose()?;
             Ok(HirStmt::Return(HirReturnStmt {
                 expr,
                 span: ret.span,
             }))
         }
         Stmt::If(if_stmt) => {
-            let cond = lower_expr(&if_stmt.cond, ctx)?;
+            let cond = lower_expr(&if_stmt.cond, ctx, ret_ty)?;
             let then_block = lower_block(&if_stmt.then_block, ctx, ret_ty)?;
             let else_block = if_stmt
                 .else_block
@@ -1768,7 +1768,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
             }))
         }
         Stmt::While(while_stmt) => {
-            let cond = lower_expr(&while_stmt.cond, ctx)?;
+            let cond = lower_expr(&while_stmt.cond, ctx, ret_ty)?;
             let body = lower_block(&while_stmt.body, ctx, ret_ty)?;
 
             Ok(HirStmt::While(HirWhileStmt {
@@ -1778,7 +1778,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
             }))
         }
         Stmt::Expr(expr_stmt) => {
-            let expr = lower_expr(&expr_stmt.expr, ctx)?;
+            let expr = lower_expr(&expr_stmt.expr, ctx, ret_ty)?;
             Ok(HirStmt::Expr(HirExprStmt {
                 expr,
                 span: expr_stmt.span,
@@ -1787,16 +1787,33 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
     }
 }
 
-fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx) -> Result<HirExpr, TypeError> {
+/// Helper to get the type of an AST expression using the existing typechecker
+/// This ensures we have a single source of truth for types
+fn type_of_ast_expr(
+    expr: &Expr,
+    ctx: &LoweringCtx,
+    ret_ty: &Ty,
+) -> Result<Ty, TypeError> {
+    check_expr(
+        expr,
+        ctx.functions,
+        &ctx.local_types,  // Use the types we've been tracking
+        ctx.use_map,
+        ctx.structs,
+        ctx.enums,
+        ctx.stdlib,
+        ret_ty,
+        ctx.module_name,
+    )
+}
+
+fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr, TypeError> {
+    // Get the type from the canonical typechecker
+    let ty = type_of_ast_expr(expr, ctx, ret_ty)?;
+
     match expr {
         Expr::Literal(lit) => {
-            let ty = match &lit.value {
-                Literal::Int(_) => Ty::Builtin(BuiltinType::I32),
-                Literal::U8(_) => Ty::Builtin(BuiltinType::U8),
-                Literal::String(_) => Ty::Builtin(BuiltinType::String),
-                Literal::Bool(_) => Ty::Builtin(BuiltinType::Bool),
-                Literal::Unit => Ty::Builtin(BuiltinType::Unit),
-            };
+            // Type already computed by check_expr
             Ok(HirExpr::Literal(HirLiteral {
                 value: lit.value.clone(),
                 ty,
@@ -1805,139 +1822,153 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx) -> Result<HirExpr, TypeError> 
         }
         Expr::Grouping(grouping) => {
             // Grouping is transparent - just lower the inner expression
-            lower_expr(&grouping.expr, ctx)
+            lower_expr(&grouping.expr, ctx, ret_ty)
         }
         Expr::Path(path) => {
             // Check if it's a local variable
             if path.segments.len() == 1 {
                 let name = &path.segments[0].item;
-                if let Some(ty) = ctx.local_types.get(name) {
+                if ctx.local_types.contains_key(name) {
                     let local_id = ctx.get_local(name).unwrap();
                     return Ok(HirExpr::Local(HirLocal {
                         local_id,
                         name: name.clone(),
-                        ty: ty.clone(),
+                        ty,  // Use the type from check_expr
                         span: path.span,
                     }));
                 }
             }
-            // Check if it's an enum variant
-            if let Some(ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums) {
-                // For now, treat enum variants as literals with the enum type
-                // Full implementation would need HirEnumVariant expr type
-                return Ok(HirExpr::Literal(HirLiteral {
-                    value: Literal::Unit,  // Placeholder
-                    ty,
-                    span: path.span,
-                }));
+            // Otherwise it's an enum variant (check_expr verified this)
+            // Extract variant name from path
+            let variant_name = path.segments.last()
+                .map(|s| s.item.clone())
+                .unwrap_or_else(|| String::from("unknown"));
+
+            Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                enum_ty: ty,
+                variant_name,
+                span: path.span,
+            }))
+        }
+        Expr::Call(call) => {
+            // Convert callee to path
+            let path = call.callee.to_path().ok_or_else(|| {
+                TypeError::new(
+                    "call target must be a function path".to_string(),
+                    call.callee.span(),
+                )
+            })?;
+
+            // Resolve function path
+            let resolved = resolve_path(&path, ctx.use_map);
+            let key = resolved.join(".");
+
+            // Lower arguments
+            let args: Result<Vec<HirExpr>, TypeError> = call
+                .args
+                .iter()
+                .map(|arg| lower_expr(arg, ctx, ret_ty))
+                .collect();
+
+            // Build resolved callee
+            let module = resolved[..resolved.len() - 1].join(".");
+            let name = resolved.last().unwrap().clone();
+            let symbol = format!("capable_{}", key.replace('.', "_"));
+
+            Ok(HirExpr::Call(HirCall {
+                callee: ResolvedCallee::Function {
+                    module,
+                    name,
+                    symbol,
+                },
+                args: args?,
+                ret_ty: ty,  // Use type from check_expr
+                span: call.span,
+            }))
+        }
+        Expr::MethodCall(method_call) => {
+            // Apply the same disambiguation as in check_expr
+            fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
+                    Expr::FieldAccess(fa) => get_leftmost_segment(&fa.object),
+                    _ => None,
+                }
             }
-            Err(TypeError::new(
-                format!("unknown value `{path}`"),
-                path.span,
-            ))
-        }
-        Expr::Call(_call) => {
-            // TODO: Implement Call lowering with function resolution
-            Err(TypeError::new(
-                "function calls not yet supported in HIR lowering".to_string(),
-                expr.span(),
-            ))
-        }
-        Expr::MethodCall(_method_call) => {
-            // TODO: Implement MethodCall lowering (desugar to Call with receiver as arg0)
-            Err(TypeError::new(
-                "method calls not yet supported in HIR lowering".to_string(),
-                expr.span(),
-            ))
+
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+                ctx.local_types.contains_key(base_name)
+            } else {
+                true
+            };
+
+            // Convert to path: receiver.to_path() + method
+            let mut path = method_call.receiver.to_path().ok_or_else(|| {
+                TypeError::new(
+                    "method calls on non-path expressions not yet supported".to_string(),
+                    method_call.receiver.span(),
+                )
+            })?;
+            path.segments.push(method_call.method.clone());
+            path.span = Span::new(path.span.start, method_call.method.span.end);
+
+            // Check if this resolves as a function
+            let resolved = resolve_path(&path, ctx.use_map);
+            let key = resolved.join(".");
+            let is_function = ctx.functions.contains_key(&key);
+
+            if base_is_local && !is_function {
+                return Err(TypeError::new(
+                    "methods on values not yet supported".to_string(),
+                    method_call.span,
+                ));
+            }
+
+            // Treat as module-qualified function call
+            // Lower arguments (no receiver reordering - that's for later with real methods)
+            let args: Result<Vec<HirExpr>, TypeError> = method_call
+                .args
+                .iter()
+                .map(|arg| lower_expr(arg, ctx, ret_ty))
+                .collect();
+
+            // Build resolved callee
+            let module = resolved[..resolved.len() - 1].join(".");
+            let name = resolved.last().unwrap().clone();
+            let symbol = format!("capable_{}", key.replace('.', "_"));
+
+            Ok(HirExpr::Call(HirCall {
+                callee: ResolvedCallee::Function {
+                    module,
+                    name,
+                    symbol,
+                },
+                args: args?,
+                ret_ty: ty,  // Use type from check_expr
+                span: method_call.span,
+            }))
         }
         Expr::Binary(bin) => {
-            let left = lower_expr(&bin.left, ctx)?;
-            let right = lower_expr(&bin.right, ctx)?;
-            let left_ty = expr_type(&left);
-            let right_ty = expr_type(&right);
-
-            // Type check the binary operation
-            let result_ty = match bin.op {
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
-                    if left_ty == Ty::Builtin(BuiltinType::I32) && right_ty == Ty::Builtin(BuiltinType::I32) {
-                        Ty::Builtin(BuiltinType::I32)
-                    } else if left_ty == Ty::Builtin(BuiltinType::I64) && right_ty == Ty::Builtin(BuiltinType::I64) {
-                        Ty::Builtin(BuiltinType::I64)
-                    } else {
-                        return Err(TypeError::new(
-                            format!("binary operation expects matching integer types, got {left_ty:?} and {right_ty:?}"),
-                            bin.span,
-                        ));
-                    }
-                }
-                BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
-                    if left_ty != right_ty {
-                        return Err(TypeError::new(
-                            format!("comparison expects matching types, got {left_ty:?} and {right_ty:?}"),
-                            bin.span,
-                        ));
-                    }
-                    Ty::Builtin(BuiltinType::Bool)
-                }
-                BinaryOp::Eq | BinaryOp::Neq => {
-                    if left_ty != right_ty {
-                        return Err(TypeError::new(
-                            format!("equality expects matching types, got {left_ty:?} and {right_ty:?}"),
-                            bin.span,
-                        ));
-                    }
-                    Ty::Builtin(BuiltinType::Bool)
-                }
-                BinaryOp::And | BinaryOp::Or => {
-                    if left_ty != Ty::Builtin(BuiltinType::Bool) || right_ty != Ty::Builtin(BuiltinType::Bool) {
-                        return Err(TypeError::new(
-                            "logical operation expects bool operands".to_string(),
-                            bin.span,
-                        ));
-                    }
-                    Ty::Builtin(BuiltinType::Bool)
-                }
-            };
+            // Type already verified by check_expr - just lower children and build node
+            let left = lower_expr(&bin.left, ctx, ret_ty)?;
+            let right = lower_expr(&bin.right, ctx, ret_ty)?;
 
             Ok(HirExpr::Binary(HirBinary {
                 left: Box::new(left),
                 op: bin.op.clone(),
                 right: Box::new(right),
-                ty: result_ty,
+                ty,  // Use type from check_expr
                 span: bin.span,
             }))
         }
         Expr::Unary(un) => {
-            let operand = lower_expr(&un.expr, ctx)?;
-            let operand_ty = expr_type(&operand);
-
-            let result_ty = match un.op {
-                UnaryOp::Neg => {
-                    if operand_ty == Ty::Builtin(BuiltinType::I32) || operand_ty == Ty::Builtin(BuiltinType::I64) {
-                        operand_ty
-                    } else {
-                        return Err(TypeError::new(
-                            "unary - expects integer".to_string(),
-                            un.span,
-                        ));
-                    }
-                }
-                UnaryOp::Not => {
-                    if operand_ty == Ty::Builtin(BuiltinType::Bool) {
-                        operand_ty
-                    } else {
-                        return Err(TypeError::new(
-                            "unary ! expects bool".to_string(),
-                            un.span,
-                        ));
-                    }
-                }
-            };
+            // Type already verified by check_expr - just lower child and build node
+            let operand = lower_expr(&un.expr, ctx, ret_ty)?;
 
             Ok(HirExpr::Unary(HirUnary {
                 op: un.op.clone(),
                 expr: Box::new(operand),
-                ty: result_ty,
+                ty,  // Use type from check_expr
                 span: un.span,
             }))
         }
@@ -1956,6 +1987,7 @@ fn expr_type(expr: &HirExpr) -> Ty {
     match expr {
         HirExpr::Literal(lit) => lit.ty.clone(),
         HirExpr::Local(local) => local.ty.clone(),
+        HirExpr::EnumVariant(variant) => variant.enum_ty.clone(),
         HirExpr::Call(call) => call.ret_ty.clone(),
         HirExpr::FieldAccess(fa) => fa.field_ty.clone(),
         HirExpr::StructLiteral(sl) => sl.struct_ty.clone(),

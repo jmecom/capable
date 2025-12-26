@@ -141,6 +141,7 @@ pub struct HirExprStmt {
 pub enum HirExpr {
     Literal(HirLiteral),
     Local(HirLocal),
+    EnumVariant(HirEnumVariantExpr),
     Call(HirCall),
     FieldAccess(HirFieldAccess),
     StructLiteral(HirStructLiteral),
@@ -154,6 +155,7 @@ impl HirExpr {
         match self {
             HirExpr::Literal(e) => e.span,
             HirExpr::Local(e) => e.span,
+            HirExpr::EnumVariant(e) => e.span,
             HirExpr::Call(e) => e.span,
             HirExpr::FieldAccess(e) => e.span,
             HirExpr::StructLiteral(e) => e.span,
@@ -176,6 +178,16 @@ pub struct HirLocal {
     pub local_id: LocalId,
     pub name: String,
     pub ty: Ty,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirEnumVariantExpr {
+    /// The enum type this variant belongs to (e.g., "sys.fs.TraversalKind")
+    pub enum_ty: Ty,
+    /// The variant name (e.g., "File")
+    pub variant_name: String,
+    /// TODO: Add payload support when needed
     pub span: Span,
 }
 
