@@ -1,5 +1,5 @@
 package safe
-module sys.args
+module sys::args
 
 pub enum ArgsErr {
   OutOfRange
@@ -14,5 +14,5 @@ pub fn len(sys: System) -> i32 {
 /// Returns the command-line argument at the given index.
 /// This is an intrinsic function and the body is replaced by the compiler.
 pub fn at(sys: System, index: i32) -> Result[string, ArgsErr] {
-  return Err(ArgsErr.OutOfRange)
+  return Err(ArgsErr::OutOfRange)
 }

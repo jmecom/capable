@@ -100,6 +100,8 @@ pub enum TokenKind {
     LBracket,
     #[token("]")]
     RBracket,
+    #[token("::", priority = 3)]
+    ColonColon,
     #[token(":")]
     Colon,
     #[token(",")]

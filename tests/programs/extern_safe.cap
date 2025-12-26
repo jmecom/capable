@@ -1,6 +1,6 @@
 package safe
 module extern_safe
-use sys.system
+use sys::system
 
 extern fn host_log(msg: string) -> unit
 

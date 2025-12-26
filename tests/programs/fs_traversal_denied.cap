@@ -1,14 +1,14 @@
 module fs_traversal_denied
-use sys.system
-use sys.fs
-use sys.console
+use sys::system
+use sys::fs
+use sys::console
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let rfs = system.fs_read(sys, "./config")
+  let c = system::console(sys)
+  let rfs = system::fs_read(sys, "./config")
 
-  match fs.read_to_string(rfs, "../secrets.txt") {
-    Ok(s) => { console.println(c, "BUG: escaped"); return 2 }
-    Err(e) => { console.println(c, "denied"); return 0 }
+  match fs::read_to_string(rfs, "../secrets.txt") {
+    Ok(s) => { console::println(c, "BUG: escaped"); return 2 }
+    Err(e) => { console::println(c, "denied"); return 0 }
   }
 }

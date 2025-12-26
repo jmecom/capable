@@ -1,11 +1,11 @@
 module unit_match_bind
-use sys.system
-use sys.console
+use sys::system
+use sys::console
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
+  let c = system::console(sys)
   match () {
-    x => { console.println(c, "unit match bind ok") }
+    x => { console::println(c, "unit match bind ok") }
   }
   return 0
 }

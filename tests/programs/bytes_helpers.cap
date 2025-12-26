@@ -1,20 +1,20 @@
 package safe
 module bytes_helpers
-use sys.system
-use sys.console
-use sys.string
-use sys.bytes
+use sys::system
+use sys::console
+use sys::string
+use sys::bytes
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
+  let c = system::console(sys)
   let s = " \n"
-  let buf = string.bytes(s)
-  let b0 = bytes.at(buf, 0)
-  let b1 = bytes.at(buf, 1)
-  if (bytes.is_whitespace(b0) && bytes.is_whitespace(b1)) {
-    console.println(c, "bytes ok")
+  let buf = string::bytes(s)
+  let b0 = bytes::at(buf, 0)
+  let b1 = bytes::at(buf, 1)
+  if (bytes::is_whitespace(b0) && bytes::is_whitespace(b1)) {
+    console::println(c, "bytes ok")
     return 0
   }
-  console.println(c, "bytes bad")
+  console::println(c, "bytes bad")
   return 1
 }

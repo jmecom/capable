@@ -1,11 +1,11 @@
 module with_helper
 use helper
-use sys.system
-use sys.console
+use sys::system
+use sys::console
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let total = helper.add(1, 2)
-  console.println(c, "ok")
+  let c = system::console(sys)
+  let total = helper::add(1, 2)
+  console::println(c, "ok")
   return total
 }

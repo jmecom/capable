@@ -1,21 +1,21 @@
 package safe
 module string_split
-use sys.system
-use sys.console
-use sys.string
-use sys.vec
-use sys.buffer
+use sys::system
+use sys::console
+use sys::string
+use sys::vec
+use sys::buffer
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let parts = string.split("a,b,c", 44u8)
-  let count = vec.vec_string_len(parts)
-  let alloc = buffer.alloc_default()
-  vec.vec_string_free(alloc, parts)
+  let c = system::console(sys)
+  let parts = string::split("a,b,c", 44u8)
+  let count = vec::vec_string_len(parts)
+  let alloc = buffer::alloc_default()
+  vec::vec_string_free(alloc, parts)
   if (count == 3) {
-    console.println(c, "split ok")
+    console::println(c, "split ok")
     return 0
   }
-  console.println(c, "split bad")
+  console::println(c, "split bad")
   return 1
 }

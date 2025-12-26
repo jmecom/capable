@@ -1,8 +1,8 @@
 module should_fail_no_console
-use sys.console
+use sys::console
 
 pub fn main(sys: System) -> i32 {
-  // Intentionally do NOT call system.console(sys)
-  console.println(c, "nope")
+  // Intentionally do NOT call system::console(sys)
+  console::println(c, "nope")
   return 0
 }

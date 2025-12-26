@@ -1,14 +1,14 @@
 package unsafe
-module sys.system
-use sys.console
-use sys.fs
+module sys::system
+use sys::console
+use sys::fs
 
 pub opaque struct System
 
-pub fn console(sys: System) -> console.Console {
+pub fn console(sys: System) -> console::Console {
   return ()
 }
 
-pub fn fs_read(sys: System, root: string) -> fs.ReadFS {
+pub fn fs_read(sys: System, root: string) -> fs::ReadFS {
   return ()
 }

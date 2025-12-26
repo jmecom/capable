@@ -1,19 +1,19 @@
 module unit_match_multi
-use sys.system
-use sys.console
+use sys::system
+use sys::console
 
 fn helper() -> unit {
   return ()
 }
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
+  let c = system::console(sys)
   // Test that match arms can return unit
   // Match on a bool, but both arms return unit
   match true {
     true => { helper() }
     false => { helper() }
   }
-  console.println(c, "unit match multi ok")
+  console::println(c, "unit match multi ok")
   return 0
 }

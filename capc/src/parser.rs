@@ -646,11 +646,24 @@ impl Parser {
                 }
             }
             Some(TokenKind::Ident) => {
-                let ident = self.expect_ident()?;
+                // Parse path segments separated by ::
+                let first_ident = self.expect_ident()?;
+                let start = first_ident.span.start;
+                let mut segments = vec![first_ident];
+
+                // Parse additional segments with ::
+                while self.peek_kind() == Some(TokenKind::ColonColon) {
+                    self.bump(); // consume ::
+                    let segment = self.expect_ident()?;
+                    segments.push(segment);
+                }
+
+                let end = segments.last().unwrap().span.end;
                 let path = Path {
-                    segments: vec![ident.clone()],
-                    span: ident.span,
+                    segments,
+                    span: Span::new(start, end),
                 };
+
                 if self.peek_kind() == Some(TokenKind::LBrace) {
                     self.parse_struct_literal(path)
                 } else {
@@ -727,6 +740,15 @@ impl Parser {
                         binding,
                         span: Span::new(start, end),
                     })
+                } else if path.segments.len() == 1 {
+                    // Single segment - could be binding or enum variant
+                    // If lowercase, it's a binding; if uppercase, it's an enum variant
+                    let name = &path.segments[0].item;
+                    if name.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) {
+                        Ok(Pattern::Binding(path.segments.into_iter().next().unwrap()))
+                    } else {
+                        Ok(Pattern::Path(path))
+                    }
                 } else {
                     Ok(Pattern::Path(path))
                 }
@@ -743,7 +765,8 @@ impl Parser {
         let first = self.expect_ident()?;
         let start = first.span.start;
         let mut segments = vec![first];
-        while self.peek_kind() == Some(TokenKind::Dot) {
+        // Parse path segments separated by ::
+        while self.peek_kind() == Some(TokenKind::ColonColon) {
             self.bump();
             segments.push(self.expect_ident()?);
         }

@@ -1,5 +1,5 @@
 package unsafe
-module sys.fs
+module sys::fs
 
 pub opaque struct ReadFS
 

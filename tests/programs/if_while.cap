@@ -1,10 +1,10 @@
 module if_while
-use sys.system
-use sys.console
+use sys::system
+use sys::console
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  if true { console.println(c, "yes") }
-  while false { console.println(c, "loop") }
+  let c = system::console(sys)
+  if true { console::println(c, "yes") }
+  while false { console::println(c, "loop") }
   return 0
 }

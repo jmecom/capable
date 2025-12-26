@@ -1,27 +1,27 @@
 package safe
 module args_safe
-use sys.system
-use sys.console
-use sys.args
-use sys.string
+use sys::system
+use sys::console
+use sys::args
+use sys::string
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let n = args.len(sys)
+  let c = system::console(sys)
+  let n = args::len(sys)
   if (n < 1) {
-    console.println(c, "args bad")
+    console::println(c, "args bad")
     return 1
   }
-  let code = match args.at(sys, 0) {
+  let code = match args::at(sys, 0) {
     Ok(s) => {
-      let m = string.len(s)
+      let m = string::len(s)
       if (m >= 0) {
-        console.println(c, "args ok")
+        console::println(c, "args ok")
       }
       0
     }
     Err(e) => {
-      console.println(c, "args err")
+      console::println(c, "args err")
       1
     }
   }

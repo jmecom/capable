@@ -25,6 +25,14 @@ pub struct HirModule {
     pub enums: Vec<HirEnum>,
 }
 
+/// A complete program with entry module and dependencies
+#[derive(Debug, Clone)]
+pub struct HirProgram {
+    pub entry: HirModule,
+    pub user_modules: Vec<HirModule>,
+    pub stdlib: Vec<HirModule>,
+}
+
 /// A function in HIR
 #[derive(Debug, Clone)]
 pub struct HirFunction {
@@ -187,7 +195,8 @@ pub struct HirEnumVariantExpr {
     pub enum_ty: Ty,
     /// The variant name (e.g., "File")
     pub variant_name: String,
-    /// TODO: Add payload support when needed
+    /// Optional payload for variant constructors like Ok(value) or Err(err)
+    pub payload: Option<Box<HirExpr>>,
     pub span: Span,
 }
 

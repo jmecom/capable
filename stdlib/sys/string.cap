@@ -1,9 +1,9 @@
 package safe
-module sys.string
+module sys::string
 
-use sys.buffer
-use sys.bytes
-use sys.vec
+use sys::buffer
+use sys::bytes
+use sys::vec
 
 pub fn len(s: string) -> i32 {
   return 0

@@ -323,7 +323,7 @@ fn collect_enums(
 
 use crate::hir::HirModule;
 
-pub fn type_check(module: &Module) -> Result<(HirModule, Vec<HirModule>, Vec<HirModule>), TypeError> {
+pub fn type_check(module: &Module) -> Result<crate::hir::HirProgram, TypeError> {
     type_check_program(module, &[], &[])
 }
 
@@ -331,7 +331,7 @@ pub fn type_check_program(
     module: &Module,
     stdlib: &[Module],
     user_modules: &[Module],
-) -> Result<(HirModule, Vec<HirModule>, Vec<HirModule>), TypeError> {
+) -> Result<crate::hir::HirProgram, TypeError> {
     let use_map = UseMap::new(module);
     let stdlib_index = build_stdlib_index(stdlib)?;
     let modules = stdlib
@@ -391,7 +391,11 @@ pub fn type_check_program(
         &stdlib_index,
     )?;
 
-    Ok((hir_entry, hir_user_modules?, hir_stdlib?))
+    Ok(crate::hir::HirProgram {
+        entry: hir_entry,
+        user_modules: hir_user_modules?,
+        stdlib: hir_stdlib?,
+    })
 }
 
 fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
@@ -865,7 +869,7 @@ fn check_expr(
                     return Ok(ty.clone());
                 }
             }
-            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map) {
+            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
                 return Ok(ty);
             }
             Err(TypeError::new(
@@ -882,11 +886,70 @@ fn check_expr(
                 )
             })?;
 
+            // Special handling for Ok(...) and Err(...) Result constructors
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].item;
+                if name == "Ok" || name == "Err" {
+                    // Check that we have exactly one argument
+                    if call.args.len() != 1 {
+                        return Err(TypeError::new(
+                            format!("{name} takes exactly one argument"),
+                            call.span,
+                        ));
+                    }
+                    // Check the argument type
+                    let arg_ty = check_expr(
+                        &call.args[0],
+                        functions,
+                        locals,
+                        use_map,
+                        struct_map,
+                        enum_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                    )?;
+                    // Infer Result type from context (ret_ty) if available
+                    if let Ty::Path(ty_name, args) = ret_ty {
+                        if ty_name == "Result" && args.len() == 2 {
+                            // Verify the argument matches the expected type
+                            let expected = if name == "Ok" { &args[0] } else { &args[1] };
+                            if &arg_ty != expected {
+                                return Err(TypeError::new(
+                                    format!("{name} argument type mismatch: expected {expected:?}, got {arg_ty:?}"),
+                                    call.args[0].span(),
+                                ));
+                            }
+                            return Ok(ret_ty.clone());
+                        }
+                    }
+                    // If no Result context, construct Result from arg type
+                    return Ok(Ty::Path(
+                        "Result".to_string(),
+                        if name == "Ok" {
+                            vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
+                        } else {
+                            vec![Ty::Builtin(BuiltinType::Unit), arg_ty]
+                        },
+                    ));
+                }
+            }
+
             let resolved = resolve_path(&path, use_map);
             let key = resolved.join(".");
-            let sig = functions.get(&key).ok_or_else(|| {
-                TypeError::new(format!("unknown function `{key}`"), path.span)
-            })?;
+
+            // First try the resolved path as-is
+            let sig = if let Some(sig) = functions.get(&key) {
+                sig
+            } else if resolved.len() == 1 {
+                // Try prepending current module for unqualified function names
+                let qualified = format!("{}.{}", module_name, key);
+                functions.get(&qualified).ok_or_else(|| {
+                    TypeError::new(format!("unknown function `{key}`"), path.span)
+                })?
+            } else {
+                return Err(TypeError::new(format!("unknown function `{key}`"), path.span));
+            };
             if sig.params.len() != call.args.len() {
                 return Err(TypeError::new(
                     format!(
@@ -1171,7 +1234,7 @@ fn check_expr(
                 // Try to convert the FieldAccess chain to a Path and resolve as an enum variant
                 // This handles cases like fs.FsErr.InvalidPath where fs is a module, not a local
                 if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
-                    if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map) {
+                    if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map, module_name) {
                         return Ok(ty);
                     }
                 }
@@ -1212,7 +1275,7 @@ fn check_match_stmt(
     let mut parent_scopes = Scopes::from_flat_map(locals.clone());
     for arm in &match_expr.arms {
         parent_scopes.push_scope();
-        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map)?;
+        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map, module_name)?;
         check_block(
             &arm.body,
             ret_ty,
@@ -1255,7 +1318,7 @@ fn check_match_expr_value(
     let mut parent_scopes = Scopes::from_flat_map(locals.clone());
     for arm in &match_expr.arms {
         parent_scopes.push_scope();
-        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map)?;
+        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map, module_name)?;
         let arm_ty = check_match_arm_value(
             &arm.body,
             functions,
@@ -1415,6 +1478,7 @@ fn bind_pattern(
     scopes: &mut Scopes,
     use_map: &UseMap,
     enum_map: &HashMap<String, EnumInfo>,
+    module_name: &str,
 ) -> Result<(), TypeError> {
     match pattern {
         Pattern::Call { path, binding, .. } => {
@@ -1450,7 +1514,7 @@ fn bind_pattern(
             Ok(())
         }
         Pattern::Path(path) => {
-            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map) {
+            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
                 if &ty != match_ty {
                     return Err(TypeError::new(
                         format!("pattern type mismatch: expected {match_ty:?}, found {ty:?}"),
@@ -1468,6 +1532,7 @@ fn resolve_enum_variant(
     path: &Path,
     use_map: &UseMap,
     enum_map: &HashMap<String, EnumInfo>,
+    module_name: &str,
 ) -> Option<Ty> {
     let resolved = resolve_path(path, use_map);
     if resolved.len() < 2 {
@@ -1475,10 +1540,24 @@ fn resolve_enum_variant(
     }
     let (enum_path, variant) = resolved.split_at(resolved.len() - 1);
     let enum_name = enum_path.join(".");
-    let info = enum_map.get(&enum_name)?;
-    if info.variants.iter().any(|name| name == &variant[0]) {
-        return Some(Ty::Path(enum_name, Vec::new()));
+
+    // First try the resolved path as-is
+    if let Some(info) = enum_map.get(&enum_name) {
+        if info.variants.iter().any(|name| name == &variant[0]) {
+            return Some(Ty::Path(enum_name, Vec::new()));
+        }
     }
+
+    // If not found, try prepending current module (for local enums)
+    if enum_path.len() == 1 {
+        let qualified = format!("{}.{}", module_name, enum_name);
+        if let Some(info) = enum_map.get(&qualified) {
+            if info.variants.iter().any(|name| name == &variant[0]) {
+                return Some(Ty::Path(qualified, Vec::new()));
+            }
+        }
+    }
+
     None
 }
 
@@ -1543,7 +1622,7 @@ fn is_orderable_type(ty: &Ty) -> bool {
 
 use crate::hir::{
     HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirField,
-    HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
+    HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
     HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
     HirStructLiteralField, HirUnary, HirWhileStmt, HirAssignStmt, LocalId, ResolvedCallee,
 };
@@ -1621,9 +1700,8 @@ fn lower_module(
     let mut hir_functions = Vec::new();
     for item in &module.items {
         if let Item::Function(func) = item {
-            if let Ok(hir_func) = lower_function(func, &mut ctx) {
-                hir_functions.push(hir_func);
-            }
+            let hir_func = lower_function(func, &mut ctx)?;
+            hir_functions.push(hir_func);
         }
     }
 
@@ -1797,6 +1875,29 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
             }))
         }
         Stmt::Expr(expr_stmt) => {
+            // For match expressions, try to lower as expression first
+            // If that fails (arms have returns), fall back to statement lowering
+            if let Expr::Match(match_expr) = &expr_stmt.expr {
+                // Try expression lowering first
+                match lower_expr(&expr_stmt.expr, ctx, ret_ty) {
+                    Ok(expr) => {
+                        return Ok(HirStmt::Expr(HirExprStmt {
+                            expr,
+                            span: expr_stmt.span,
+                        }));
+                    }
+                    Err(_) => {
+                        // Expression lowering failed (arms have returns)
+                        // Use statement lowering
+                        let expr = lower_match_stmt(match_expr, ctx, ret_ty)?;
+                        return Ok(HirStmt::Expr(HirExprStmt {
+                            expr,
+                            span: expr_stmt.span,
+                        }));
+                    }
+                }
+            }
+
             let expr = lower_expr(&expr_stmt.expr, ctx, ret_ty)?;
             Ok(HirStmt::Expr(HirExprStmt {
                 expr,
@@ -1866,6 +1967,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
                 enum_ty: ty,
                 variant_name,
+                payload: None,
                 span: path.span,
             }))
         }
@@ -1878,8 +1980,32 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 )
             })?;
 
+            // Special handling for Ok(...) and Err(...) Result constructors
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].item;
+                if name == "Ok" || name == "Err" {
+                    // Lower the argument
+                    let arg = lower_expr(&call.args[0], ctx, ret_ty)?;
+                    let variant_name = name.clone();
+
+                    // The result type comes from check_expr (stored in ty)
+                    return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                        enum_ty: ty.clone(),
+                        variant_name,
+                        payload: Some(Box::new(arg)),
+                        span: call.span,
+                    }));
+                }
+            }
+
             // Resolve function path
-            let resolved = resolve_path(&path, ctx.use_map);
+            let mut resolved = resolve_path(&path, ctx.use_map);
+
+            // For unqualified names, prepend current module
+            if resolved.len() == 1 {
+                resolved.insert(0, ctx.module_name.to_string());
+            }
+
             let key = resolved.join(".");
 
             // Lower arguments
@@ -2011,7 +2137,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             if !base_is_local {
                 // Try to convert to path and resolve as enum variant
                 if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
-                    if let Some(enum_ty) = resolve_enum_variant(&path, ctx.use_map, ctx.enums) {
+                    if let Some(enum_ty) = resolve_enum_variant(&path, ctx.use_map, ctx.enums, ctx.module_name) {
                         // It's an enum variant - extract variant name
                         let variant_name = path.segments.last()
                             .map(|s| s.item.clone())
@@ -2020,6 +2146,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                         return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
                             enum_ty,
                             variant_name,
+                            payload: None,
                             span: field_access.span,
                         }));
                     }
@@ -2032,12 +2159,226 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 field_access.span,
             ))
         }
-        Expr::StructLiteral(_) | Expr::Match(_) => {
-            // TODO: Implement these when needed
-            Err(TypeError::new(
-                format!("expression type not yet supported in HIR lowering"),
-                expr.span(),
-            ))
+        Expr::StructLiteral(lit) => {
+            // Resolve the struct type name
+            let type_name = resolve_type_name(&lit.path, ctx.use_map, ctx.stdlib);
+            let key = if lit.path.segments.len() == 1 {
+                if ctx.stdlib.types.contains_key(&lit.path.segments[0].item) {
+                    type_name.clone()
+                } else {
+                    lit.path.segments[0].item.clone()
+                }
+            } else {
+                type_name.clone()
+            };
+
+            let info = ctx.structs.get(&key).ok_or_else(|| {
+                TypeError::new(format!("unknown struct `{}`", key), lit.span)
+            })?;
+
+            // Check opaque constraint
+            if info.is_opaque && info.module != ctx.module_name {
+                return Err(TypeError::new(
+                    format!(
+                        "cannot construct opaque type `{}` outside module `{}`",
+                        key, info.module
+                    ),
+                    lit.span,
+                ));
+            }
+
+            // Lower each field expression
+            let mut hir_fields = Vec::new();
+            for field in &lit.fields {
+                let hir_expr = lower_expr(&field.expr, ctx, ret_ty)?;
+                hir_fields.push(HirStructLiteralField {
+                    name: field.name.item.clone(),
+                    expr: hir_expr,
+                });
+            }
+
+            // Construct the struct type
+            let struct_ty = Ty::Path(type_name, vec![]);
+
+            Ok(HirExpr::StructLiteral(HirStructLiteral {
+                struct_ty,
+                fields: hir_fields,
+                span: lit.span,
+            }))
+        }
+        Expr::Match(match_expr) => {
+            // This path is for match-as-expression (needs value from arms)
+            // Lower the scrutinee expression
+            let scrutinee = lower_expr(&match_expr.expr, ctx, ret_ty)?;
+            let scrutinee_ty = expr_type(&scrutinee);
+
+            // Lower each arm
+            let mut hir_arms = Vec::new();
+            for arm in &match_expr.arms {
+                ctx.push_scope();
+
+                // Lower the pattern, adding any bindings to ctx
+                let hir_pattern = lower_pattern(&arm.pattern, &scrutinee_ty, ctx)?;
+
+                // Lower the arm body
+                let hir_body = lower_block(&arm.body, ctx, ret_ty)?;
+
+                ctx.pop_scope();
+
+                hir_arms.push(HirMatchArm {
+                    pattern: hir_pattern,
+                    body: hir_body,
+                });
+            }
+
+            Ok(HirExpr::Match(HirMatch {
+                expr: Box::new(scrutinee),
+                expr_ty: scrutinee_ty,
+                arms: hir_arms,
+                result_ty: ty,  // Type from check_expr
+                span: match_expr.span,
+            }))
+        }
+    }
+}
+
+/// Lower a match-as-statement (arms can contain returns, don't need to produce values)
+fn lower_match_stmt(
+    match_expr: &MatchExpr,
+    ctx: &mut LoweringCtx,
+    ret_ty: &Ty,
+) -> Result<HirExpr, TypeError> {
+    // Lower the scrutinee expression
+    let scrutinee = lower_expr(&match_expr.expr, ctx, ret_ty)?;
+    let scrutinee_ty = expr_type(&scrutinee);
+
+    // Lower each arm - using check_block instead of check_match_expr_value
+    // This allows arms to end with return statements
+    let mut hir_arms = Vec::new();
+    for arm in &match_expr.arms {
+        ctx.push_scope();
+
+        // Lower the pattern, adding any bindings to ctx
+        let hir_pattern = lower_pattern(&arm.pattern, &scrutinee_ty, ctx)?;
+
+        // Lower the arm body (this uses lower_block which handles returns)
+        let hir_body = lower_block(&arm.body, ctx, ret_ty)?;
+
+        ctx.pop_scope();
+
+        hir_arms.push(HirMatchArm {
+            pattern: hir_pattern,
+            body: hir_body,
+        });
+    }
+
+    Ok(HirExpr::Match(HirMatch {
+        expr: Box::new(scrutinee),
+        expr_ty: scrutinee_ty,
+        arms: hir_arms,
+        result_ty: Ty::Builtin(BuiltinType::Unit),  // Statement context, no value
+        span: match_expr.span,
+    }))
+}
+
+/// Lower an AST pattern to an HIR pattern, adding any bindings to the context
+fn lower_pattern(
+    pattern: &Pattern,
+    match_ty: &Ty,
+    ctx: &mut LoweringCtx,
+) -> Result<HirPattern, TypeError> {
+    match pattern {
+        Pattern::Wildcard(_) => Ok(HirPattern::Wildcard),
+
+        Pattern::Literal(lit) => Ok(HirPattern::Literal(lit.clone())),
+
+        Pattern::Binding(ident) => {
+            // Binding introduces a new local with the match type
+            let local_id = ctx.fresh_local(ident.item.clone(), match_ty.clone());
+            Ok(HirPattern::Binding(local_id, ident.item.clone()))
+        }
+
+        Pattern::Path(path) => {
+            // Path pattern is an enum variant without binding
+            if let Some(enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
+                let variant_name = path.segments.last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                Ok(HirPattern::Variant {
+                    enum_ty,
+                    variant_name,
+                    binding: None,
+                })
+            } else {
+                Err(TypeError::new(
+                    format!("unknown enum variant in pattern: {}", path),
+                    path.span,
+                ))
+            }
+        }
+
+        Pattern::Call { path, binding, span } => {
+            // Call pattern is an enum variant with optional binding (e.g., Ok(x), Err(e))
+
+            // Special handling for Result's Ok/Err variants
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].item;
+                if name == "Ok" || name == "Err" {
+                    if let Ty::Path(ty_name, args) = match_ty {
+                        if ty_name == "Result" && args.len() == 2 {
+                            let variant_name = name.clone();
+
+                            // Handle binding if present
+                            let binding_info = if let Some(bind_ident) = binding {
+                                let bind_ty = if variant_name == "Ok" {
+                                    args[0].clone()
+                                } else {
+                                    args[1].clone()
+                                };
+                                let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
+                                Some((local_id, bind_ident.item.clone()))
+                            } else {
+                                None
+                            };
+
+                            return Ok(HirPattern::Variant {
+                                enum_ty: match_ty.clone(),
+                                variant_name,
+                                binding: binding_info,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Resolve the enum variant for user-defined enums
+            if let Some(enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
+                let variant_name = path.segments.last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                // Handle binding if present
+                let binding_info = if let Some(bind_ident) = binding {
+                    // For user-defined enums, use the match type as binding type
+                    // TODO: Extract payload type from enum variant definition
+                    let bind_ty = match_ty.clone();
+                    let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
+                    Some((local_id, bind_ident.item.clone()))
+                } else {
+                    None
+                };
+
+                Ok(HirPattern::Variant {
+                    enum_ty,
+                    variant_name,
+                    binding: binding_info,
+                })
+            } else {
+                Err(TypeError::new(
+                    format!("unknown enum variant in pattern: {}", path),
+                    *span,
+                ))
+            }
         }
     }
 }

@@ -1,24 +1,24 @@
 package safe
 module stdin_safe
-use sys.system
-use sys.console
-use sys.io
-use sys.string
+use sys::system
+use sys::console
+use sys::io
+use sys::string
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let code = match io.read_stdin_to_string() {
+  let c = system::console(sys)
+  let code = match io::read_stdin_to_string() {
     Ok(s) => {
-      let n = string.len(s)
+      let n = string::len(s)
       if (n == 0) {
-        console.println(c, "stdin ok")
+        console::println(c, "stdin ok")
       } else {
-        console.println(c, "stdin data")
+        console::println(c, "stdin data")
       }
       0
     }
     Err(e) => {
-      console.println(c, "stdin err")
+      console::println(c, "stdin err")
       1
     }
   }

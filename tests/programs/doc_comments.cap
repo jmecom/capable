@@ -1,4 +1,4 @@
-module test.docs
+module test::docs
 
 /// This is a doc comment for a struct.
 /// It has multiple lines.

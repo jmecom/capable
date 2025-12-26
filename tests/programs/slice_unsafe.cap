@@ -1,19 +1,19 @@
 package unsafe
 module slice_unsafe
-use sys.system
-use sys.console
-use sys.mem
+use sys::system
+use sys::console
+use sys::mem
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let p = mem.malloc(4)
-  let slice = mem.slice_from_ptr(p, 4)
-  let len = mem.slice_len(slice)
+  let c = system::console(sys)
+  let p = mem::malloc(4)
+  let slice = mem::slice_from_ptr(p, 4)
+  let len = mem::slice_len(slice)
   if (len == 4) {
-    console.println(c, "slice ok")
+    console::println(c, "slice ok")
   } else {
-    console.println(c, "slice bad")
+    console::println(c, "slice bad")
   }
-  mem.free(p)
+  mem::free(p)
   return 0
 }

@@ -1,8 +1,8 @@
 module should_fail_console_wrong_type
-use sys.console
+use sys::console
 
 pub fn main(sys: System) -> i32 {
   let c: i32 = 0
-  console.println(c, "nope")
+  console::println(c, "nope")
   return 0
 }

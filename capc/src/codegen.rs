@@ -136,9 +136,9 @@ enum ResultKind {
 }
 
 pub fn build_object(
-    entry: &crate::hir::HirModule,
-    user_modules: &[crate::hir::HirModule],
-    stdlib: &[crate::hir::HirModule],
+    program: &crate::hir::HirProgram,
+    entry_ast: &AstModule,
+    user_modules_ast: &[AstModule],
     out_path: &Path,
 ) -> Result<(), CodegenError> {
     let mut flag_builder = cranelift_codegen::settings::builder();
@@ -155,19 +155,19 @@ pub fn build_object(
             .map_err(|err| CodegenError::Codegen(err.to_string()))?,
     );
 
-    let stdlib_index = build_stdlib_index(stdlib);
-    let enum_index = build_enum_index(entry, user_modules, stdlib);
+    let stdlib_index = build_stdlib_index(&program.stdlib);
+    let enum_index = build_enum_index(&program.entry, &program.user_modules, &program.stdlib);
 
     let mut fn_map = HashMap::new();
     register_runtime_intrinsics(&mut fn_map, module.isa().pointer_type());
-    let all_modules = user_modules
+    let all_modules = program.user_modules
         .iter()
-        .chain(std::iter::once(entry))
+        .chain(std::iter::once(&program.entry))
         .collect::<Vec<_>>();
     for module_ref in &all_modules {
         register_user_functions(
             module_ref,
-            entry,
+            &program.entry,
             &stdlib_index,
             &enum_index,
             &mut fn_map,
@@ -175,85 +175,92 @@ pub fn build_object(
         )?;
     }
 
+    // Register extern functions from AST modules (not in HIR yet)
+    let all_ast_modules = user_modules_ast
+        .iter()
+        .chain(std::iter::once(entry_ast))
+        .collect::<Vec<_>>();
+    for ast_module in &all_ast_modules {
+        register_extern_functions(ast_module, &stdlib_index, &enum_index, &mut fn_map)?;
+    }
+
     let mut data_counter = 0u32;
     for module_ref in &all_modules {
-        let module_name = module_ref.name.to_string();
-        let use_map = UseMap::new(module_ref);
-        for item in &module_ref.items {
-            if let Item::Function(func) = item {
-                let key = format!("{module_name}.{}", func.name.item);
-                let info = fn_map
-                    .get(&key)
-                    .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
-                    .clone();
-                if info.is_runtime {
-                    continue;
-                }
-                let func_id = module
-                    .declare_function(
-                        &info.symbol,
-                        Linkage::Export,
-                        &sig_to_clif(&info.sig, module.isa().pointer_type()),
-                    )
-                    .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-                let mut ctx = module.make_context();
-                ctx.func = Function::with_name_signature(
-                    ir::UserFuncName::user(0, func_id.as_u32()),
-                    sig_to_clif(&info.sig, module.isa().pointer_type()),
-                );
-
-                let mut builder_ctx = FunctionBuilderContext::new();
-                let mut builder = FunctionBuilder::new(&mut ctx.func, &mut builder_ctx);
-                let block = builder.create_block();
-                builder.append_block_params_for_function_params(block);
-                builder.switch_to_block(block);
-                // Blocks sealed after body emission.
-
-                let mut locals: HashMap<String, LocalValue> = HashMap::new();
-                let params = builder.block_params(block).to_vec();
-                let mut param_index = 0;
-                for param in &func.params {
-                    let ty_kind = lower_ty(&param.ty, &use_map, &stdlib_index, &enum_index)?;
-                    let value =
-                        value_from_params(&mut builder, &ty_kind, &params, &mut param_index)?;
-                    let local = store_local(&mut builder, value);
-                    locals.insert(param.name.item.clone(), local);
-                }
-
-                let mut terminated = false;
-                for stmt in &func.body.stmts {
-                    let flow = emit_stmt(
-                        &mut builder,
-                        stmt,
-                        &mut locals,
-                        &fn_map,
-                        &use_map,
-                        &module_name,
-                        &stdlib_index,
-                        &enum_index,
-                        &mut module,
-                        &mut data_counter,
-                    )?;
-                    if flow == Flow::Terminated {
-                        terminated = true;
-                        break;
-                    }
-                }
-
-                // Only add implicit unit return if function body doesn't terminate
-                if info.sig.ret == TyKind::Unit && !terminated {
-                    builder.ins().return_(&[]);
-                }
-
-                builder.seal_all_blocks();
-                builder.finalize();
-                if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
-                    return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
-                }
-                module
-                    .define_function(func_id, &mut ctx)
-                    .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+        let module_name = &module_ref.name;
+        for func in &module_ref.functions {
+            let key = format!("{}.{}", module_name, func.name);
+            let info = fn_map
+                .get(&key)
+                .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
+                .clone();
+            if info.is_runtime {
+                continue;
             }
+            let func_id = module
+                .declare_function(
+                    &info.symbol,
+                    Linkage::Export,
+                    &sig_to_clif(&info.sig, module.isa().pointer_type()),
+                )
+                .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+            let mut ctx = module.make_context();
+            ctx.func = Function::with_name_signature(
+                ir::UserFuncName::user(0, func_id.as_u32()),
+                sig_to_clif(&info.sig, module.isa().pointer_type()),
+            );
+
+            let mut builder_ctx = FunctionBuilderContext::new();
+            let mut builder = FunctionBuilder::new(&mut ctx.func, &mut builder_ctx);
+            let block = builder.create_block();
+            builder.append_block_params_for_function_params(block);
+            builder.switch_to_block(block);
+            // Blocks sealed after body emission.
+
+            let mut locals: HashMap<String, LocalValue> = HashMap::new();
+            let params = builder.block_params(block).to_vec();
+            let mut param_index = 0;
+            for param in &func.params {
+                // HirParam already has resolved types - use typeck_ty_to_tykind
+                let ty_kind = typeck_ty_to_tykind(&param.ty)?;
+                let value =
+                    value_from_params(&mut builder, &ty_kind, &params, &mut param_index)?;
+                let local = store_local(&mut builder, value);
+                // HirParam.name is String, not Spanned<String>
+                locals.insert(param.name.clone(), local);
+            }
+
+            let mut terminated = false;
+            for stmt in &func.body.stmts {
+                // Use HIR emission functions
+                let flow = emit_hir_stmt(
+                    &mut builder,
+                    stmt,
+                    &mut locals,
+                    &fn_map,
+                    &enum_index,
+                    &mut module,
+                    &mut data_counter,
+                )?;
+                if flow == Flow::Terminated {
+                    terminated = true;
+                    break;
+                }
+            }
+
+            // Only add implicit unit return if function body doesn't terminate
+            if info.sig.ret == TyKind::Unit && !terminated {
+                builder.ins().return_(&[]);
+            }
+
+            builder.seal_all_blocks();
+            builder.finalize();
+            if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
+                eprintln!("=== IR for {} ===\n{}", func.name, ctx.func.display());
+                return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
+            }
+            module
+                .define_function(func_id, &mut ctx)
+                .map_err(|err| CodegenError::Codegen(err.to_string()))?;
         }
     }
 
@@ -1225,44 +1232,120 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     let _ = ptr_ty;
 }
 
+/// Convert typeck::Ty to codegen::TyKind
+fn typeck_ty_to_tykind(ty: &crate::typeck::Ty) -> Result<TyKind, CodegenError> {
+    use crate::typeck::{BuiltinType, Ty};
+    match ty {
+        Ty::Builtin(b) => match b {
+            BuiltinType::I32 => Ok(TyKind::I32),
+            BuiltinType::I64 => Err(CodegenError::Unsupported("i64 not yet supported".to_string())),
+            BuiltinType::U32 => Ok(TyKind::U32),
+            BuiltinType::U8 => Ok(TyKind::U8),
+            BuiltinType::Bool => Ok(TyKind::Bool),
+            BuiltinType::String => Ok(TyKind::String),
+            BuiltinType::Unit => Ok(TyKind::Unit),
+        },
+        Ty::Path(path, args) => {
+            // Handle known types
+            if path.ends_with(".Slice") {
+                Ok(TyKind::Handle)
+            } else if path.ends_with(".Buffer") {
+                Ok(TyKind::Handle)
+            } else if path.ends_with(".FsErr") || path.contains("Err") {
+                Ok(TyKind::I32)  // Enums are i32
+            } else if path.contains('.') {
+                // Other module types are generally handles
+                Ok(TyKind::Handle)
+            } else {
+                // Local enum
+                Ok(TyKind::I32)
+            }
+        },
+        Ty::Ptr(inner) => Ok(TyKind::Ptr),
+    }
+}
+
 fn register_user_functions(
-    module: &AstModule,
-    entry: &AstModule,
+    module: &crate::hir::HirModule,
+    entry: &crate::hir::HirModule,
     stdlib: &StdlibIndex,
     enum_index: &EnumIndex,
     map: &mut HashMap<String, FnInfo>,
     _ptr_ty: Type,
 ) -> Result<(), CodegenError> {
+    let module_name = &module.name;
+    // HIR functions already have resolved types
+    for func in &module.functions {
+        let sig = FnSig {
+            params: func
+                .params
+                .iter()
+                .map(|p| typeck_ty_to_tykind(&p.ty))
+                .collect::<Result<Vec<TyKind>, CodegenError>>()?,
+            ret: typeck_ty_to_tykind(&func.ret_ty)?,
+        };
+        let key = format!("{}.{}", module_name, func.name);
+        let symbol = if module_name == &entry.name && func.name == "main" {
+            "capable_main".to_string()
+        } else {
+            mangle_symbol(module_name, &func.name)
+        };
+        map.insert(
+            key,
+            FnInfo {
+                sig,
+                abi_sig: None,
+                symbol,
+                is_runtime: false,
+            },
+        );
+    }
+    // Note: HirModule doesn't have extern functions as separate items
+    // They would be in the functions list if needed
+    Ok(())
+}
+
+fn register_extern_functions(
+    module: &AstModule,
+    stdlib: &StdlibIndex,
+    enum_index: &EnumIndex,
+    map: &mut HashMap<String, FnInfo>,
+) -> Result<(), CodegenError> {
     let module_name = module.name.to_string();
     let use_map = UseMap::new(module);
+
     for item in &module.items {
-        match item {
-            Item::Function(func) => {
-                let sig = FnSig {
-                    params: func
-                        .params
-                        .iter()
-                        .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
-                        .collect::<Result<Vec<TyKind>, CodegenError>>()?,
-                    ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
-                };
-                let key = format!("{module_name}.{}", func.name.item);
-                let symbol = if module_name == entry.name.to_string() && func.name.item == "main" {
-                    "capable_main".to_string()
-                } else {
-                    mangle_symbol(&module_name, &func.name.item)
-                };
-                map.insert(
-                    key,
-                    FnInfo {
-                        sig,
-                        abi_sig: None,
-                        symbol,
-                        is_runtime: false,
-                    },
-                );
-            }
-            Item::ExternFunction(func) => {
+        if let Item::ExternFunction(func) = item {
+            let sig = FnSig {
+                params: func
+                    .params
+                    .iter()
+                    .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
+                    .collect::<Result<Vec<TyKind>, CodegenError>>()?,
+                ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
+            };
+            let key = format!("{}.{}", module_name, func.name.item);
+            map.insert(
+                key,
+                FnInfo {
+                    sig,
+                    abi_sig: None,
+                    symbol: func.name.item.clone(),
+                    is_runtime: true,
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+// Removed old extern function handling - HIR doesn't distinguish them separately
+fn _old_extern_handling() {
+    // This is dead code kept for reference
+    // In HIR, extern functions would just be in the functions list
+    // with appropriate metadata if we needed to track them
+    /*
+    Item::ExternFunction(func) => {
                 let sig = FnSig {
                     params: func
                         .params
@@ -1286,6 +1369,7 @@ fn register_user_functions(
         }
     }
     Ok(())
+    */
 }
 
 fn mangle_symbol(module_name: &str, func_name: &str) -> String {
@@ -2359,6 +2443,1127 @@ fn emit_match_expr(
     Ok(result)
 }
 
+// ============================================================================
+// HIR Emission Functions
+// ============================================================================
+
+fn emit_hir_stmt(
+    builder: &mut FunctionBuilder,
+    stmt: &crate::hir::HirStmt,
+    locals: &mut HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<Flow, CodegenError> {
+    use crate::hir::HirStmt;
+
+    match stmt {
+        HirStmt::Let(let_stmt) => {
+            let value = emit_hir_expr(
+                builder,
+                &let_stmt.expr,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            let local = store_local(builder, value);
+            locals.insert(let_stmt.name.clone(), local);
+        }
+        HirStmt::Assign(assign) => {
+            let value = emit_hir_expr(
+                builder,
+                &assign.expr,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            let Some(local) = locals.get_mut(&assign.name) else {
+                return Err(CodegenError::UnknownVariable(assign.name.clone()));
+            };
+            match local {
+                LocalValue::Slot(slot, _ty) => {
+                    let ValueRepr::Single(val) = value else {
+                        return Err(CodegenError::Unsupported("assignment".to_string()));
+                    };
+                    builder.ins().stack_store(val, *slot, 0);
+                }
+                LocalValue::Value(_) => {
+                    return Err(CodegenError::Unsupported("assignment".to_string()));
+                }
+            }
+        }
+        HirStmt::Return(ret_stmt) => {
+            if let Some(expr) = &ret_stmt.expr {
+                let value = emit_hir_expr(
+                    builder,
+                    expr,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    module,
+                    data_counter,
+                )?;
+                match value {
+                    ValueRepr::Unit => builder.ins().return_(&[]),
+                    ValueRepr::Single(val) => builder.ins().return_(&[val]),
+                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                        let values = flatten_value(&value);
+                        builder.ins().return_(&values)
+                    }
+                };
+            } else {
+                builder.ins().return_(&[]);
+            }
+            return Ok(Flow::Terminated);
+        }
+        HirStmt::Expr(expr_stmt) => {
+            let _ = emit_hir_expr(
+                builder,
+                &expr_stmt.expr,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+        }
+        HirStmt::If(if_stmt) => {
+            // Snapshot locals so branch-scoped lets don't leak
+            let saved_locals = locals.clone();
+
+            let then_block = builder.create_block();
+            let merge_block = builder.create_block();
+            let else_block = if if_stmt.else_block.is_some() {
+                builder.create_block()
+            } else {
+                merge_block
+            };
+
+            let cond_val = emit_hir_expr(
+                builder,
+                &if_stmt.cond,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            let cond_b1 = to_b1(builder, cond_val)?;
+            builder
+                .ins()
+                .brif(cond_b1, then_block, &[], else_block, &[]);
+
+            // THEN branch with its own locals
+            builder.switch_to_block(then_block);
+            let mut then_locals = saved_locals.clone();
+            let mut then_terminated = false;
+            for stmt in &if_stmt.then_block.stmts {
+                let flow = emit_hir_stmt(
+                    builder,
+                    stmt,
+                    &mut then_locals,
+                    fn_map,
+                    enum_index,
+                    module,
+                    data_counter,
+                )?;
+                if flow == Flow::Terminated {
+                    then_terminated = true;
+                    break;
+                }
+            }
+            if !then_terminated {
+                builder.ins().jump(merge_block, &[]);
+            }
+            builder.seal_block(then_block);
+
+            // ELSE branch with its own locals
+            if let Some(else_block_hir) = &if_stmt.else_block {
+                builder.switch_to_block(else_block);
+                let mut else_locals = saved_locals.clone();
+                let mut else_terminated = false;
+                for stmt in &else_block_hir.stmts {
+                    let flow = emit_hir_stmt(
+                        builder,
+                        stmt,
+                        &mut else_locals,
+                        fn_map,
+                        enum_index,
+                        module,
+                        data_counter,
+                    )?;
+                    if flow == Flow::Terminated {
+                        else_terminated = true;
+                        break;
+                    }
+                }
+                if !else_terminated {
+                    builder.ins().jump(merge_block, &[]);
+                }
+                builder.seal_block(else_block);
+            }
+
+            // After the if, restore the pre-if locals snapshot
+            *locals = saved_locals;
+
+            builder.switch_to_block(merge_block);
+            builder.seal_block(merge_block);
+        }
+        HirStmt::While(while_stmt) => {
+            // Snapshot locals so loop-body lets don't leak out of the loop
+            let saved_locals = locals.clone();
+
+            let header_block = builder.create_block();
+            let body_block = builder.create_block();
+            let exit_block = builder.create_block();
+
+            builder.ins().jump(header_block, &[]);
+            builder.switch_to_block(header_block);
+
+            let cond_val = emit_hir_expr(
+                builder,
+                &while_stmt.cond,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            let cond_b1 = to_b1(builder, cond_val)?;
+            builder
+                .ins()
+                .brif(cond_b1, body_block, &[], exit_block, &[]);
+
+            builder.switch_to_block(body_block);
+
+            // Loop body gets its own locals
+            let mut body_locals = saved_locals.clone();
+            let mut body_terminated = false;
+            for stmt in &while_stmt.body.stmts {
+                let flow = emit_hir_stmt(
+                    builder,
+                    stmt,
+                    &mut body_locals,
+                    fn_map,
+                    enum_index,
+                    module,
+                    data_counter,
+                )?;
+                if flow == Flow::Terminated {
+                    body_terminated = true;
+                    break;
+                }
+            }
+
+            if !body_terminated {
+                builder.ins().jump(header_block, &[]);
+            }
+
+            builder.seal_block(body_block);
+            builder.seal_block(header_block);
+
+            builder.switch_to_block(exit_block);
+            builder.seal_block(exit_block);
+
+            // After the loop, restore the pre-loop locals snapshot
+            *locals = saved_locals;
+        }
+    }
+    Ok(Flow::Continues)
+}
+
+fn emit_hir_expr(
+    builder: &mut FunctionBuilder,
+    expr: &crate::hir::HirExpr,
+    locals: &HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    use crate::hir::HirExpr;
+
+    match expr {
+        HirExpr::Literal(lit) => match &lit.value {
+            Literal::Int(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I32, *value as i64),
+            )),
+            Literal::U8(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I8, *value as i64),
+            )),
+            Literal::Bool(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I8, *value as i64),
+            )),
+            Literal::String(value) => emit_string(builder, value, module, data_counter),
+            Literal::Unit => Ok(ValueRepr::Unit),
+        },
+        HirExpr::Local(local) => {
+            // Look up the local by name (we still use String keys in the HashMap)
+            if let Some(value) = locals.get(&local.name) {
+                return Ok(load_local(builder, value));
+            }
+            Err(CodegenError::UnknownVariable(local.name.clone()))
+        }
+        HirExpr::EnumVariant(variant) => {
+            // Check if this is a Result type with payload (Ok/Err)
+            if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty {
+                if ty_name == "Result" && args.len() == 2 {
+                    if let Some(payload_expr) = &variant.payload {
+                        // Emit the payload
+                        let payload_value = emit_hir_expr(
+                            builder,
+                            payload_expr,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            module,
+                            data_counter,
+                        )?;
+
+                        // Create the Result value
+                        let tag = if variant.variant_name == "Ok" { 0 } else { 1 };
+                        let tag_val = builder.ins().iconst(ir::types::I32, tag);
+
+                        // Create dummy values for the unused slot
+                        // For Ok, ok = payload, err = dummy
+                        // For Err, ok = dummy, err = payload
+                        let payload_single = match payload_value {
+                            ValueRepr::Single(v) => v,
+                            ValueRepr::Unit => builder.ins().iconst(ir::types::I8, 0),
+                            ValueRepr::Pair(a, _) => a, // Take first for string etc
+                            _ => return Err(CodegenError::Unsupported(
+                                "complex payload in Result".to_string(),
+                            )),
+                        };
+                        let dummy = builder.ins().iconst(ir::types::I64, 0);
+
+                        let (ok, err) = if variant.variant_name == "Ok" {
+                            (payload_single, dummy)
+                        } else {
+                            (dummy, payload_single)
+                        };
+
+                        return Ok(ValueRepr::Result {
+                            tag: tag_val,
+                            ok: Box::new(ValueRepr::Single(ok)),
+                            err: Box::new(ValueRepr::Single(err)),
+                        });
+                    }
+                }
+            }
+
+            // For non-Result enums or variants without payload, emit just the discriminant
+            let qualified = match &variant.enum_ty {
+                crate::typeck::Ty::Path(path, _) => path.clone(),
+                _ => return Err(CodegenError::Codegen(format!(
+                    "enum variant has non-path type: {:?}",
+                    variant.enum_ty
+                ))),
+            };
+            if let Some(variants) = enum_index.variants.get(&qualified) {
+                if let Some(&discr) = variants.get(&variant.variant_name) {
+                    return Ok(ValueRepr::Single(
+                        builder.ins().iconst(ir::types::I32, i64::from(discr)),
+                    ));
+                }
+            }
+            Err(CodegenError::Codegen(format!(
+                "unknown enum variant: {}.{}",
+                qualified, variant.variant_name
+            )))
+        }
+        HirExpr::Call(call) => {
+            // HIR calls are already fully resolved - no path resolution needed!
+            let (module_path, func_name, symbol) = match &call.callee {
+                crate::hir::ResolvedCallee::Function { module, name, symbol } => {
+                    (module.clone(), name.clone(), symbol.clone())
+                }
+                crate::hir::ResolvedCallee::Intrinsic(_) => {
+                    return Err(CodegenError::Unsupported("intrinsics".to_string()));
+                }
+            };
+
+            // Lookup in fn_map by module.function key
+            let key = format!("{}.{}", module_path, func_name);
+            let info = fn_map
+                .get(&key)
+                .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
+                .clone();
+
+            // Emit arguments
+            let mut args = Vec::new();
+            for arg in &call.args {
+                let value = emit_hir_expr(
+                    builder,
+                    arg,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    module,
+                    data_counter,
+                )?;
+                args.extend(flatten_value(&value));
+            }
+
+            // Handle result out-parameters (same logic as AST version)
+            let mut out_slots = None;
+            let mut result_out = None;
+            let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
+
+            if abi_sig.ret == TyKind::ResultString {
+                let ptr_ty = module.isa().pointer_type();
+
+                let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    ptr_ty.bytes() as u32,
+                ));
+                let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    8,
+                ));
+                let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    4,
+                ));
+
+                let ptr_ptr = builder.ins().stack_addr(ptr_ty, slot_ptr, 0);
+                let len_ptr = builder.ins().stack_addr(ptr_ty, slot_len, 0);
+                let err_ptr = builder.ins().stack_addr(ptr_ty, slot_err, 0);
+
+                args.push(ptr_ptr);
+                args.push(len_ptr);
+                args.push(err_ptr);
+
+                out_slots = Some((slot_ptr, slot_len, slot_err));
+            }
+
+            if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
+                let ptr_ty = module.isa().pointer_type();
+                let ok_slot = if **ok_ty == TyKind::Unit {
+                    None
+                } else {
+                    let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        ty.bytes().max(1) as u32,
+                    ));
+                    let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+                    args.push(addr);
+                    Some((slot, ty))
+                };
+                let err_slot = if **err_ty == TyKind::Unit {
+                    None
+                } else {
+                    let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        ty.bytes().max(1) as u32,
+                    ));
+                    let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+                    args.push(addr);
+                    Some((slot, ty))
+                };
+                result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
+            }
+
+            // Emit the call
+            let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+            let func_id = module
+                .declare_function(
+                    &info.symbol,
+                    if info.is_runtime {
+                        Linkage::Import
+                    } else {
+                        Linkage::Export
+                    },
+                    &sig,
+                )
+                .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+            let local = module.declare_func_in_func(func_id, builder.func);
+            let call_inst = builder.ins().call(local, &args);
+            let results = builder.inst_results(call_inst).to_vec();
+
+            // Handle result unpacking (same logic as AST version)
+            if abi_sig.ret == TyKind::ResultString {
+                let tag = results
+                    .get(0)
+                    .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+                let (slot_ptr, slot_len, slot_err) =
+                    out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
+                let ptr_addr = builder
+                    .ins()
+                    .stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+                let len_addr = builder
+                    .ins()
+                    .stack_addr(module.isa().pointer_type(), slot_len, 0);
+                let err_addr = builder
+                    .ins()
+                    .stack_addr(module.isa().pointer_type(), slot_err, 0);
+                let ptr =
+                    builder
+                        .ins()
+                        .load(module.isa().pointer_type(), MemFlags::new(), ptr_addr, 0);
+                let len = builder
+                    .ins()
+                    .load(ir::types::I64, MemFlags::new(), len_addr, 0);
+                let err = builder
+                    .ins()
+                    .load(ir::types::I32, MemFlags::new(), err_addr, 0);
+                match &info.sig.ret {
+                    TyKind::Result(ok_ty, err_ty) => {
+                        if **ok_ty != TyKind::String || **err_ty != TyKind::I32 {
+                            return Err(CodegenError::Unsupported("result out params".to_string()));
+                        }
+                        Ok(ValueRepr::Result {
+                            tag: *tag,
+                            ok: Box::new(ValueRepr::Pair(ptr, len)),
+                            err: Box::new(ValueRepr::Single(err)),
+                        })
+                    }
+                    _ => Err(CodegenError::Unsupported("result out params".to_string())),
+                }
+            } else if let TyKind::ResultOut(_, _) = &abi_sig.ret {
+                let tag = results
+                    .get(0)
+                    .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+                let (ok_slot, err_slot, ok_ty, err_ty) = result_out
+                    .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
+                let ok_val = if let Some((slot, ty)) = ok_slot {
+                    let addr = builder
+                        .ins()
+                        .stack_addr(module.isa().pointer_type(), slot, 0);
+                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                    ValueRepr::Single(val)
+                } else {
+                    ValueRepr::Unit
+                };
+                let err_val = if let Some((slot, ty)) = err_slot {
+                    let addr = builder
+                        .ins()
+                        .stack_addr(module.isa().pointer_type(), slot, 0);
+                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                    ValueRepr::Single(val)
+                } else {
+                    ValueRepr::Unit
+                };
+                match &info.sig.ret {
+                    TyKind::Result(_, _) => Ok(ValueRepr::Result {
+                        tag: *tag,
+                        ok: Box::new(ok_val),
+                        err: Box::new(err_val),
+                    }),
+                    _ => Err(CodegenError::Unsupported(format!(
+                        "result out params for {ok_ty:?}/{err_ty:?}"
+                    ))),
+                }
+            } else {
+                let mut index = 0;
+                value_from_results(builder, &info.sig.ret, &results, &mut index)
+            }
+        }
+        HirExpr::Binary(binary) => {
+            let lhs = emit_hir_expr(
+                builder,
+                &binary.left,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+
+            if matches!(binary.op, BinaryOp::And | BinaryOp::Or) {
+                let lhs_val = match lhs {
+                    ValueRepr::Single(v) => v,
+                    ValueRepr::Unit => {
+                        return Err(CodegenError::Unsupported("boolean op on unit".to_string()))
+                    }
+                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                        return Err(CodegenError::Unsupported(
+                            "boolean op on string".to_string(),
+                        ))
+                    }
+                };
+                return emit_hir_short_circuit_expr(
+                    builder,
+                    lhs_val,
+                    &binary.right,
+                    matches!(binary.op, BinaryOp::And),
+                    locals,
+                    fn_map,
+                    enum_index,
+                    module,
+                    data_counter,
+                );
+            }
+
+            let rhs = emit_hir_expr(
+                builder,
+                &binary.right,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+
+            match (&binary.op, lhs, rhs) {
+                (BinaryOp::Add, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().iadd(a, b)))
+                }
+                (BinaryOp::Sub, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().isub(a, b)))
+                }
+                (BinaryOp::Mul, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().imul(a, b)))
+                }
+                (BinaryOp::Div, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().sdiv(a, b)))
+                }
+                (BinaryOp::Eq, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::Equal, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Neq, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::NotEqual, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Lt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedLessThan, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Lte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedLessThanOrEqual, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Gt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                (BinaryOp::Gte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, a, b);
+                    Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
+                }
+                _ => Err(CodegenError::Unsupported("binary op".to_string())),
+            }
+        }
+        HirExpr::Unary(unary) => {
+            let value = emit_hir_expr(
+                builder,
+                &unary.expr,
+                locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            match (&unary.op, value) {
+                (UnaryOp::Neg, ValueRepr::Single(v)) => {
+                    Ok(ValueRepr::Single(builder.ins().ineg(v)))
+                }
+                (UnaryOp::Not, ValueRepr::Single(v)) => {
+                    let one = builder.ins().iconst(ir::types::I8, 1);
+                    Ok(ValueRepr::Single(builder.ins().bxor(v, one)))
+                }
+                _ => Err(CodegenError::Unsupported("unary op".to_string())),
+            }
+        }
+        HirExpr::Match(match_expr) => {
+            // Check if this is a match-as-statement (result_ty is Unit)
+            if matches!(match_expr.result_ty, crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::Unit)) {
+                emit_hir_match_stmt(
+                    builder,
+                    match_expr,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    module,
+                    data_counter,
+                )
+            } else {
+                emit_hir_match_expr(
+                    builder,
+                    match_expr,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    module,
+                    data_counter,
+                )
+            }
+        }
+        HirExpr::FieldAccess(_) => {
+            // TODO: Implement HIR field access emission
+            Err(CodegenError::Unsupported("field access in HIR not yet implemented".to_string()))
+        }
+        HirExpr::StructLiteral(_) => {
+            // TODO: Implement HIR struct literal emission
+            Err(CodegenError::Unsupported("struct literals in HIR not yet implemented".to_string()))
+        }
+    }
+}
+
+fn emit_hir_short_circuit_expr(
+    builder: &mut FunctionBuilder,
+    lhs_val: ir::Value,
+    rhs_expr: &crate::hir::HirExpr,
+    is_and: bool,
+    locals: &HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    let rhs_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, ir::types::I8);
+
+    let lhs_bool = builder.ins().icmp_imm(IntCC::NotEqual, lhs_val, 0);
+    if is_and {
+        builder
+            .ins()
+            .brif(lhs_bool, rhs_block, &[], merge_block, &[lhs_val]);
+    } else {
+        builder
+            .ins()
+            .brif(lhs_bool, merge_block, &[lhs_val], rhs_block, &[]);
+    }
+
+    builder.switch_to_block(rhs_block);
+    builder.seal_block(rhs_block);
+    let rhs = emit_hir_expr(builder, rhs_expr, locals, fn_map, enum_index, module, data_counter)?;
+    let rhs_val = match rhs {
+        ValueRepr::Single(v) => v,
+        _ => return Err(CodegenError::Unsupported("boolean op".to_string())),
+    };
+    builder.ins().jump(merge_block, &[rhs_val]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    let param = builder.block_params(merge_block)[0];
+    Ok(ValueRepr::Single(param))
+}
+
+/// Emit HIR match as statement (arms can contain returns, don't produce values)
+fn emit_hir_match_stmt(
+    builder: &mut FunctionBuilder,
+    match_expr: &crate::hir::HirMatch,
+    locals: &HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    // Emit the scrutinee expression
+    let value = emit_hir_expr(
+        builder,
+        &match_expr.expr,
+        locals,
+        fn_map,
+        enum_index,
+        module,
+        data_counter,
+    )?;
+
+    let (match_val, match_result) = match value.clone() {
+        ValueRepr::Single(v) => (v, None),
+        ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
+        ValueRepr::Pair(_, _) => {
+            return Err(CodegenError::Unsupported("match on string".to_string()))
+        }
+    };
+
+    let merge_block = builder.create_block();
+
+    // Create all check blocks upfront so they exist before being referenced
+    let num_arms = match_expr.arms.len();
+    let mut check_blocks: Vec<ir::Block> = Vec::new();
+    let mut arm_blocks: Vec<ir::Block> = Vec::new();
+    for i in 0..num_arms {
+        arm_blocks.push(builder.create_block());
+        if i + 1 < num_arms {
+            check_blocks.push(builder.create_block());
+        }
+    }
+    // For the last arm, the "next" block is merge_block
+    check_blocks.push(merge_block);
+
+    let mut current_block = builder
+        .current_block()
+        .ok_or_else(|| CodegenError::Codegen("no current block for match".to_string()))?;
+
+    let mut any_arm_continues = false;
+
+    for (idx, arm) in match_expr.arms.iter().enumerate() {
+        let arm_block = arm_blocks[idx];
+        let next_block = check_blocks[idx];
+
+        if idx > 0 {
+            builder.switch_to_block(current_block);
+        }
+        let cond = hir_match_pattern_cond(builder, &arm.pattern, match_val, enum_index)?;
+        builder.ins().brif(cond, arm_block, &[], next_block, &[]);
+
+        builder.switch_to_block(arm_block);
+
+        let mut arm_locals = locals.clone();
+        hir_bind_match_pattern_value(
+            builder,
+            &arm.pattern,
+            &value,
+            match_result.as_ref(),
+            &mut arm_locals,
+        )?;
+
+        // Emit all statements in the arm body
+        let mut arm_terminated = false;
+        for stmt in &arm.body.stmts {
+            let flow = emit_hir_stmt(
+                builder,
+                stmt,
+                &mut arm_locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            if flow == Flow::Terminated {
+                arm_terminated = true;
+                break;
+            }
+        }
+
+        // If the arm didn't terminate (e.g., with return), jump to merge block
+        if !arm_terminated {
+            builder.ins().jump(merge_block, &[]);
+            any_arm_continues = true;
+        }
+
+        current_block = next_block;
+    }
+
+    // Always switch to merge_block to insert it into the layout
+    builder.switch_to_block(merge_block);
+
+    // If no arm continues to merge_block, it's unreachable - add trap
+    // This also ensures the block has content so it's properly inserted
+    if !any_arm_continues {
+        builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
+    }
+
+    Ok(ValueRepr::Unit)
+}
+
+/// Emit HIR match expression
+fn emit_hir_match_expr(
+    builder: &mut FunctionBuilder,
+    match_expr: &crate::hir::HirMatch,
+    locals: &HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    use crate::hir::HirStmt;
+
+    // Emit the scrutinee expression
+    let value = emit_hir_expr(
+        builder,
+        &match_expr.expr,
+        locals,
+        fn_map,
+        enum_index,
+        module,
+        data_counter,
+    )?;
+
+    let (match_val, match_result) = match value.clone() {
+        ValueRepr::Single(v) => (v, None),
+        ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
+        ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
+        ValueRepr::Pair(_, _) => {
+            return Err(CodegenError::Unsupported("match on string".to_string()))
+        }
+    };
+
+    let merge_block = builder.create_block();
+    let mut current_block = builder
+        .current_block()
+        .ok_or_else(|| CodegenError::Codegen("no current block for match".to_string()))?;
+
+    let mut result_shape: Option<ResultShape> = None;
+
+    for (idx, arm) in match_expr.arms.iter().enumerate() {
+        let is_last = idx + 1 == match_expr.arms.len();
+        let arm_block = builder.create_block();
+        let next_block = if is_last {
+            merge_block
+        } else {
+            builder.create_block()
+        };
+
+        if idx > 0 {
+            builder.switch_to_block(current_block);
+        }
+        let cond = hir_match_pattern_cond(builder, &arm.pattern, match_val, enum_index)?;
+        builder.ins().brif(cond, arm_block, &[], next_block, &[]);
+
+        builder.switch_to_block(arm_block);
+        let mut arm_locals = locals.clone();
+        hir_bind_match_pattern_value(
+            builder,
+            &arm.pattern,
+            &value,
+            match_result.as_ref(),
+            &mut arm_locals,
+        )?;
+
+        // Emit the arm body statements
+        let stmts = &arm.body.stmts;
+        let Some((last, prefix)) = stmts.split_last() else {
+            return Err(CodegenError::Unsupported("empty match arm".to_string()));
+        };
+
+        let mut prefix_terminated = false;
+        for stmt in prefix {
+            let flow = emit_hir_stmt(
+                builder,
+                stmt,
+                &mut arm_locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?;
+            if flow == Flow::Terminated {
+                prefix_terminated = true;
+                break;
+            }
+        }
+
+        // If prefix terminated, we can't emit the final expression
+        if prefix_terminated {
+            return Err(CodegenError::Unsupported(
+                "match expression arm terminated before final expression".to_string(),
+            ));
+        }
+
+        // Last statement should be an expression
+        let arm_value = match last {
+            HirStmt::Expr(expr_stmt) => emit_hir_expr(
+                builder,
+                &expr_stmt.expr,
+                &arm_locals,
+                fn_map,
+                enum_index,
+                module,
+                data_counter,
+            )?,
+            _ => {
+                return Err(CodegenError::Unsupported(
+                    "match arm must end with expression".to_string(),
+                ))
+            }
+        };
+
+        let values = match &arm_value {
+            ValueRepr::Single(val) => vec![*val],
+            ValueRepr::Pair(a, b) => vec![*a, *b],
+            ValueRepr::Unit => vec![],
+            ValueRepr::Result { .. } => {
+                return Err(CodegenError::Unsupported("match result value".to_string()))
+            }
+        };
+
+        // Set up result shape and stack slots on first arm
+        if result_shape.is_none() {
+            let mut types = Vec::new();
+            let mut slots = Vec::new();
+            for val in &values {
+                let ty = builder.func.dfg.value_type(*val);
+                let size = ty.bytes() as u32;
+                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    size.max(1),
+                ));
+                types.push(ty);
+                slots.push(slot);
+            }
+            result_shape = Some(ResultShape {
+                kind: match &arm_value {
+                    ValueRepr::Unit => ResultKind::Unit,
+                    ValueRepr::Single(_) => ResultKind::Single,
+                    ValueRepr::Pair(_, _) => ResultKind::Pair,
+                    _ => ResultKind::Single,
+                },
+                slots,
+                types,
+            });
+        }
+
+        // Store values to stack slots
+        let shape = result_shape
+            .as_ref()
+            .ok_or_else(|| CodegenError::Codegen("missing match result shape".to_string()))?;
+        if values.len() != shape.types.len() {
+            eprintln!("DEBUG: arm value mismatch - values: {:?}, expected: {:?}", values.len(), shape.types.len());
+            eprintln!("DEBUG: arm_value = {:?}", arm_value);
+            return Err(CodegenError::Unsupported("mismatched match arm".to_string()));
+        }
+        for (idx, val) in values.iter().enumerate() {
+            builder.ins().stack_store(*val, shape.slots[idx], 0);
+        }
+        builder.ins().jump(merge_block, &[]);
+        builder.seal_block(arm_block);
+
+        if is_last {
+            break;
+        }
+        current_block = next_block;
+    }
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+
+    // Load result from stack slots
+    let shape = result_shape
+        .ok_or_else(|| CodegenError::Codegen("missing match result value".to_string()))?;
+    let mut loaded = Vec::new();
+    for (slot, ty) in shape.slots.iter().zip(shape.types.iter()) {
+        let addr = builder.ins().stack_addr(module.isa().pointer_type(), *slot, 0);
+        let val = builder.ins().load(*ty, MemFlags::new(), addr, 0);
+        loaded.push(val);
+    }
+
+    let result = match shape.kind {
+        ResultKind::Unit => ValueRepr::Unit,
+        ResultKind::Single => ValueRepr::Single(loaded[0]),
+        ResultKind::Pair => ValueRepr::Pair(loaded[0], loaded[1]),
+    };
+
+    Ok(result)
+}
+
+/// Compute the condition for an HIR pattern match
+fn hir_match_pattern_cond(
+    builder: &mut FunctionBuilder,
+    pattern: &crate::hir::HirPattern,
+    match_val: ir::Value,
+    enum_index: &EnumIndex,
+) -> Result<ir::Value, CodegenError> {
+    use crate::hir::HirPattern;
+
+    match pattern {
+        HirPattern::Wildcard | HirPattern::Binding(_, _) => {
+            // Wildcard and binding patterns always match
+            let one = builder.ins().iconst(ir::types::I32, 1);
+            Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1))
+        }
+        HirPattern::Literal(lit) => match lit {
+            Literal::Int(n) => {
+                let rhs = builder.ins().iconst(ir::types::I32, *n);
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
+            Literal::U8(n) => {
+                let rhs = builder.ins().iconst(ir::types::I8, i64::from(*n));
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
+            Literal::Bool(b) => {
+                let rhs = builder.ins().iconst(ir::types::I8, if *b { 1 } else { 0 });
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
+            Literal::Unit => {
+                // Unit always matches unit
+                let one = builder.ins().iconst(ir::types::I32, 1);
+                Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1))
+            }
+            Literal::String(_) => Err(CodegenError::Unsupported(
+                "string pattern matching".to_string(),
+            )),
+        },
+        HirPattern::Variant { enum_ty, variant_name, .. } => {
+            // Get the discriminant value for this variant
+            let qualified = match enum_ty {
+                crate::typeck::Ty::Path(path, _) => path.clone(),
+                _ => return Err(CodegenError::Codegen(format!(
+                    "enum variant pattern has non-path type: {:?}",
+                    enum_ty
+                ))),
+            };
+
+            // Get the type of match_val to ensure consistent comparison
+            let val_ty = builder.func.dfg.value_type(match_val);
+
+            // Special handling for Result type (built-in, not in enum_index)
+            if qualified == "Result" {
+                let discr = match variant_name.as_str() {
+                    "Ok" => 0i64,
+                    "Err" => 1i64,
+                    _ => return Err(CodegenError::Codegen(format!(
+                        "unknown Result variant: {}", variant_name
+                    ))),
+                };
+                let rhs = builder.ins().iconst(val_ty, discr);
+                return Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs));
+            }
+
+            if let Some(variants) = enum_index.variants.get(&qualified) {
+                if let Some(&discr) = variants.get(variant_name) {
+                    let rhs = builder.ins().iconst(val_ty, i64::from(discr));
+                    return Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs));
+                }
+            }
+            Err(CodegenError::Codegen(format!(
+                "unknown enum variant in pattern: {}.{}",
+                qualified, variant_name
+            )))
+        }
+    }
+}
+
+/// Bind pattern variables for HIR patterns
+fn hir_bind_match_pattern_value(
+    builder: &mut FunctionBuilder,
+    pattern: &crate::hir::HirPattern,
+    value: &ValueRepr,
+    result: Option<&(ValueRepr, ValueRepr)>,
+    locals: &mut HashMap<String, LocalValue>,
+) -> Result<(), CodegenError> {
+    use crate::hir::HirPattern;
+
+    match pattern {
+        HirPattern::Wildcard => Ok(()),
+        HirPattern::Literal(_) => Ok(()),
+        HirPattern::Binding(_id, name) => {
+            // Bind the entire value to the variable
+            locals.insert(name.clone(), store_local(builder, value.clone()));
+            Ok(())
+        }
+        HirPattern::Variant { variant_name, binding, .. } => {
+            if let Some((local_id, name)) = binding {
+                // Bind the inner value based on variant
+                let Some((ok_val, err_val)) = result else {
+                    return Err(CodegenError::Unsupported(
+                        "variant binding without result value".to_string(),
+                    ));
+                };
+                if variant_name == "Ok" {
+                    locals.insert(name.clone(), store_local(builder, ok_val.clone()));
+                } else if variant_name == "Err" {
+                    locals.insert(name.clone(), store_local(builder, err_val.clone()));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 fn match_pattern_cond(
     builder: &mut FunctionBuilder,
     pattern: &Pattern,
@@ -2744,46 +3949,50 @@ fn resolve_enum_variant(path: &AstPath, use_map: &UseMap, enum_index: &EnumIndex
     info.get(&variant[0]).copied()
 }
 
-fn build_stdlib_index(stdlib: &[AstModule]) -> StdlibIndex {
+fn build_stdlib_index(stdlib: &[crate::hir::HirModule]) -> StdlibIndex {
     let mut types = HashMap::new();
     for module in stdlib {
-        let module_name = module.name.to_string();
-        for item in &module.items {
-            let name = match item {
-                Item::Struct(decl) if decl.is_pub => decl.name.item.clone(),
-                Item::Enum(decl) if decl.is_pub => decl.name.item.clone(),
-                _ => continue,
-            };
-            let qualified = format!("{module_name}.{name}");
-            types.insert(name, qualified);
+        let module_name = &module.name;
+        // Add public structs
+        for st in &module.structs {
+            if st.is_pub {
+                let qualified = format!("{}.{}", module_name, st.name);
+                types.insert(st.name.clone(), qualified);
+            }
+        }
+        // Add public enums
+        for en in &module.enums {
+            if en.is_pub {
+                let qualified = format!("{}.{}", module_name, en.name);
+                types.insert(en.name.clone(), qualified);
+            }
         }
     }
     StdlibIndex { types }
 }
 
 fn build_enum_index(
-    entry: &AstModule,
-    user_modules: &[AstModule],
-    stdlib: &[AstModule],
+    entry: &crate::hir::HirModule,
+    user_modules: &[crate::hir::HirModule],
+    stdlib: &[crate::hir::HirModule],
 ) -> EnumIndex {
     let mut variants = HashMap::new();
-    let entry_name = entry.name.to_string();
+    let entry_name = &entry.name;
     let modules = stdlib
         .iter()
         .chain(user_modules.iter())
         .chain(std::iter::once(entry));
     for module in modules {
-        let module_name = module.name.to_string();
-        for item in &module.items {
-            let Item::Enum(decl) = item else { continue };
+        let module_name = &module.name;
+        for en in &module.enums {
             let mut map = HashMap::new();
-            for (idx, variant) in decl.variants.iter().enumerate() {
-                map.insert(variant.name.item.clone(), idx as i32);
+            for (idx, variant) in en.variants.iter().enumerate() {
+                map.insert(variant.name.clone(), idx as i32);
             }
-            let qualified = format!("{module_name}.{}", decl.name.item);
+            let qualified = format!("{}.{}", module_name, en.name);
             variants.insert(qualified, map.clone());
             if module_name == entry_name {
-                variants.insert(decl.name.item.clone(), map);
+                variants.insert(en.name.clone(), map);
             }
         }
     }

@@ -1,35 +1,35 @@
 package safe
 module vec_helpers
-use sys.system
-use sys.console
-use sys.buffer
-use sys.vec
+use sys::system
+use sys::console
+use sys::buffer
+use sys::vec
 
 pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let alloc = buffer.alloc_default()
-  let v = vec.vec_u8_new(alloc)
-  match vec.vec_u8_push(v, 65u8) {
+  let c = system::console(sys)
+  let alloc = buffer::alloc_default()
+  let v = vec::vec_u8_new(alloc)
+  match vec::vec_u8_push(v, 65u8) {
     Ok(x) => {}
-    Err(e) => { console.println(c, "vec bad"); return 1 }
+    Err(e) => { console::println(c, "vec bad"); return 1 }
   }
-  match vec.vec_u8_push(v, 66u8) {
+  match vec::vec_u8_push(v, 66u8) {
     Ok(x) => {}
-    Err(e) => { console.println(c, "vec bad"); return 1 }
+    Err(e) => { console::println(c, "vec bad"); return 1 }
   }
-  let len = vec.vec_u8_len(v)
-  let b = vec.vec_u8_get(v, 1)
+  let len = vec::vec_u8_len(v)
+  let b = vec::vec_u8_get(v, 1)
   match (b) {
     Ok(x) => {
       if (len == 2 && x == 66u8) {
-        console.println(c, "vec ok")
-        vec.vec_u8_free(alloc, v)
+        console::println(c, "vec ok")
+        vec::vec_u8_free(alloc, v)
         return 0
       }
     }
     Err(e) => {}
   }
-  console.println(c, "vec bad")
-  vec.vec_u8_free(alloc, v)
+  console::println(c, "vec bad")
+  vec::vec_u8_free(alloc, v)
   return 1
 }

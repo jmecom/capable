@@ -1,6 +1,6 @@
 package unsafe
 module extern_missing
-use sys.system
+use sys::system
 
 extern fn missing_symbol() -> unit
 
