@@ -1,0 +1,14 @@
+module struct_field_access
+use sys::system
+use sys::console
+
+struct Pair { left: i32, right: i32 }
+
+pub fn main(sys: System) -> i32 {
+  let c = system::console(sys)
+  let p = Pair { left: 3, right: 4 }
+  let sum = p.left + p.right
+  console::print_i32(c, sum)
+  console::println(c, "")
+  return 0
+}

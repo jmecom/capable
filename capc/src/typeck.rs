@@ -1240,12 +1240,48 @@ fn check_expr(
                 }
             }
 
-            // Real struct field access is not yet implemented in codegen
-            // Reject it here to avoid typechecking programs that will fail codegen
-            Err(TypeError::new(
-                "struct field access not yet implemented".to_string(),
-                field_access.span,
-            ))
+            let object_ty = check_expr(
+                &field_access.object,
+                functions,
+                locals,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
+            let Ty::Path(struct_name, _) = object_ty else {
+                return Err(TypeError::new(
+                    "field access requires a struct value".to_string(),
+                    field_access.span,
+                ));
+            };
+            let info = struct_map
+                .get(&struct_name)
+                .or_else(|| struct_map.get(&format!("{module_name}.{struct_name}")))
+                .ok_or_else(|| {
+                    TypeError::new(
+                        format!("field access on non-struct `{struct_name}`"),
+                        field_access.span,
+                    )
+                })?;
+            if info.is_opaque && info.module != module_name {
+                return Err(TypeError::new(
+                    format!(
+                        "cannot access fields of opaque type `{struct_name}` outside module `{}`",
+                        info.module
+                    ),
+                    field_access.span,
+                ));
+            }
+            let field_ty = info.fields.get(&field_access.field.item).ok_or_else(|| {
+                TypeError::new(
+                    format!("unknown field `{}`", field_access.field.item),
+                    field_access.field.span,
+                )
+            })?;
+            Ok(field_ty.clone())
         }
     }
 }
@@ -1622,7 +1658,7 @@ fn is_orderable_type(ty: &Ty) -> bool {
 
 use crate::hir::{
     HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirField,
-    HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
+    HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
     HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
     HirStructLiteralField, HirUnary, HirWhileStmt, HirAssignStmt, LocalId, ResolvedCallee,
 };
@@ -2153,11 +2189,16 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 }
             }
 
-            // Real struct field access not yet implemented
-            Err(TypeError::new(
-                "struct field access not yet implemented".to_string(),
-                field_access.span,
-            ))
+            let object = lower_expr(&field_access.object, ctx, ret_ty)?;
+            let object_ty = type_of_ast_expr(&field_access.object, ctx, ret_ty)?;
+
+            Ok(HirExpr::FieldAccess(HirFieldAccess {
+                object: Box::new(object),
+                object_ty,
+                field_name: field_access.field.item.clone(),
+                field_ty: ty,
+                span: field_access.span,
+            }))
         }
         Expr::StructLiteral(lit) => {
             // Resolve the struct type name

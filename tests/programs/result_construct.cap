@@ -1,0 +1,33 @@
+package safe
+module result_construct
+use sys::system
+use sys::console
+
+pub fn main(sys: System) -> i32 {
+  let c = system::console(sys)
+  let a = make(true)
+  let b = make(false)
+
+  match (a) {
+    Ok(s) => { console::println(c, s) }
+    Err(e) => { console::println(c, "bad a"); return 1 }
+  }
+
+  match (b) {
+    Ok(s) => { console::println(c, "bad b"); return 1 }
+    Err(e) => {
+      console::print_i32(c, e)
+      console::println(c, "")
+    }
+  }
+
+  return 0
+}
+
+fn make(ok: bool) -> Result[string, i32] {
+  if (ok) {
+    return Ok("hello")
+  } else {
+    return Err(7)
+  }
+}

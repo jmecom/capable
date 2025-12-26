@@ -76,6 +76,35 @@ fn run_match_expr() {
 }
 
 #[test]
+fn run_struct_field_access() {
+    let out_dir = make_out_dir("struct_field_access");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/struct_field_access.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("7"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_result_construct() {
+    let out_dir = make_out_dir("result_construct");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/result_construct.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("hello"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("7"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_malloc_demo() {
     let out_dir = make_out_dir("malloc_demo");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
@@ -401,4 +430,3 @@ fn run_scoping_assign() {
     assert_eq!(code, 0);
     assert!(stdout.contains("scoping assign test ok"), "stdout was: {stdout:?}");
 }
-

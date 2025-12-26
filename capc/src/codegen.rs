@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -104,6 +104,30 @@ struct EnumIndex {
 }
 
 #[derive(Clone, Debug)]
+struct StructLayoutIndex {
+    layouts: HashMap<String, StructLayout>,
+}
+
+#[derive(Clone, Debug)]
+struct StructLayout {
+    size: u32,
+    align: u32,
+    fields: HashMap<String, StructFieldLayout>,
+}
+
+#[derive(Clone, Debug)]
+struct StructFieldLayout {
+    offset: u32,
+    ty: crate::typeck::Ty,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TypeLayout {
+    size: u32,
+    align: u32,
+}
+
+#[derive(Clone, Debug)]
 enum ValueRepr {
     Unit,
     Single(ir::Value),
@@ -157,6 +181,12 @@ pub fn build_object(
 
     let stdlib_index = build_stdlib_index(&program.stdlib);
     let enum_index = build_enum_index(&program.entry, &program.user_modules, &program.stdlib);
+    let struct_layouts = build_struct_layout_index(
+        &program.entry,
+        &program.user_modules,
+        &program.stdlib,
+        module.isa().pointer_type(),
+    )?;
 
     let mut fn_map = HashMap::new();
     register_runtime_intrinsics(&mut fn_map, module.isa().pointer_type());
@@ -170,6 +200,7 @@ pub fn build_object(
             &program.entry,
             &stdlib_index,
             &enum_index,
+            &struct_layouts,
             &mut fn_map,
             module.isa().pointer_type(),
         )?;
@@ -221,7 +252,7 @@ pub fn build_object(
             let mut param_index = 0;
             for param in &func.params {
                 // HirParam already has resolved types - use typeck_ty_to_tykind
-                let ty_kind = typeck_ty_to_tykind(&param.ty)?;
+                let ty_kind = typeck_ty_to_tykind(&param.ty, Some(&struct_layouts))?;
                 let value =
                     value_from_params(&mut builder, &ty_kind, &params, &mut param_index)?;
                 let local = store_local(&mut builder, value);
@@ -238,6 +269,7 @@ pub fn build_object(
                     &mut locals,
                     &fn_map,
                     &enum_index,
+                    &struct_layouts,
                     &mut module,
                     &mut data_counter,
                 )?;
@@ -1233,7 +1265,10 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
 }
 
 /// Convert typeck::Ty to codegen::TyKind
-fn typeck_ty_to_tykind(ty: &crate::typeck::Ty) -> Result<TyKind, CodegenError> {
+fn typeck_ty_to_tykind(
+    ty: &crate::typeck::Ty,
+    struct_layouts: Option<&StructLayoutIndex>,
+) -> Result<TyKind, CodegenError> {
     use crate::typeck::{BuiltinType, Ty};
     match ty {
         Ty::Builtin(b) => match b {
@@ -1246,6 +1281,16 @@ fn typeck_ty_to_tykind(ty: &crate::typeck::Ty) -> Result<TyKind, CodegenError> {
             BuiltinType::Unit => Ok(TyKind::Unit),
         },
         Ty::Path(path, args) => {
+            if path == "Result" && args.len() == 2 {
+                let ok = typeck_ty_to_tykind(&args[0], struct_layouts)?;
+                let err = typeck_ty_to_tykind(&args[1], struct_layouts)?;
+                return Ok(TyKind::Result(Box::new(ok), Box::new(err)));
+            }
+            if let Some(layouts) = struct_layouts {
+                if resolve_struct_layout(ty, "", &layouts.layouts).is_some() {
+                    return Ok(TyKind::Ptr);
+                }
+            }
             // Handle known types
             if path.ends_with(".Slice") {
                 Ok(TyKind::Handle)
@@ -1270,6 +1315,7 @@ fn register_user_functions(
     entry: &crate::hir::HirModule,
     stdlib: &StdlibIndex,
     enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
     _ptr_ty: Type,
 ) -> Result<(), CodegenError> {
@@ -1280,9 +1326,9 @@ fn register_user_functions(
             params: func
                 .params
                 .iter()
-                .map(|p| typeck_ty_to_tykind(&p.ty))
+                .map(|p| typeck_ty_to_tykind(&p.ty, Some(struct_layouts)))
                 .collect::<Result<Vec<TyKind>, CodegenError>>()?,
-            ret: typeck_ty_to_tykind(&func.ret_ty)?,
+            ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
         };
         let key = format!("{}.{}", module_name, func.name);
         let symbol = if module_name == &entry.name && func.name == "main" {
@@ -2453,6 +2499,7 @@ fn emit_hir_stmt(
     locals: &mut HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<Flow, CodegenError> {
@@ -2466,6 +2513,7 @@ fn emit_hir_stmt(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -2479,6 +2527,7 @@ fn emit_hir_stmt(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -2505,6 +2554,7 @@ fn emit_hir_stmt(
                     locals,
                     fn_map,
                     enum_index,
+                    struct_layouts,
                     module,
                     data_counter,
                 )?;
@@ -2528,6 +2578,7 @@ fn emit_hir_stmt(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -2550,6 +2601,7 @@ fn emit_hir_stmt(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -2569,6 +2621,7 @@ fn emit_hir_stmt(
                     &mut then_locals,
                     fn_map,
                     enum_index,
+                    struct_layouts,
                     module,
                     data_counter,
                 )?;
@@ -2594,6 +2647,7 @@ fn emit_hir_stmt(
                         &mut else_locals,
                         fn_map,
                         enum_index,
+                        struct_layouts,
                         module,
                         data_counter,
                     )?;
@@ -2631,6 +2685,7 @@ fn emit_hir_stmt(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -2651,6 +2706,7 @@ fn emit_hir_stmt(
                     &mut body_locals,
                     fn_map,
                     enum_index,
+                    struct_layouts,
                     module,
                     data_counter,
                 )?;
@@ -2683,6 +2739,7 @@ fn emit_hir_expr(
     locals: &HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -2713,47 +2770,64 @@ fn emit_hir_expr(
             // Check if this is a Result type with payload (Ok/Err)
             if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty {
                 if ty_name == "Result" && args.len() == 2 {
-                    if let Some(payload_expr) = &variant.payload {
-                        // Emit the payload
-                        let payload_value = emit_hir_expr(
-                            builder,
-                            payload_expr,
-                            locals,
-                            fn_map,
-                            enum_index,
-                            module,
-                            data_counter,
-                        )?;
+                    let ok_ty = &args[0];
+                    let err_ty = &args[1];
+                    let tag = if variant.variant_name == "Ok" { 0 } else { 1 };
+                    let tag_val = builder.ins().iconst(ir::types::I8, tag);
+                    let ptr_ty = module.isa().pointer_type();
 
-                        // Create the Result value
-                        let tag = if variant.variant_name == "Ok" { 0 } else { 1 };
-                        let tag_val = builder.ins().iconst(ir::types::I32, tag);
+                    let (ok, err) = match variant.variant_name.as_str() {
+                        "Ok" => {
+                            let payload = if let Some(payload_expr) = &variant.payload {
+                                emit_hir_expr(
+                                    builder,
+                                    payload_expr,
+                                    locals,
+                                    fn_map,
+                                    enum_index,
+                                    struct_layouts,
+                                    module,
+                                    data_counter,
+                                )?
+                            } else {
+                                zero_value_for_ty(builder, ok_ty, ptr_ty, Some(struct_layouts))?
+                            };
+                            let err_zero =
+                                zero_value_for_ty(builder, err_ty, ptr_ty, Some(struct_layouts))?;
+                            (payload, err_zero)
+                        }
+                        "Err" => {
+                            let ok_zero =
+                                zero_value_for_ty(builder, ok_ty, ptr_ty, Some(struct_layouts))?;
+                            let payload = if let Some(payload_expr) = &variant.payload {
+                                emit_hir_expr(
+                                    builder,
+                                    payload_expr,
+                                    locals,
+                                    fn_map,
+                                    enum_index,
+                                    struct_layouts,
+                                    module,
+                                    data_counter,
+                                )?
+                            } else {
+                                zero_value_for_ty(builder, err_ty, ptr_ty, Some(struct_layouts))?
+                            };
+                            (ok_zero, payload)
+                        }
+                        _ => {
+                            return Err(CodegenError::Codegen(format!(
+                                "unknown Result variant: {}",
+                                variant.variant_name
+                            )))
+                        }
+                    };
 
-                        // Create dummy values for the unused slot
-                        // For Ok, ok = payload, err = dummy
-                        // For Err, ok = dummy, err = payload
-                        let payload_single = match payload_value {
-                            ValueRepr::Single(v) => v,
-                            ValueRepr::Unit => builder.ins().iconst(ir::types::I8, 0),
-                            ValueRepr::Pair(a, _) => a, // Take first for string etc
-                            _ => return Err(CodegenError::Unsupported(
-                                "complex payload in Result".to_string(),
-                            )),
-                        };
-                        let dummy = builder.ins().iconst(ir::types::I64, 0);
-
-                        let (ok, err) = if variant.variant_name == "Ok" {
-                            (payload_single, dummy)
-                        } else {
-                            (dummy, payload_single)
-                        };
-
-                        return Ok(ValueRepr::Result {
-                            tag: tag_val,
-                            ok: Box::new(ValueRepr::Single(ok)),
-                            err: Box::new(ValueRepr::Single(err)),
-                        });
-                    }
+                    return Ok(ValueRepr::Result {
+                        tag: tag_val,
+                        ok: Box::new(ok),
+                        err: Box::new(err),
+                    });
                 }
             }
 
@@ -2804,6 +2878,7 @@ fn emit_hir_expr(
                     locals,
                     fn_map,
                     enum_index,
+                    struct_layouts,
                     module,
                     data_counter,
                 )?;
@@ -2973,6 +3048,7 @@ fn emit_hir_expr(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -2997,6 +3073,7 @@ fn emit_hir_expr(
                     locals,
                     fn_map,
                     enum_index,
+                    struct_layouts,
                     module,
                     data_counter,
                 );
@@ -3008,6 +3085,7 @@ fn emit_hir_expr(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -3059,6 +3137,7 @@ fn emit_hir_expr(
                 locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -3082,6 +3161,7 @@ fn emit_hir_expr(
                     locals,
                     fn_map,
                     enum_index,
+                    struct_layouts,
                     module,
                     data_counter,
                 )
@@ -3092,20 +3172,412 @@ fn emit_hir_expr(
                     locals,
                     fn_map,
                     enum_index,
+                    struct_layouts,
                     module,
                     data_counter,
                 )
             }
         }
-        HirExpr::FieldAccess(_) => {
-            // TODO: Implement HIR field access emission
-            Err(CodegenError::Unsupported("field access in HIR not yet implemented".to_string()))
-        }
-        HirExpr::StructLiteral(_) => {
-            // TODO: Implement HIR struct literal emission
-            Err(CodegenError::Unsupported("struct literals in HIR not yet implemented".to_string()))
+        HirExpr::FieldAccess(field_access) => emit_hir_field_access(
+            builder,
+            field_access,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            module,
+            data_counter,
+        ),
+        HirExpr::StructLiteral(literal) => {
+            emit_hir_struct_literal(
+                builder,
+                literal,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )
         }
     }
+}
+
+fn emit_hir_struct_literal(
+    builder: &mut FunctionBuilder,
+    literal: &crate::hir::HirStructLiteral,
+    locals: &HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    let layout = resolve_struct_layout(&literal.struct_ty, "", &struct_layouts.layouts)
+        .ok_or_else(|| {
+            CodegenError::Unsupported(format!(
+                "struct layout missing for {:?}",
+                literal.struct_ty
+            ))
+        })?;
+    let ptr_ty = module.isa().pointer_type();
+    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+        ir::StackSlotKind::ExplicitSlot,
+        layout.size.max(1),
+    ));
+    let base_ptr = builder.ins().stack_addr(ptr_ty, slot, 0);
+
+    for field in &literal.fields {
+        let Some(field_layout) = layout.fields.get(&field.name) else {
+            return Err(CodegenError::Codegen(format!(
+                "unknown struct field `{}`",
+                field.name
+            )));
+        };
+        let value = emit_hir_expr(
+            builder,
+            &field.expr,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            module,
+            data_counter,
+        )?;
+        store_value_by_ty(
+            builder,
+            base_ptr,
+            field_layout.offset,
+            &field_layout.ty,
+            value,
+            struct_layouts,
+            module,
+        )?;
+    }
+
+    Ok(ValueRepr::Single(base_ptr))
+}
+
+fn emit_hir_field_access(
+    builder: &mut FunctionBuilder,
+    field_access: &crate::hir::HirFieldAccess,
+    locals: &HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    let layout = resolve_struct_layout(&field_access.object_ty, "", &struct_layouts.layouts)
+        .ok_or_else(|| {
+            CodegenError::Unsupported(format!(
+                "struct layout missing for {:?}",
+                field_access.object_ty
+            ))
+        })?;
+    let Some(field_layout) = layout.fields.get(&field_access.field_name) else {
+        return Err(CodegenError::Codegen(format!(
+            "unknown struct field `{}`",
+            field_access.field_name
+        )));
+    };
+
+    let object_value = emit_hir_expr(
+        builder,
+        &field_access.object,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )?;
+    let base_ptr = match object_value {
+        ValueRepr::Single(val) => val,
+        _ => {
+            return Err(CodegenError::Unsupported(
+                "field access on non-struct value".to_string(),
+            ))
+        }
+    };
+
+    load_value_by_ty(
+        builder,
+        base_ptr,
+        field_layout.offset,
+        &field_layout.ty,
+        struct_layouts,
+        module,
+    )
+}
+
+fn store_value_by_ty(
+    builder: &mut FunctionBuilder,
+    base_ptr: ir::Value,
+    offset: u32,
+    ty: &crate::typeck::Ty,
+    value: ValueRepr,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+) -> Result<(), CodegenError> {
+    use crate::typeck::{BuiltinType, Ty};
+
+    let addr = ptr_add(builder, base_ptr, offset);
+    let ptr_ty = module.isa().pointer_type();
+    match ty {
+        Ty::Builtin(b) => match b {
+            BuiltinType::Unit => Ok(()),
+            BuiltinType::I32 | BuiltinType::U32 => {
+                let ValueRepr::Single(val) = value else {
+                    return Err(CodegenError::Unsupported("store i32".to_string()));
+                };
+                builder.ins().store(MemFlags::new(), val, addr, 0);
+                Ok(())
+            }
+            BuiltinType::U8 | BuiltinType::Bool => {
+                let ValueRepr::Single(val) = value else {
+                    return Err(CodegenError::Unsupported("store u8".to_string()));
+                };
+                builder.ins().store(MemFlags::new(), val, addr, 0);
+                Ok(())
+            }
+            BuiltinType::String => {
+                let ValueRepr::Pair(ptr, len) = value else {
+                    return Err(CodegenError::Unsupported("store string".to_string()));
+                };
+                let (ptr_off, len_off) = string_offsets(ptr_ty);
+                let ptr_addr = ptr_add(builder, base_ptr, offset + ptr_off);
+                let len_addr = ptr_add(builder, base_ptr, offset + len_off);
+                builder.ins().store(MemFlags::new(), ptr, ptr_addr, 0);
+                builder.ins().store(MemFlags::new(), len, len_addr, 0);
+                Ok(())
+            }
+            BuiltinType::I64 => Err(CodegenError::Unsupported("i64 not yet supported".to_string())),
+        },
+        Ty::Ptr(_) => {
+            let ValueRepr::Single(val) = value else {
+                return Err(CodegenError::Unsupported("store ptr".to_string()));
+            };
+            builder.ins().store(MemFlags::new(), val, addr, 0);
+            Ok(())
+        }
+        Ty::Path(name, args) => {
+            if name == "Result" && args.len() == 2 {
+                let ValueRepr::Result { tag, ok, err } = value else {
+                    return Err(CodegenError::Unsupported("store result".to_string()));
+                };
+                let ok_layout = type_layout_from_index(&args[0], struct_layouts, ptr_ty)?;
+                let err_layout = type_layout_from_index(&args[1], struct_layouts, ptr_ty)?;
+                let (_, ok_off, err_off) = result_offsets(ok_layout, err_layout);
+                builder.ins().store(MemFlags::new(), tag, addr, 0);
+                store_value_by_ty(
+                    builder,
+                    base_ptr,
+                    offset + ok_off,
+                    &args[0],
+                    *ok,
+                    struct_layouts,
+                    module,
+                )?;
+                store_value_by_ty(
+                    builder,
+                    base_ptr,
+                    offset + err_off,
+                    &args[1],
+                    *err,
+                    struct_layouts,
+                    module,
+                )?;
+                return Ok(());
+            }
+
+            if let Some(layout) = resolve_struct_layout(ty, "", &struct_layouts.layouts) {
+                let ValueRepr::Single(src_ptr) = value else {
+                    return Err(CodegenError::Unsupported("store struct".to_string()));
+                };
+                for field in layout.fields.values() {
+                    let field_value = load_value_by_ty(
+                        builder,
+                        src_ptr,
+                        field.offset,
+                        &field.ty,
+                        struct_layouts,
+                        module,
+                    )?;
+                    store_value_by_ty(
+                        builder,
+                        base_ptr,
+                        offset + field.offset,
+                        &field.ty,
+                        field_value,
+                        struct_layouts,
+                        module,
+                    )?;
+                }
+                return Ok(());
+            }
+
+            let ty_kind = typeck_ty_to_tykind(ty, Some(struct_layouts))?;
+            store_value_by_tykind(builder, addr, &ty_kind, value, ptr_ty)
+        }
+    }
+}
+
+fn store_value_by_tykind(
+    builder: &mut FunctionBuilder,
+    addr: ir::Value,
+    ty: &TyKind,
+    value: ValueRepr,
+    _ptr_ty: Type,
+) -> Result<(), CodegenError> {
+    let ValueRepr::Single(val) = value else {
+        return Err(CodegenError::Unsupported("store value".to_string()));
+    };
+    match ty {
+        TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
+            builder.ins().store(MemFlags::new(), val, addr, 0);
+            Ok(())
+        }
+        _ => Err(CodegenError::Unsupported(format!(
+            "store unsupported {ty:?}"
+        ))),
+    }
+}
+
+fn load_value_by_ty(
+    builder: &mut FunctionBuilder,
+    base_ptr: ir::Value,
+    offset: u32,
+    ty: &crate::typeck::Ty,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+) -> Result<ValueRepr, CodegenError> {
+    use crate::typeck::{BuiltinType, Ty};
+
+    let addr = ptr_add(builder, base_ptr, offset);
+    let ptr_ty = module.isa().pointer_type();
+    match ty {
+        Ty::Builtin(b) => match b {
+            BuiltinType::Unit => Ok(ValueRepr::Unit),
+            BuiltinType::I32 | BuiltinType::U32 => Ok(ValueRepr::Single(
+                builder.ins().load(ir::types::I32, MemFlags::new(), addr, 0),
+            )),
+            BuiltinType::U8 | BuiltinType::Bool => Ok(ValueRepr::Single(
+                builder.ins().load(ir::types::I8, MemFlags::new(), addr, 0),
+            )),
+            BuiltinType::String => {
+                let (ptr_off, len_off) = string_offsets(ptr_ty);
+                let ptr_addr = ptr_add(builder, base_ptr, offset + ptr_off);
+                let len_addr = ptr_add(builder, base_ptr, offset + len_off);
+                let ptr = builder
+                    .ins()
+                    .load(ptr_ty, MemFlags::new(), ptr_addr, 0);
+                let len = builder
+                    .ins()
+                    .load(ir::types::I64, MemFlags::new(), len_addr, 0);
+                Ok(ValueRepr::Pair(ptr, len))
+            }
+            BuiltinType::I64 => Err(CodegenError::Unsupported("i64 not yet supported".to_string())),
+        },
+        Ty::Ptr(_) => Ok(ValueRepr::Single(
+            builder.ins().load(ptr_ty, MemFlags::new(), addr, 0),
+        )),
+        Ty::Path(name, args) => {
+            if name == "Result" && args.len() == 2 {
+                let ok_layout = type_layout_from_index(&args[0], struct_layouts, ptr_ty)?;
+                let err_layout = type_layout_from_index(&args[1], struct_layouts, ptr_ty)?;
+                let (_, ok_off, err_off) = result_offsets(ok_layout, err_layout);
+                let tag = builder.ins().load(ir::types::I8, MemFlags::new(), addr, 0);
+                let ok = load_value_by_ty(
+                    builder,
+                    base_ptr,
+                    offset + ok_off,
+                    &args[0],
+                    struct_layouts,
+                    module,
+                )?;
+                let err = load_value_by_ty(
+                    builder,
+                    base_ptr,
+                    offset + err_off,
+                    &args[1],
+                    struct_layouts,
+                    module,
+                )?;
+                return Ok(ValueRepr::Result {
+                    tag,
+                    ok: Box::new(ok),
+                    err: Box::new(err),
+                });
+            }
+
+            if resolve_struct_layout(ty, "", &struct_layouts.layouts).is_some() {
+                let ptr = ptr_add(builder, base_ptr, offset);
+                return Ok(ValueRepr::Single(ptr));
+            }
+
+            let ty_kind = typeck_ty_to_tykind(ty, Some(struct_layouts))?;
+            load_value_by_tykind(builder, addr, &ty_kind, ptr_ty)
+        }
+    }
+}
+
+fn load_value_by_tykind(
+    builder: &mut FunctionBuilder,
+    addr: ir::Value,
+    ty: &TyKind,
+    ptr_ty: Type,
+) -> Result<ValueRepr, CodegenError> {
+    let load_ty = match ty {
+        TyKind::I32 | TyKind::U32 => ir::types::I32,
+        TyKind::U8 | TyKind::Bool => ir::types::I8,
+        TyKind::Handle => ir::types::I64,
+        TyKind::Ptr => ptr_ty,
+        _ => {
+            return Err(CodegenError::Unsupported(format!(
+                "load unsupported {ty:?}"
+            )))
+        }
+    };
+    Ok(ValueRepr::Single(
+        builder.ins().load(load_ty, MemFlags::new(), addr, 0),
+    ))
+}
+
+fn ptr_add(builder: &mut FunctionBuilder, base: ir::Value, offset: u32) -> ir::Value {
+    if offset == 0 {
+        base
+    } else {
+        builder.ins().iadd_imm(base, i64::from(offset))
+    }
+}
+
+fn string_offsets(ptr_ty: Type) -> (u32, u32) {
+    let ptr_size = ptr_ty.bytes() as u32;
+    let len_offset = align_to(ptr_size, 8);
+    (0, len_offset)
+}
+
+fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
+    let tag_offset = 0u32;
+    let ok_offset = align_to(1, ok.align);
+    let err_offset = align_to(ok_offset.saturating_add(ok.size), err.align);
+    (tag_offset, ok_offset, err_offset)
+}
+
+fn type_layout_from_index(
+    ty: &crate::typeck::Ty,
+    struct_layouts: &StructLayoutIndex,
+    ptr_ty: Type,
+) -> Result<TypeLayout, CodegenError> {
+    if let Some(layout) = resolve_struct_layout(ty, "", &struct_layouts.layouts) {
+        return Ok(TypeLayout {
+            size: layout.size,
+            align: layout.align,
+        });
+    }
+    let ty_kind = typeck_ty_to_tykind(ty, Some(struct_layouts))?;
+    type_layout_for_tykind(&ty_kind, ptr_ty)
 }
 
 fn emit_hir_short_circuit_expr(
@@ -3116,6 +3588,7 @@ fn emit_hir_short_circuit_expr(
     locals: &HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -3136,7 +3609,16 @@ fn emit_hir_short_circuit_expr(
 
     builder.switch_to_block(rhs_block);
     builder.seal_block(rhs_block);
-    let rhs = emit_hir_expr(builder, rhs_expr, locals, fn_map, enum_index, module, data_counter)?;
+    let rhs = emit_hir_expr(
+        builder,
+        rhs_expr,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )?;
     let rhs_val = match rhs {
         ValueRepr::Single(v) => v,
         _ => return Err(CodegenError::Unsupported("boolean op".to_string())),
@@ -3156,6 +3638,7 @@ fn emit_hir_match_stmt(
     locals: &HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -3166,6 +3649,7 @@ fn emit_hir_match_stmt(
         locals,
         fn_map,
         enum_index,
+        struct_layouts,
         module,
         data_counter,
     )?;
@@ -3230,6 +3714,7 @@ fn emit_hir_match_stmt(
                 &mut arm_locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -3267,6 +3752,7 @@ fn emit_hir_match_expr(
     locals: &HashMap<String, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -3279,6 +3765,7 @@ fn emit_hir_match_expr(
         locals,
         fn_map,
         enum_index,
+        struct_layouts,
         module,
         data_counter,
     )?;
@@ -3338,6 +3825,7 @@ fn emit_hir_match_expr(
                 &mut arm_locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?;
@@ -3362,6 +3850,7 @@ fn emit_hir_match_expr(
                 &arm_locals,
                 fn_map,
                 enum_index,
+                struct_layouts,
                 module,
                 data_counter,
             )?,
@@ -3828,6 +4317,66 @@ fn value_type_for_result_out(ty: &TyKind, ptr_ty: Type) -> Result<ir::Type, Code
     }
 }
 
+fn zero_value_for_tykind(
+    builder: &mut FunctionBuilder,
+    ty: &TyKind,
+    ptr_ty: Type,
+) -> Result<ValueRepr, CodegenError> {
+    match ty {
+        TyKind::Unit => Ok(ValueRepr::Unit),
+        TyKind::I32 | TyKind::U32 => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
+        TyKind::U8 | TyKind::Bool => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, 0))),
+        TyKind::Handle => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I64, 0))),
+        TyKind::Ptr => Ok(ValueRepr::Single(builder.ins().iconst(ptr_ty, 0))),
+        TyKind::String => {
+            let ptr = builder.ins().iconst(ptr_ty, 0);
+            let len = builder.ins().iconst(ir::types::I64, 0);
+            Ok(ValueRepr::Pair(ptr, len))
+        }
+        TyKind::Result(ok, err) => {
+            let tag = builder.ins().iconst(ir::types::I8, 0);
+            let ok_val = zero_value_for_tykind(builder, ok, ptr_ty)?;
+            let err_val = zero_value_for_tykind(builder, err, ptr_ty)?;
+            Ok(ValueRepr::Result {
+                tag,
+                ok: Box::new(ok_val),
+                err: Box::new(err_val),
+            })
+        }
+        TyKind::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
+        TyKind::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+    }
+}
+
+fn zero_value_for_ty(
+    builder: &mut FunctionBuilder,
+    ty: &crate::typeck::Ty,
+    ptr_ty: Type,
+    struct_layouts: Option<&StructLayoutIndex>,
+) -> Result<ValueRepr, CodegenError> {
+    use crate::typeck::Ty;
+
+    match ty {
+        Ty::Builtin(_) => {
+            zero_value_for_tykind(builder, &typeck_ty_to_tykind(ty, struct_layouts)?, ptr_ty)
+        }
+        Ty::Ptr(_) => zero_value_for_tykind(builder, &TyKind::Ptr, ptr_ty),
+        Ty::Path(name, args) => {
+            if name == "Result" && args.len() == 2 {
+                let tag = builder.ins().iconst(ir::types::I8, 0);
+                let ok_val = zero_value_for_ty(builder, &args[0], ptr_ty, struct_layouts)?;
+                let err_val = zero_value_for_ty(builder, &args[1], ptr_ty, struct_layouts)?;
+                return Ok(ValueRepr::Result {
+                    tag,
+                    ok: Box::new(ok_val),
+                    err: Box::new(err_val),
+                });
+            }
+            zero_value_for_tykind(builder, &typeck_ty_to_tykind(ty, struct_layouts)?, ptr_ty)
+        }
+    }
+}
+
 fn value_from_params(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
@@ -3997,6 +4546,248 @@ fn build_enum_index(
         }
     }
     EnumIndex { variants }
+}
+
+fn build_struct_layout_index(
+    entry: &crate::hir::HirModule,
+    user_modules: &[crate::hir::HirModule],
+    stdlib: &[crate::hir::HirModule],
+    ptr_ty: Type,
+) -> Result<StructLayoutIndex, CodegenError> {
+    let modules = stdlib
+        .iter()
+        .chain(user_modules.iter())
+        .chain(std::iter::once(entry))
+        .collect::<Vec<_>>();
+
+    let mut defs: HashMap<String, (&str, &crate::hir::HirStruct)> = HashMap::new();
+    for module in &modules {
+        for st in &module.structs {
+            if st.is_opaque {
+                continue;
+            }
+            let qualified = format!("{}.{}", module.name, st.name);
+            defs.insert(qualified, (&module.name, st));
+        }
+    }
+
+    let mut layouts = HashMap::new();
+    let mut visiting = HashSet::new();
+    for (qualified, (module_name, st)) in &defs {
+        compute_struct_layout(
+            qualified,
+            module_name,
+            st,
+            &defs,
+            &mut layouts,
+            &mut visiting,
+            ptr_ty,
+        )?;
+    }
+
+    // Also register unqualified names to support local references.
+    for module in &modules {
+        for st in &module.structs {
+            if st.is_opaque {
+                continue;
+            }
+            let qualified = format!("{}.{}", module.name, st.name);
+            if let Some(layout) = layouts.get(&qualified).cloned() {
+                layouts.entry(st.name.clone()).or_insert(layout);
+            }
+        }
+    }
+
+    Ok(StructLayoutIndex { layouts })
+}
+
+fn compute_struct_layout(
+    qualified: &str,
+    module_name: &str,
+    st: &crate::hir::HirStruct,
+    defs: &HashMap<String, (&str, &crate::hir::HirStruct)>,
+    layouts: &mut HashMap<String, StructLayout>,
+    visiting: &mut HashSet<String>,
+    ptr_ty: Type,
+) -> Result<(), CodegenError> {
+    if layouts.contains_key(qualified) {
+        return Ok(());
+    }
+    if !visiting.insert(qualified.to_string()) {
+        return Err(CodegenError::Unsupported(format!(
+            "recursive struct layout for {qualified}"
+        )));
+    }
+
+    let mut fields = HashMap::new();
+    let mut offset = 0u32;
+    let mut align = 1u32;
+    for field in &st.fields {
+        let layout = type_layout_for_ty(&field.ty, module_name, defs, layouts, ptr_ty)?;
+        offset = align_to(offset, layout.align);
+        fields.insert(
+            field.name.clone(),
+            StructFieldLayout {
+                offset,
+                ty: field.ty.clone(),
+            },
+        );
+        offset = offset.saturating_add(layout.size);
+        align = align.max(layout.align);
+    }
+    let size = align_to(offset, align);
+
+    layouts.insert(
+        qualified.to_string(),
+        StructLayout { size, align, fields },
+    );
+    visiting.remove(qualified);
+    Ok(())
+}
+
+fn type_layout_for_ty(
+    ty: &crate::typeck::Ty,
+    module_name: &str,
+    defs: &HashMap<String, (&str, &crate::hir::HirStruct)>,
+    layouts: &mut HashMap<String, StructLayout>,
+    ptr_ty: Type,
+) -> Result<TypeLayout, CodegenError> {
+    use crate::typeck::Ty;
+
+    if let Some(layout) = resolve_struct_layout(ty, module_name, layouts) {
+        return Ok(TypeLayout {
+            size: layout.size,
+            align: layout.align,
+        });
+    }
+
+    match ty {
+        Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+            let tag = TypeLayout { size: 1, align: 1 };
+            let ok = type_layout_for_ty(&args[0], module_name, defs, layouts, ptr_ty)?;
+            let err = type_layout_for_ty(&args[1], module_name, defs, layouts, ptr_ty)?;
+            let mut offset = 0u32;
+            let mut align = tag.align;
+            offset = align_to(offset, tag.align);
+            offset = offset.saturating_add(tag.size);
+            offset = align_to(offset, ok.align);
+            offset = offset.saturating_add(ok.size);
+            offset = align_to(offset, err.align);
+            offset = offset.saturating_add(err.size);
+            align = align.max(ok.align).max(err.align);
+            let size = align_to(offset, align);
+            Ok(TypeLayout { size, align })
+        }
+        Ty::Path(name, _) => {
+            if let Some((struct_module, struct_def)) = resolve_struct_def(name, module_name, defs)
+            {
+                compute_struct_layout(
+                    &format!("{}.{}", struct_module, struct_def.name),
+                    struct_module,
+                    struct_def,
+                    defs,
+                    layouts,
+                    &mut HashSet::new(),
+                    ptr_ty,
+                )?;
+                if let Some(layout) =
+                    resolve_struct_layout(&Ty::Path(name.clone(), Vec::new()), module_name, layouts)
+                {
+                    return Ok(TypeLayout {
+                        size: layout.size,
+                        align: layout.align,
+                    });
+                }
+            }
+            let ty_kind = typeck_ty_to_tykind(ty, None)?;
+            type_layout_for_tykind(&ty_kind, ptr_ty)
+        }
+        _ => {
+            let ty_kind = typeck_ty_to_tykind(ty, None)?;
+            type_layout_for_tykind(&ty_kind, ptr_ty)
+        }
+    }
+}
+
+fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLayout, CodegenError> {
+    match ty {
+        TyKind::Unit => Ok(TypeLayout { size: 0, align: 1 }),
+        TyKind::I32 | TyKind::U32 => Ok(TypeLayout { size: 4, align: 4 }),
+        TyKind::U8 | TyKind::Bool => Ok(TypeLayout { size: 1, align: 1 }),
+        TyKind::Handle => Ok(TypeLayout { size: 8, align: 8 }),
+        TyKind::Ptr => Ok(TypeLayout {
+            size: ptr_ty.bytes() as u32,
+            align: ptr_ty.bytes() as u32,
+        }),
+        TyKind::String => Ok(TypeLayout {
+            size: ptr_ty.bytes() as u32 + 8,
+            align: ptr_ty.bytes().max(8) as u32,
+        }),
+        TyKind::Result(ok, err) => {
+            let tag = TypeLayout { size: 1, align: 1 };
+            let ok = type_layout_for_tykind(ok, ptr_ty)?;
+            let err = type_layout_for_tykind(err, ptr_ty)?;
+            let mut offset = 0u32;
+            let mut align = tag.align;
+            offset = align_to(offset, tag.align);
+            offset = offset.saturating_add(tag.size);
+            offset = align_to(offset, ok.align);
+            offset = offset.saturating_add(ok.size);
+            offset = align_to(offset, err.align);
+            offset = offset.saturating_add(err.size);
+            align = align.max(ok.align).max(err.align);
+            let size = align_to(offset, align);
+            Ok(TypeLayout { size, align })
+        }
+        TyKind::ResultOut(_, _) | TyKind::ResultString => Err(CodegenError::Unsupported(
+            "layout for result out params".to_string(),
+        )),
+    }
+}
+
+fn resolve_struct_layout<'a>(
+    ty: &crate::typeck::Ty,
+    module_name: &str,
+    layouts: &'a HashMap<String, StructLayout>,
+) -> Option<&'a StructLayout> {
+    match ty {
+        crate::typeck::Ty::Path(name, _) => {
+            if name.contains('.') {
+                layouts.get(name)
+            } else {
+                let qualified = format!("{module_name}.{name}");
+                layouts.get(&qualified).or_else(|| layouts.get(name))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn resolve_struct_def<'a>(
+    name: &str,
+    module_name: &str,
+    defs: &'a HashMap<String, (&'a str, &'a crate::hir::HirStruct)>,
+) -> Option<(&'a str, &'a crate::hir::HirStruct)> {
+    if name.contains('.') {
+        defs.get(name).copied()
+    } else {
+        let qualified = format!("{module_name}.{name}");
+        defs.get(&qualified)
+            .copied()
+            .or_else(|| defs.get(name).copied())
+    }
+}
+
+fn align_to(value: u32, align: u32) -> u32 {
+    if align == 0 {
+        return value;
+    }
+    let rem = value % align;
+    if rem == 0 {
+        value
+    } else {
+        value + (align - rem)
+    }
 }
 
 fn lower_ty(
