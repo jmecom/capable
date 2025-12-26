@@ -143,6 +143,7 @@ enum ValueRepr {
 enum LocalValue {
     Value(ValueRepr),
     Slot(ir::StackSlot, Type),
+    StructSlot(ir::StackSlot, crate::typeck::Ty),
 }
 
 #[derive(Clone, Debug)]
@@ -1478,6 +1479,9 @@ fn emit_stmt(
                     };
                     builder.ins().stack_store(val, *slot, 0);
                 }
+                LocalValue::StructSlot(_, _) => {
+                    return Err(CodegenError::Unsupported("struct assignment".to_string()));
+                }
                 LocalValue::Value(_) => {
                     return Err(CodegenError::Unsupported("assignment".to_string()));
                 }
@@ -1730,7 +1734,7 @@ fn emit_expr(
         Expr::Path(path) => {
             if path.segments.len() == 1 {
                 if let Some(value) = locals.get(&path.segments[0].item) {
-                    return Ok(load_local(builder, value));
+                    return Ok(load_local(builder, value, module.isa().pointer_type()));
                 }
             }
             if let Some(index) = resolve_enum_variant(path, use_map, enum_index) {
@@ -2517,8 +2521,34 @@ fn emit_hir_stmt(
                 module,
                 data_counter,
             )?;
-            let local = store_local(builder, value);
-            locals.insert(let_stmt.name.clone(), local);
+            if let Some(layout) =
+                resolve_struct_layout(&let_stmt.ty, "", &struct_layouts.layouts)
+            {
+                let slot_size = align_to(layout.size.max(1), layout.align.max(1));
+                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    slot_size,
+                ));
+                let base_ptr = builder
+                    .ins()
+                    .stack_addr(module.isa().pointer_type(), slot, 0);
+                store_value_by_ty(
+                    builder,
+                    base_ptr,
+                    0,
+                    &let_stmt.ty,
+                    value,
+                    struct_layouts,
+                    module,
+                )?;
+                locals.insert(
+                    let_stmt.name.clone(),
+                    LocalValue::StructSlot(slot, let_stmt.ty.clone()),
+                );
+            } else {
+                let local = store_local(builder, value);
+                locals.insert(let_stmt.name.clone(), local);
+            }
         }
         HirStmt::Assign(assign) => {
             let value = emit_hir_expr(
@@ -2540,6 +2570,20 @@ fn emit_hir_stmt(
                         return Err(CodegenError::Unsupported("assignment".to_string()));
                     };
                     builder.ins().stack_store(val, *slot, 0);
+                }
+                LocalValue::StructSlot(slot, ty) => {
+                    let base_ptr = builder
+                        .ins()
+                        .stack_addr(module.isa().pointer_type(), *slot, 0);
+                    store_value_by_ty(
+                        builder,
+                        base_ptr,
+                        0,
+                        ty,
+                        value,
+                        struct_layouts,
+                        module,
+                    )?;
                 }
                 LocalValue::Value(_) => {
                     return Err(CodegenError::Unsupported("assignment".to_string()));
@@ -2762,7 +2806,7 @@ fn emit_hir_expr(
         HirExpr::Local(local) => {
             // Look up the local by name (we still use String keys in the HashMap)
             if let Some(value) = locals.get(&local.name) {
-                return Ok(load_local(builder, value));
+                return Ok(load_local(builder, value, module.isa().pointer_type()));
             }
             Err(CodegenError::UnknownVariable(local.name.clone()))
         }
@@ -3221,9 +3265,10 @@ fn emit_hir_struct_literal(
             ))
         })?;
     let ptr_ty = module.isa().pointer_type();
+    let slot_size = align_to(layout.size.max(1), layout.align.max(1));
     let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
         ir::StackSlotKind::ExplicitSlot,
-        layout.size.max(1),
+        slot_size,
     ));
     let base_ptr = builder.ins().stack_addr(ptr_ty, slot, 0);
 
@@ -4299,9 +4344,13 @@ fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
     }
 }
 
-fn load_local(builder: &mut FunctionBuilder, local: &LocalValue) -> ValueRepr {
+fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -> ValueRepr {
     match local {
         LocalValue::Slot(slot, ty) => ValueRepr::Single(builder.ins().stack_load(*ty, *slot, 0)),
+        LocalValue::StructSlot(slot, _) => {
+            let addr = builder.ins().stack_addr(ptr_ty, *slot, 0);
+            ValueRepr::Single(addr)
+        }
         LocalValue::Value(value) => value.clone(),
     }
 }
@@ -4561,6 +4610,7 @@ fn build_struct_layout_index(
         .collect::<Vec<_>>();
 
     let mut defs: HashMap<String, (&str, &crate::hir::HirStruct)> = HashMap::new();
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
     for module in &modules {
         for st in &module.structs {
             if st.is_opaque {
@@ -4568,6 +4618,7 @@ fn build_struct_layout_index(
             }
             let qualified = format!("{}.{}", module.name, st.name);
             defs.insert(qualified, (&module.name, st));
+            *name_counts.entry(st.name.clone()).or_insert(0) += 1;
         }
     }
 
@@ -4585,7 +4636,7 @@ fn build_struct_layout_index(
         )?;
     }
 
-    // Also register unqualified names to support local references.
+    // Also register unqualified names when unambiguous.
     for module in &modules {
         for st in &module.structs {
             if st.is_opaque {
@@ -4593,7 +4644,9 @@ fn build_struct_layout_index(
             }
             let qualified = format!("{}.{}", module.name, st.name);
             if let Some(layout) = layouts.get(&qualified).cloned() {
-                layouts.entry(st.name.clone()).or_insert(layout);
+                if name_counts.get(&st.name).copied().unwrap_or(0) == 1 {
+                    layouts.entry(st.name.clone()).or_insert(layout);
+                }
             }
         }
     }
@@ -4623,7 +4676,8 @@ fn compute_struct_layout(
     let mut offset = 0u32;
     let mut align = 1u32;
     for field in &st.fields {
-        let layout = type_layout_for_ty(&field.ty, module_name, defs, layouts, ptr_ty)?;
+        let layout =
+            type_layout_for_ty(&field.ty, module_name, defs, layouts, visiting, ptr_ty)?;
         offset = align_to(offset, layout.align);
         fields.insert(
             field.name.clone(),
@@ -4650,6 +4704,7 @@ fn type_layout_for_ty(
     module_name: &str,
     defs: &HashMap<String, (&str, &crate::hir::HirStruct)>,
     layouts: &mut HashMap<String, StructLayout>,
+    visiting: &mut HashSet<String>,
     ptr_ty: Type,
 ) -> Result<TypeLayout, CodegenError> {
     use crate::typeck::Ty;
@@ -4664,8 +4719,8 @@ fn type_layout_for_ty(
     match ty {
         Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
             let tag = TypeLayout { size: 1, align: 1 };
-            let ok = type_layout_for_ty(&args[0], module_name, defs, layouts, ptr_ty)?;
-            let err = type_layout_for_ty(&args[1], module_name, defs, layouts, ptr_ty)?;
+            let ok = type_layout_for_ty(&args[0], module_name, defs, layouts, visiting, ptr_ty)?;
+            let err = type_layout_for_ty(&args[1], module_name, defs, layouts, visiting, ptr_ty)?;
             let mut offset = 0u32;
             let mut align = tag.align;
             offset = align_to(offset, tag.align);
@@ -4687,7 +4742,7 @@ fn type_layout_for_ty(
                     struct_def,
                     defs,
                     layouts,
-                    &mut HashSet::new(),
+                    visiting,
                     ptr_ty,
                 )?;
                 if let Some(layout) =
@@ -4719,10 +4774,14 @@ fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLayout, Codeg
             size: ptr_ty.bytes() as u32,
             align: ptr_ty.bytes() as u32,
         }),
-        TyKind::String => Ok(TypeLayout {
-            size: ptr_ty.bytes() as u32 + 8,
-            align: ptr_ty.bytes().max(8) as u32,
-        }),
+        TyKind::String => {
+            let ptr_size = ptr_ty.bytes() as u32;
+            let len_offset = align_to(ptr_size, 8);
+            Ok(TypeLayout {
+                size: len_offset + 8,
+                align: ptr_ty.bytes().max(8) as u32,
+            })
+        }
         TyKind::Result(ok, err) => {
             let tag = TypeLayout { size: 1, align: 1 };
             let ok = type_layout_for_tykind(ok, ptr_ty)?;
