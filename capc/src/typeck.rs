@@ -1538,6 +1538,8 @@ struct LoweringCtx<'a> {
     module_name: &'a str,
     /// Maps variable names to their LocalId
     local_map: HashMap<String, LocalId>,
+    /// Maps variable names to their types (needed for type checking during lowering)
+    local_types: HashMap<String, Ty>,
     local_counter: usize,
 }
 
@@ -1558,14 +1560,16 @@ impl<'a> LoweringCtx<'a> {
             stdlib,
             module_name,
             local_map: HashMap::new(),
+            local_types: HashMap::new(),
             local_counter: 0,
         }
     }
 
-    fn fresh_local(&mut self, name: String) -> LocalId {
+    fn fresh_local(&mut self, name: String, ty: Ty) -> LocalId {
         let id = LocalId(self.local_counter);
         self.local_counter += 1;
-        self.local_map.insert(name, id);
+        self.local_map.insert(name.clone(), id);
+        self.local_types.insert(name, ty);
         id
     }
 
@@ -1666,6 +1670,7 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     // Reset local counter for this function
     ctx.local_counter = 0;
     ctx.local_map.clear();
+    ctx.local_types.clear();
 
     // Create locals for parameters
     let params: Result<Vec<HirParam>, TypeError> = func
@@ -1673,7 +1678,7 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         .iter()
         .map(|p| {
             let ty = lower_type(&p.ty, ctx.use_map, ctx.stdlib)?;
-            let local_id = ctx.fresh_local(p.name.item.clone());
+            let local_id = ctx.fresh_local(p.name.item.clone(), ty.clone());
             Ok(HirParam {
                 local_id,
                 name: p.name.item.clone(),
@@ -1716,7 +1721,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
         Stmt::Let(let_stmt) => {
             let expr = lower_expr(&let_stmt.expr, ctx)?;
             let ty = expr_type(&expr);
-            let local_id = ctx.fresh_local(let_stmt.name.item.clone());
+            let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.clone());
 
             Ok(HirStmt::Let(HirLetStmt {
                 local_id,
@@ -1783,11 +1788,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
 }
 
 fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx) -> Result<HirExpr, TypeError> {
-    // For now, lower_expr is a placeholder that returns errors
-    // We'll implement this fully once we integrate it with type checking
-    // The key insight: we need type information to properly lower expressions,
-    // which means we should integrate this with check_expr rather than duplicate logic
-
     match expr {
         Expr::Literal(lit) => {
             let ty = match &lit.value {
@@ -1807,12 +1807,144 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx) -> Result<HirExpr, TypeError> 
             // Grouping is transparent - just lower the inner expression
             lower_expr(&grouping.expr, ctx)
         }
-        _ => {
-            // Return error for unimplemented expressions
-            // Full implementation will come when we integrate with type checking
+        Expr::Path(path) => {
+            // Check if it's a local variable
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].item;
+                if let Some(ty) = ctx.local_types.get(name) {
+                    let local_id = ctx.get_local(name).unwrap();
+                    return Ok(HirExpr::Local(HirLocal {
+                        local_id,
+                        name: name.clone(),
+                        ty: ty.clone(),
+                        span: path.span,
+                    }));
+                }
+            }
+            // Check if it's an enum variant
+            if let Some(ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums) {
+                // For now, treat enum variants as literals with the enum type
+                // Full implementation would need HirEnumVariant expr type
+                return Ok(HirExpr::Literal(HirLiteral {
+                    value: Literal::Unit,  // Placeholder
+                    ty,
+                    span: path.span,
+                }));
+            }
             Err(TypeError::new(
-                format!("expression type {:?} not yet supported in HIR lowering",
-                    std::mem::discriminant(expr)),
+                format!("unknown value `{path}`"),
+                path.span,
+            ))
+        }
+        Expr::Call(_call) => {
+            // TODO: Implement Call lowering with function resolution
+            Err(TypeError::new(
+                "function calls not yet supported in HIR lowering".to_string(),
+                expr.span(),
+            ))
+        }
+        Expr::MethodCall(_method_call) => {
+            // TODO: Implement MethodCall lowering (desugar to Call with receiver as arg0)
+            Err(TypeError::new(
+                "method calls not yet supported in HIR lowering".to_string(),
+                expr.span(),
+            ))
+        }
+        Expr::Binary(bin) => {
+            let left = lower_expr(&bin.left, ctx)?;
+            let right = lower_expr(&bin.right, ctx)?;
+            let left_ty = expr_type(&left);
+            let right_ty = expr_type(&right);
+
+            // Type check the binary operation
+            let result_ty = match bin.op {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                    if left_ty == Ty::Builtin(BuiltinType::I32) && right_ty == Ty::Builtin(BuiltinType::I32) {
+                        Ty::Builtin(BuiltinType::I32)
+                    } else if left_ty == Ty::Builtin(BuiltinType::I64) && right_ty == Ty::Builtin(BuiltinType::I64) {
+                        Ty::Builtin(BuiltinType::I64)
+                    } else {
+                        return Err(TypeError::new(
+                            format!("binary operation expects matching integer types, got {left_ty:?} and {right_ty:?}"),
+                            bin.span,
+                        ));
+                    }
+                }
+                BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
+                    if left_ty != right_ty {
+                        return Err(TypeError::new(
+                            format!("comparison expects matching types, got {left_ty:?} and {right_ty:?}"),
+                            bin.span,
+                        ));
+                    }
+                    Ty::Builtin(BuiltinType::Bool)
+                }
+                BinaryOp::Eq | BinaryOp::Neq => {
+                    if left_ty != right_ty {
+                        return Err(TypeError::new(
+                            format!("equality expects matching types, got {left_ty:?} and {right_ty:?}"),
+                            bin.span,
+                        ));
+                    }
+                    Ty::Builtin(BuiltinType::Bool)
+                }
+                BinaryOp::And | BinaryOp::Or => {
+                    if left_ty != Ty::Builtin(BuiltinType::Bool) || right_ty != Ty::Builtin(BuiltinType::Bool) {
+                        return Err(TypeError::new(
+                            "logical operation expects bool operands".to_string(),
+                            bin.span,
+                        ));
+                    }
+                    Ty::Builtin(BuiltinType::Bool)
+                }
+            };
+
+            Ok(HirExpr::Binary(HirBinary {
+                left: Box::new(left),
+                op: bin.op.clone(),
+                right: Box::new(right),
+                ty: result_ty,
+                span: bin.span,
+            }))
+        }
+        Expr::Unary(un) => {
+            let operand = lower_expr(&un.expr, ctx)?;
+            let operand_ty = expr_type(&operand);
+
+            let result_ty = match un.op {
+                UnaryOp::Neg => {
+                    if operand_ty == Ty::Builtin(BuiltinType::I32) || operand_ty == Ty::Builtin(BuiltinType::I64) {
+                        operand_ty
+                    } else {
+                        return Err(TypeError::new(
+                            "unary - expects integer".to_string(),
+                            un.span,
+                        ));
+                    }
+                }
+                UnaryOp::Not => {
+                    if operand_ty == Ty::Builtin(BuiltinType::Bool) {
+                        operand_ty
+                    } else {
+                        return Err(TypeError::new(
+                            "unary ! expects bool".to_string(),
+                            un.span,
+                        ));
+                    }
+                }
+            };
+
+            Ok(HirExpr::Unary(HirUnary {
+                op: un.op.clone(),
+                expr: Box::new(operand),
+                ty: result_ty,
+                span: un.span,
+            }))
+        }
+        Expr::FieldAccess(_) | Expr::StructLiteral(_) | Expr::Match(_) => {
+            // TODO: Implement these when needed
+            Err(TypeError::new(
+                format!("expression type not yet supported in HIR lowering"),
                 expr.span(),
             ))
         }
