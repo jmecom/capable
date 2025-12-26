@@ -362,17 +362,17 @@ pub fn type_check_program(
         }
     }
 
-    // TODO(P1.5 Step 4-5): Implement full HIR lowering
-    // WARNING: This currently returns an EMPTY skeleton HirModule!
-    // Do NOT consume this HIR until Step 5 - codegen still uses AST directly.
-    // The actual lowering (populating functions/structs/enums with resolved nodes)
-    // will be implemented when we switch codegen to consume HIR.
-    Ok(HirModule {
-        name: module_name,
-        functions: Vec::new(),
-        structs: Vec::new(),
-        enums: Vec::new(),
-    })
+    // Lower to HIR (Step 4)
+    // WARNING: HIR lowering is incomplete - only handles literals and grouping currently
+    // Codegen still uses AST directly until Step 5
+    lower_module(
+        module,
+        &functions,
+        &struct_map,
+        &enum_map,
+        &use_map,
+        &stdlib_index,
+    )
 }
 
 fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
@@ -1516,6 +1516,321 @@ fn is_orderable_type(ty: &Ty) -> bool {
             | Ty::Builtin(BuiltinType::U32)
             | Ty::Builtin(BuiltinType::U8)
     )
+}
+
+// ============================================================================
+// HIR Lowering - Convert typechecked AST to HIR with full resolution
+// ============================================================================
+
+use crate::hir::{
+    HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirExpr, HirExprStmt, HirField,
+    HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
+    HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
+    HirStructLiteralField, HirUnary, HirWhileStmt, HirAssignStmt, LocalId, ResolvedCallee,
+};
+
+struct LoweringCtx<'a> {
+    functions: &'a HashMap<String, FunctionSig>,
+    structs: &'a HashMap<String, StructInfo>,
+    enums: &'a HashMap<String, EnumInfo>,
+    use_map: &'a UseMap,
+    stdlib: &'a StdlibIndex,
+    module_name: &'a str,
+    /// Maps variable names to their LocalId
+    local_map: HashMap<String, LocalId>,
+    local_counter: usize,
+}
+
+impl<'a> LoweringCtx<'a> {
+    fn new(
+        functions: &'a HashMap<String, FunctionSig>,
+        structs: &'a HashMap<String, StructInfo>,
+        enums: &'a HashMap<String, EnumInfo>,
+        use_map: &'a UseMap,
+        stdlib: &'a StdlibIndex,
+        module_name: &'a str,
+    ) -> Self {
+        Self {
+            functions,
+            structs,
+            enums,
+            use_map,
+            stdlib,
+            module_name,
+            local_map: HashMap::new(),
+            local_counter: 0,
+        }
+    }
+
+    fn fresh_local(&mut self, name: String) -> LocalId {
+        let id = LocalId(self.local_counter);
+        self.local_counter += 1;
+        self.local_map.insert(name, id);
+        id
+    }
+
+    fn get_local(&self, name: &str) -> Option<LocalId> {
+        self.local_map.get(name).copied()
+    }
+
+    fn push_scope(&mut self) {
+        // For now, we'll use a simple flat map
+        // Future: use a scope stack for proper shadowing
+    }
+
+    fn pop_scope(&mut self) {
+        // Future: pop scope from stack
+    }
+}
+
+fn lower_module(
+    module: &Module,
+    functions: &HashMap<String, FunctionSig>,
+    structs: &HashMap<String, StructInfo>,
+    enums: &HashMap<String, EnumInfo>,
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+) -> Result<HirModule, TypeError> {
+    let module_name = module.name.to_string();
+    let mut ctx = LoweringCtx::new(functions, structs, enums, use_map, stdlib, &module_name);
+
+    // Lower all functions
+    let mut hir_functions = Vec::new();
+    for item in &module.items {
+        if let Item::Function(func) = item {
+            if let Ok(hir_func) = lower_function(func, &mut ctx) {
+                hir_functions.push(hir_func);
+            }
+        }
+    }
+
+    // Lower structs (just collect metadata for now)
+    let mut hir_structs = Vec::new();
+    for item in &module.items {
+        if let Item::Struct(decl) = item {
+            let fields: Result<Vec<HirField>, TypeError> = decl
+                .fields
+                .iter()
+                .map(|f| {
+                    Ok(HirField {
+                        name: f.name.item.clone(),
+                        ty: lower_type(&f.ty, use_map, stdlib)?,
+                    })
+                })
+                .collect();
+            hir_structs.push(HirStruct {
+                name: decl.name.item.clone(),
+                fields: fields?,
+                is_pub: decl.is_pub,
+                is_opaque: decl.is_opaque,
+                span: decl.span,
+            });
+        }
+    }
+
+    // Lower enums
+    let mut hir_enums = Vec::new();
+    for item in &module.items {
+        if let Item::Enum(decl) = item {
+            let variants: Result<Vec<HirEnumVariant>, TypeError> = decl
+                .variants
+                .iter()
+                .map(|v| {
+                    let payload = v.payload.as_ref()
+                        .map(|ty| lower_type(ty, use_map, stdlib))
+                        .transpose()?;
+                    Ok(HirEnumVariant {
+                        name: v.name.item.clone(),
+                        payload,
+                    })
+                })
+                .collect();
+            hir_enums.push(HirEnum {
+                name: decl.name.item.clone(),
+                variants: variants?,
+                is_pub: decl.is_pub,
+                span: decl.span,
+            });
+        }
+    }
+
+    Ok(HirModule {
+        name: module_name,
+        functions: hir_functions,
+        structs: hir_structs,
+        enums: hir_enums,
+    })
+}
+
+fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction, TypeError> {
+    // Reset local counter for this function
+    ctx.local_counter = 0;
+    ctx.local_map.clear();
+
+    // Create locals for parameters
+    let params: Result<Vec<HirParam>, TypeError> = func
+        .params
+        .iter()
+        .map(|p| {
+            let ty = lower_type(&p.ty, ctx.use_map, ctx.stdlib)?;
+            let local_id = ctx.fresh_local(p.name.item.clone());
+            Ok(HirParam {
+                local_id,
+                name: p.name.item.clone(),
+                ty,
+            })
+        })
+        .collect();
+    let params = params?;
+
+    let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib)?;
+    let body = lower_block(&func.body, ctx, &ret_ty)?;
+
+    Ok(HirFunction {
+        name: func.name.item.clone(),
+        params,
+        ret_ty,
+        body,
+        is_pub: func.is_pub,
+        span: func.span,
+    })
+}
+
+fn lower_block(block: &Block, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirBlock, TypeError> {
+    ctx.push_scope();
+    let stmts: Result<Vec<HirStmt>, TypeError> = block
+        .stmts
+        .iter()
+        .map(|stmt| lower_stmt(stmt, ctx, ret_ty))
+        .collect();
+    ctx.pop_scope();
+
+    Ok(HirBlock {
+        stmts: stmts?,
+        span: block.span,
+    })
+}
+
+fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt, TypeError> {
+    match stmt {
+        Stmt::Let(let_stmt) => {
+            let expr = lower_expr(&let_stmt.expr, ctx)?;
+            let ty = expr_type(&expr);
+            let local_id = ctx.fresh_local(let_stmt.name.item.clone());
+
+            Ok(HirStmt::Let(HirLetStmt {
+                local_id,
+                name: let_stmt.name.item.clone(),
+                ty,
+                expr,
+                span: let_stmt.span,
+            }))
+        }
+        Stmt::Assign(assign) => {
+            let expr = lower_expr(&assign.expr, ctx)?;
+            let local_id = ctx
+                .get_local(&assign.name.item)
+                .ok_or_else(|| TypeError::new("unknown variable".to_string(), assign.name.span))?;
+
+            Ok(HirStmt::Assign(HirAssignStmt {
+                local_id,
+                name: assign.name.item.clone(),
+                expr,
+                span: assign.span,
+            }))
+        }
+        Stmt::Return(ret) => {
+            let expr = ret.expr.as_ref().map(|e| lower_expr(e, ctx)).transpose()?;
+            Ok(HirStmt::Return(HirReturnStmt {
+                expr,
+                span: ret.span,
+            }))
+        }
+        Stmt::If(if_stmt) => {
+            let cond = lower_expr(&if_stmt.cond, ctx)?;
+            let then_block = lower_block(&if_stmt.then_block, ctx, ret_ty)?;
+            let else_block = if_stmt
+                .else_block
+                .as_ref()
+                .map(|b| lower_block(b, ctx, ret_ty))
+                .transpose()?;
+
+            Ok(HirStmt::If(HirIfStmt {
+                cond,
+                then_block,
+                else_block,
+                span: if_stmt.span,
+            }))
+        }
+        Stmt::While(while_stmt) => {
+            let cond = lower_expr(&while_stmt.cond, ctx)?;
+            let body = lower_block(&while_stmt.body, ctx, ret_ty)?;
+
+            Ok(HirStmt::While(HirWhileStmt {
+                cond,
+                body,
+                span: while_stmt.span,
+            }))
+        }
+        Stmt::Expr(expr_stmt) => {
+            let expr = lower_expr(&expr_stmt.expr, ctx)?;
+            Ok(HirStmt::Expr(HirExprStmt {
+                expr,
+                span: expr_stmt.span,
+            }))
+        }
+    }
+}
+
+fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx) -> Result<HirExpr, TypeError> {
+    // For now, lower_expr is a placeholder that returns errors
+    // We'll implement this fully once we integrate it with type checking
+    // The key insight: we need type information to properly lower expressions,
+    // which means we should integrate this with check_expr rather than duplicate logic
+
+    match expr {
+        Expr::Literal(lit) => {
+            let ty = match &lit.value {
+                Literal::Int(_) => Ty::Builtin(BuiltinType::I32),
+                Literal::U8(_) => Ty::Builtin(BuiltinType::U8),
+                Literal::String(_) => Ty::Builtin(BuiltinType::String),
+                Literal::Bool(_) => Ty::Builtin(BuiltinType::Bool),
+                Literal::Unit => Ty::Builtin(BuiltinType::Unit),
+            };
+            Ok(HirExpr::Literal(HirLiteral {
+                value: lit.value.clone(),
+                ty,
+                span: lit.span,
+            }))
+        }
+        Expr::Grouping(grouping) => {
+            // Grouping is transparent - just lower the inner expression
+            lower_expr(&grouping.expr, ctx)
+        }
+        _ => {
+            // Return error for unimplemented expressions
+            // Full implementation will come when we integrate with type checking
+            Err(TypeError::new(
+                format!("expression type {:?} not yet supported in HIR lowering",
+                    std::mem::discriminant(expr)),
+                expr.span(),
+            ))
+        }
+    }
+}
+
+// Helper to get type from HIR expr
+fn expr_type(expr: &HirExpr) -> Ty {
+    match expr {
+        HirExpr::Literal(lit) => lit.ty.clone(),
+        HirExpr::Local(local) => local.ty.clone(),
+        HirExpr::Call(call) => call.ret_ty.clone(),
+        HirExpr::FieldAccess(fa) => fa.field_ty.clone(),
+        HirExpr::StructLiteral(sl) => sl.struct_ty.clone(),
+        HirExpr::Binary(bin) => bin.ty.clone(),
+        HirExpr::Unary(un) => un.ty.clone(),
+        HirExpr::Match(m) => m.result_ty.clone(),
+    }
 }
 
 trait SpanExt {
