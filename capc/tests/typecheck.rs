@@ -288,7 +288,7 @@ impl Pair {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let msg = err.to_string();
     assert!(
-        msg.contains("impl methods must take `self`"),
+        msg.contains("first parameter must be self: Pair"),
         "expected error about missing self, got: {msg}"
     );
 }
@@ -311,7 +311,7 @@ impl Pair {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let msg = err.to_string();
     assert!(
-        msg.contains("impl method self parameter must be"),
+        msg.contains("first parameter must be self: Pair"),
         "expected error about self type, got: {msg}"
     );
 }
@@ -329,5 +329,44 @@ fn typecheck_private_method_across_modules() {
     assert!(
         msg.contains("private"),
         "expected error about private method, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_impl_method_name_should_be_unqualified() {
+    let source = r#"
+module app
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn Pair__sum(self: Pair) -> i32 {
+    return self.left + self.right
+  }
+}
+"#;
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("method name in impl should be unqualified"),
+        "expected error about impl method name, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_impl_wrong_module() {
+    let source = load_program("impl_wrong_module.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/impl_wrong_module.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    let err = type_check_program(&module, &stdlib, &user_modules).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("impl blocks must be declared in the defining module"),
+        "expected error about impl module, got: {msg}"
     );
 }

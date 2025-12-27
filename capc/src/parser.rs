@@ -152,7 +152,7 @@ impl Parser {
                         "opaque applies only to struct declarations".to_string(),
                     ));
                 }
-                Ok(Item::Impl(self.parse_impl_block()?))
+                Ok(Item::Impl(self.parse_impl_block(doc)?))
             }
             Some(_other) => Err(self.error_current(format!(
                 "expected item, found {{other:?}}"
@@ -161,7 +161,7 @@ impl Parser {
         }
     }
 
-    fn parse_impl_block(&mut self) -> Result<ImplBlock, ParseError> {
+    fn parse_impl_block(&mut self, impl_doc: Option<String>) -> Result<ImplBlock, ParseError> {
         let start = self.expect(TokenKind::Impl)?.span.start;
         let target = self.parse_type()?;
         self.expect(TokenKind::LBrace)?;
@@ -180,6 +180,7 @@ impl Parser {
         Ok(ImplBlock {
             target,
             methods,
+            doc: impl_doc,
             span: Span::new(start, end),
         })
     }

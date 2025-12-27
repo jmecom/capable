@@ -81,6 +81,7 @@ pub struct ExternFunction {
 pub struct ImplBlock {
     pub target: Type,
     pub methods: Vec<Function>,
+    pub doc: Option<String>,
     pub span: Span,
 }
 

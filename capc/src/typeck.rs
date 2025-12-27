@@ -212,13 +212,13 @@ fn resolve_impl_target(
     let target_ty = lower_type(target, use_map, stdlib)?;
     let Ty::Path(target_name, target_args) = &target_ty else {
         return Err(TypeError::new(
-            "impl target must be a struct type".to_string(),
+            "impl target must be a struct type name".to_string(),
             span,
         ));
     };
     if !target_args.is_empty() {
         return Err(TypeError::new(
-            "impl targets with type arguments are not supported yet".to_string(),
+            "generic impl targets not supported yet".to_string(),
             span,
         ));
     }
@@ -238,7 +238,7 @@ fn resolve_impl_target(
         (info.module.clone(), target_name.clone(), target_args.clone())
     } else {
         return Err(TypeError::new(
-            "impl target must be a struct type".to_string(),
+            "impl target must be a struct type name".to_string(),
             span,
         ));
     };
@@ -259,15 +259,22 @@ fn validate_impl_method(
     stdlib: &StdlibIndex,
     span: Span,
 ) -> Result<Vec<Param>, TypeError> {
+    if method.name.item.contains("__") || method.name.item.starts_with(&format!("{type_name}__")) {
+        return Err(TypeError::new(
+            "method name in impl should be unqualified (write sum, not Pair__sum)".to_string(),
+            method.name.span,
+        ));
+    }
+
     let Some(first_param) = method.params.first() else {
         return Err(TypeError::new(
-            "impl methods must take `self` as the first parameter".to_string(),
+            format!("first parameter must be self: {type_name}"),
             span,
         ));
     };
     if first_param.name.item != "self" {
         return Err(TypeError::new(
-            "impl methods must take `self` as the first parameter".to_string(),
+            format!("first parameter must be self: {type_name}"),
             span,
         ));
     }
@@ -286,9 +293,7 @@ fn validate_impl_method(
             && lowered != expected_ptr_qualified
         {
             return Err(TypeError::new(
-                format!(
-                    "impl method self parameter must be `{type_name}` or `*{type_name}`"
-                ),
+                format!("first parameter must be self: {type_name}"),
                 span,
             ));
         }
@@ -330,6 +335,43 @@ fn desugar_impl_method(type_name: &str, method: &Function, params: Vec<Param>) -
         doc: method.doc.clone(),
         span: method.span,
     }
+}
+
+fn desugar_impl_methods(
+    impl_block: &ImplBlock,
+    module_name: &str,
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+    struct_map: &HashMap<String, StructInfo>,
+) -> Result<Vec<Function>, TypeError> {
+    let (_impl_module, type_name, _args) = resolve_impl_target(
+        &impl_block.target,
+        use_map,
+        stdlib,
+        struct_map,
+        module_name,
+        impl_block.span,
+    )?;
+    let mut method_names = std::collections::HashSet::new();
+    let mut methods = Vec::with_capacity(impl_block.methods.len());
+    for method in &impl_block.methods {
+        if !method_names.insert(method.name.item.clone()) {
+            return Err(TypeError::new(
+                format!("duplicate method `{}` in impl block", method.name.item),
+                method.name.span,
+            ));
+        }
+        let params = validate_impl_method(
+            &type_name,
+            module_name,
+            method,
+            use_map,
+            stdlib,
+            method.span,
+        )?;
+        methods.push(desugar_impl_method(&type_name, method, params));
+    }
+    Ok(methods)
 }
 
 fn build_stdlib_index(stdlib: &[Module]) -> Result<StdlibIndex, TypeError> {
@@ -433,37 +475,12 @@ fn collect_functions(
                     add_function(&func.name, &func.params, &func.ret, func.name.span, func.is_pub)?;
                 }
                 Item::Impl(impl_block) => {
-                    let (_impl_module, type_name, _args) = resolve_impl_target(
-                        &impl_block.target,
-                        &local_use,
-                        stdlib,
-                        struct_map,
-                        &module_name,
-                        impl_block.span,
-                    )?;
-                    let mut method_names = std::collections::HashSet::new();
-                    for method in &impl_block.methods {
-                        if !method_names.insert(method.name.item.clone()) {
-                            return Err(TypeError::new(
-                                format!("duplicate method `{}` in impl block", method.name.item),
-                                method.name.span,
-                            ));
-                        }
-                        let params = validate_impl_method(
-                            &type_name,
-                            &module_name,
-                            method,
-                            &local_use,
-                            stdlib,
-                            method.span,
-                        )?;
-                        let name = Spanned::new(
-                            format!("{type_name}__{}", method.name.item),
-                            method.name.span,
-                        );
+                    let methods =
+                        desugar_impl_methods(impl_block, &module_name, &local_use, stdlib, struct_map)?;
+                    for method in methods {
                         add_function(
-                            &name,
-                            &params,
+                            &method.name,
+                            &method.params,
                             &method.ret,
                             method.name.span,
                             method.is_pub,
@@ -617,26 +634,16 @@ pub fn type_check_program(
                 )?;
             }
             Item::Impl(impl_block) => {
-                let (_impl_module, type_name, _args) = resolve_impl_target(
-                    &impl_block.target,
+                let methods = desugar_impl_methods(
+                    impl_block,
+                    &module_name,
                     &use_map,
                     &stdlib_index,
                     &struct_map,
-                    &module_name,
-                    impl_block.span,
                 )?;
-                for method in &impl_block.methods {
-                    let params = validate_impl_method(
-                        &type_name,
-                        &module_name,
-                        method,
-                        &use_map,
-                        &stdlib_index,
-                        method.span,
-                    )?;
-                    let desugared = desugar_impl_method(&type_name, method, params);
+                for method in methods {
                     check_function(
-                        &desugared,
+                        &method,
                         &functions,
                         &use_map,
                         &struct_map,
@@ -2137,25 +2144,10 @@ fn lower_module(
                 hir_functions.push(hir_func);
             }
             Item::Impl(impl_block) => {
-                let (_impl_module, type_name, _args) = resolve_impl_target(
-                    &impl_block.target,
-                    use_map,
-                    stdlib,
-                    structs,
-                    &module_name,
-                    impl_block.span,
-                )?;
-                for method in &impl_block.methods {
-                    let params = validate_impl_method(
-                        &type_name,
-                        &module_name,
-                        method,
-                        use_map,
-                        stdlib,
-                        method.span,
-                    )?;
-                    let desugared = desugar_impl_method(&type_name, method, params);
-                    let hir_func = lower_function(&desugared, &mut ctx)?;
+                let methods =
+                    desugar_impl_methods(impl_block, &module_name, use_map, stdlib, structs)?;
+                for method in methods {
+                    let hir_func = lower_function(&method, &mut ctx)?;
                     hir_functions.push(hir_func);
                 }
             }

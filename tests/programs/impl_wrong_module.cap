@@ -1,0 +1,8 @@
+module impl_wrong_module
+use impl_wrong_module_helper
+
+impl impl_wrong_module_helper::Pair {
+  fn sum(self) -> i32 {
+    return self.left + self.right
+  }
+}
