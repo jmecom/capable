@@ -29,7 +29,7 @@ impl RootCap {
     return Err(io::IoErr::IoError)
   }
 
-  pub fn alloc_default(self) -> buffer::Alloc {
+  pub fn mint_alloc_default(self) -> buffer::Alloc {
     return ()
   }
 }

@@ -10,7 +10,7 @@ pub fn main(sys: RootCap) -> i32 {
       let bytes = buf.len()
       let words_vec = s.split_whitespace()
       let words = words_vec.len()
-      let alloc = sys.alloc_default()
+      let alloc = sys.mint_alloc_default()
       alloc.vec_string_free(words_vec)
       let i: i32 = 0
       let lines: i32 = 0

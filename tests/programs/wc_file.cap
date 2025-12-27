@@ -41,7 +41,7 @@ pub fn main(sys: RootCap) -> i32 {
       let rfs = sys.mint_readfs("./")
       match rfs.read_to_string(path) {
         Ok(s) => {
-          let alloc = sys.alloc_default()
+          let alloc = sys.mint_alloc_default()
           count_text(c, alloc, s)
         }
         Err(e) => {

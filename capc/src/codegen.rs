@@ -780,7 +780,7 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.system.RootCap__alloc_default".to_string(),
+        "sys.system.RootCap__mint_alloc_default".to_string(),
         FnInfo {
             sig: mem_alloc_default.clone(),
             abi_sig: None,

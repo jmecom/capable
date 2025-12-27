@@ -5,7 +5,7 @@ use sys::system
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  let alloc = sys.alloc_default()
+  let alloc = sys.mint_alloc_default()
   let p = alloc.malloc(8)
   let p32 = alloc.cast_u8_to_u32(p)
   let p2 = alloc.cast_u32_to_u8(p32)

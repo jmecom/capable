@@ -4,7 +4,7 @@ use sys::system
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  let alloc = sys.alloc_default()
+  let alloc = sys.mint_alloc_default()
   match alloc.buffer_new(1) {
     Ok(b) => {
       match b.push(7u8) {

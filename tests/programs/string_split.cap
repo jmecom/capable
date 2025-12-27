@@ -6,7 +6,7 @@ pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let parts = "a,b,c".split(44u8)
   let count = parts.len()
-  let alloc = sys.alloc_default()
+  let alloc = sys.mint_alloc_default()
   alloc.vec_string_free(parts)
   if (count == 3) {
     c.println("split ok")

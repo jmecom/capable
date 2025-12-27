@@ -4,7 +4,7 @@ use sys::system
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  let alloc = sys.alloc_default()
+  let alloc = sys.mint_alloc_default()
   let p = alloc.malloc(4)
   let slice = alloc.slice_from_ptr(p, 4)
   let len = slice.len()

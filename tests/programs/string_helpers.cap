@@ -10,7 +10,7 @@ pub fn main(sys: RootCap) -> i32 {
   let b = buf.at(0)
   let words = "a b  c".split_whitespace()
   let count = words.len()
-  let alloc = sys.alloc_default()
+  let alloc = sys.mint_alloc_default()
   alloc.vec_string_free(words)
   if (n == 3 && b == 97u8 && count == 3) {
     c.println("string ok")
