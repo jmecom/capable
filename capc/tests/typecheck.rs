@@ -269,3 +269,65 @@ fn add(a: i32, b: i32) -> i32 {
         "expected error about missing/expected return, got: {msg}"
     );
 }
+
+#[test]
+fn typecheck_impl_requires_self_param() {
+    let source = r#"
+module app
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn sum(x: Pair) -> i32 {
+    return x.left + x.right
+  }
+}
+"#;
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("impl methods must take `self`"),
+        "expected error about missing self, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_impl_self_type_mismatch() {
+    let source = r#"
+module app
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn sum(self: i32) -> i32 {
+    return self
+  }
+}
+"#;
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("impl method self parameter must be"),
+        "expected error about self type, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_private_method_across_modules() {
+    let source = load_program("method_private_use.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/method_private_use.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    let err = type_check_program(&module, &stdlib, &user_modules).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("private"),
+        "expected error about private method, got: {msg}"
+    );
+}

@@ -124,28 +124,30 @@ Module {
                                 end: 76,
                             },
                         },
-                        ty: Path {
-                            path: Path {
-                                segments: [
-                                    Spanned {
-                                        item: "System",
-                                        span: Span {
-                                            start: 78,
-                                            end: 84,
+                        ty: Some(
+                            Path {
+                                path: Path {
+                                    segments: [
+                                        Spanned {
+                                            item: "System",
+                                            span: Span {
+                                                start: 78,
+                                                end: 84,
+                                            },
                                         },
+                                    ],
+                                    span: Span {
+                                        start: 78,
+                                        end: 84,
                                     },
-                                ],
+                                },
+                                args: [],
                                 span: Span {
                                     start: 78,
                                     end: 84,
                                 },
                             },
-                            args: [],
-                            span: Span {
-                                start: 78,
-                                end: 84,
-                            },
-                        },
+                        ),
                     },
                 ],
                 ret: Path {

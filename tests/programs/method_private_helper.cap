@@ -1,9 +1,9 @@
-module method_helper
+module method_private_helper
 
 pub struct Pair { left: i32, right: i32 }
 
 impl Pair {
-  pub fn sum(self: Pair) -> i32 {
+  fn sum(self) -> i32 {
     return self.left + self.right
   }
 }

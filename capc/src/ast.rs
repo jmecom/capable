@@ -87,7 +87,7 @@ pub struct ImplBlock {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Param {
     pub name: Ident,
-    pub ty: Type,
+    pub ty: Option<Type>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -5,11 +5,11 @@ use sys::console
 struct Pair { left: i32, right: i32 }
 
 impl Pair {
-  fn sum(self: Pair) -> i32 {
+  fn sum(self) -> i32 {
     return self.left + self.right
   }
 
-  fn add(self: Pair, value: i32) -> i32 {
+  fn add(self, value: i32) -> i32 {
     return self.left + value
   }
 }

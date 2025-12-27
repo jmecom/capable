@@ -197,7 +197,7 @@ impl Parser {
                 let ty = self.parse_type()?;
                 params.push(Param {
                     name: param_name,
-                    ty,
+                    ty: Some(ty),
                 });
                 if self.maybe_consume(TokenKind::Comma).is_some() {
                     continue;
@@ -229,8 +229,15 @@ impl Parser {
         if self.peek_kind() != Some(TokenKind::RParen) {
             loop {
                 let param_name = self.expect_ident()?;
-                self.expect(TokenKind::Colon)?;
-                let ty = self.parse_type()?;
+                let ty = if self.maybe_consume(TokenKind::Colon).is_some() {
+                    Some(self.parse_type()?)
+                } else if param_name.item == "self" {
+                    None
+                } else {
+                    return Err(self.error_current(
+                        "expected ':' after parameter name".to_string(),
+                    ));
+                };
                 params.push(Param {
                     name: param_name,
                     ty,

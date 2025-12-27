@@ -4,12 +4,14 @@ use sys::console
 
 struct Pair { left: i32, right: i32 }
 
-fn Pair__sum(self: Pair) -> i32 {
-  return self.left + self.right
-}
+impl Pair {
+  fn sum(self: Pair) -> i32 {
+    return self.left + self.right
+  }
 
-fn Pair__add(self: Pair, value: i32) -> i32 {
-  return self.left + value
+  fn add(self: Pair, value: i32) -> i32 {
+    return self.left + value
+  }
 }
 
 pub fn main(sys: System) -> i32 {

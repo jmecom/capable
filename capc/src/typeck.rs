@@ -201,34 +201,129 @@ fn resolve_method_target(
     ))
 }
 
-fn resolve_impl_type_name(
+fn resolve_impl_target(
     target: &Type,
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
     module_name: &str,
     span: Span,
-) -> Result<String, TypeError> {
+) -> Result<(String, String, Vec<Ty>), TypeError> {
     let target_ty = lower_type(target, use_map, stdlib)?;
-    let (impl_module, type_name, _) =
-        resolve_method_target(&target_ty, module_name, struct_map, span)?;
+    let Ty::Path(target_name, target_args) = &target_ty else {
+        return Err(TypeError::new(
+            "impl target must be a struct type".to_string(),
+            span,
+        ));
+    };
+    if !target_args.is_empty() {
+        return Err(TypeError::new(
+            "impl targets with type arguments are not supported yet".to_string(),
+            span,
+        ));
+    }
+    let (impl_module, type_name, args) = if let Some(info) = struct_map.get(target_name) {
+        let type_name = target_name
+            .rsplit_once('.')
+            .map(|(_, t)| t)
+            .unwrap_or(target_name)
+            .to_string();
+        (info.module.clone(), type_name, target_args.clone())
+    } else if target_name.contains('.') {
+        let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
+            TypeError::new("invalid type path".to_string(), span)
+        })?;
+        (mod_part.to_string(), type_part.to_string(), target_args.clone())
+    } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
+        (info.module.clone(), target_name.clone(), target_args.clone())
+    } else {
+        return Err(TypeError::new(
+            "impl target must be a struct type".to_string(),
+            span,
+        ));
+    };
     if impl_module != module_name {
         return Err(TypeError::new(
             "impl blocks must be declared in the defining module".to_string(),
             span,
         ));
     }
-    Ok(type_name)
+    Ok((impl_module, type_name, args))
 }
 
-fn desugar_impl_method(type_name: &str, method: &Function) -> Function {
+fn validate_impl_method(
+    type_name: &str,
+    module_name: &str,
+    method: &Function,
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+    span: Span,
+) -> Result<Vec<Param>, TypeError> {
+    let Some(first_param) = method.params.first() else {
+        return Err(TypeError::new(
+            "impl methods must take `self` as the first parameter".to_string(),
+            span,
+        ));
+    };
+    if first_param.name.item != "self" {
+        return Err(TypeError::new(
+            "impl methods must take `self` as the first parameter".to_string(),
+            span,
+        ));
+    }
+
+    let mut params = method.params.clone();
+    let expected_unqualified = Ty::Path(type_name.to_string(), Vec::new());
+    let expected_qualified = Ty::Path(format!("{module_name}.{type_name}"), Vec::new());
+    let expected_ptr_unqualified = Ty::Ptr(Box::new(expected_unqualified.clone()));
+    let expected_ptr_qualified = Ty::Ptr(Box::new(expected_qualified.clone()));
+
+    if let Some(ty) = &first_param.ty {
+        let lowered = lower_type(ty, use_map, stdlib)?;
+        if lowered != expected_unqualified
+            && lowered != expected_qualified
+            && lowered != expected_ptr_unqualified
+            && lowered != expected_ptr_qualified
+        {
+            return Err(TypeError::new(
+                format!(
+                    "impl method self parameter must be `{type_name}` or `*{type_name}`"
+                ),
+                span,
+            ));
+        }
+    } else {
+        let path = Path {
+            segments: vec![Spanned::new(type_name.to_string(), span)],
+            span,
+        };
+        params[0].ty = Some(Type::Path {
+            path,
+            args: Vec::new(),
+            span,
+        });
+    }
+
+    for param in params.iter().skip(1) {
+        if param.ty.is_none() {
+            return Err(TypeError::new(
+                format!("parameter `{}` requires a type annotation", param.name.item),
+                param.name.span,
+            ));
+        }
+    }
+
+    Ok(params)
+}
+
+fn desugar_impl_method(type_name: &str, method: &Function, params: Vec<Param>) -> Function {
     let name = Spanned::new(
         format!("{type_name}__{}", method.name.item),
         method.name.span,
     );
     Function {
         name,
-        params: method.params.clone(),
+        params,
         ret: method.ret.clone(),
         body: method.body.clone(),
         is_pub: method.is_pub,
@@ -276,10 +371,24 @@ fn collect_functions(
                                     span: Span,
                                     is_pub: bool|
              -> Result<(), TypeError> {
+                for param in params {
+                    if param.ty.is_none() {
+                        return Err(TypeError::new(
+                            format!("parameter `{}` requires a type annotation", param.name.item),
+                            param.name.span,
+                        ));
+                    }
+                }
                 let sig = FunctionSig {
                     params: params
                         .iter()
-                        .map(|p| lower_type(&p.ty, &local_use, stdlib))
+                        .map(|p| {
+                            lower_type(
+                                p.ty.as_ref().expect("param type checked"),
+                                &local_use,
+                                stdlib,
+                            )
+                        })
                         .collect::<Result<_, _>>()?,
                     ret: lower_type(ret, &local_use, stdlib)?,
                     module: module_name.clone(),
@@ -306,13 +415,25 @@ fn collect_functions(
 
             match item {
                 Item::Function(func) => {
+                    if func.name.item.contains("__") {
+                        return Err(TypeError::new(
+                            "function names may not contain `__`".to_string(),
+                            func.name.span,
+                        ));
+                    }
                     add_function(&func.name, &func.params, &func.ret, func.name.span, func.is_pub)?;
                 }
                 Item::ExternFunction(func) => {
+                    if func.name.item.contains("__") {
+                        return Err(TypeError::new(
+                            "function names may not contain `__`".to_string(),
+                            func.name.span,
+                        ));
+                    }
                     add_function(&func.name, &func.params, &func.ret, func.name.span, func.is_pub)?;
                 }
                 Item::Impl(impl_block) => {
-                    let type_name = resolve_impl_type_name(
+                    let (_impl_module, type_name, _args) = resolve_impl_target(
                         &impl_block.target,
                         &local_use,
                         stdlib,
@@ -320,14 +441,29 @@ fn collect_functions(
                         &module_name,
                         impl_block.span,
                     )?;
+                    let mut method_names = std::collections::HashSet::new();
                     for method in &impl_block.methods {
+                        if !method_names.insert(method.name.item.clone()) {
+                            return Err(TypeError::new(
+                                format!("duplicate method `{}` in impl block", method.name.item),
+                                method.name.span,
+                            ));
+                        }
+                        let params = validate_impl_method(
+                            &type_name,
+                            &module_name,
+                            method,
+                            &local_use,
+                            stdlib,
+                            method.span,
+                        )?;
                         let name = Spanned::new(
                             format!("{type_name}__{}", method.name.item),
                             method.name.span,
                         );
                         add_function(
                             &name,
-                            &method.params,
+                            &params,
                             &method.ret,
                             method.name.span,
                             method.is_pub,
@@ -481,7 +617,7 @@ pub fn type_check_program(
                 )?;
             }
             Item::Impl(impl_block) => {
-                let type_name = resolve_impl_type_name(
+                let (_impl_module, type_name, _args) = resolve_impl_target(
                     &impl_block.target,
                     &use_map,
                     &stdlib_index,
@@ -490,7 +626,15 @@ pub fn type_check_program(
                     impl_block.span,
                 )?;
                 for method in &impl_block.methods {
-                    let desugared = desugar_impl_method(&type_name, method);
+                    let params = validate_impl_method(
+                        &type_name,
+                        &module_name,
+                        method,
+                        &use_map,
+                        &stdlib_index,
+                        method.span,
+                    )?;
+                    let desugared = desugar_impl_method(&type_name, method, params);
                     check_function(
                         &desugared,
                         &functions,
@@ -609,8 +753,10 @@ fn type_contains_ptr(ty: &Type) -> Option<Span> {
 
 fn type_contains_ptr_fn(func: &Function) -> Option<Span> {
     for param in &func.params {
-        if let Some(span) = type_contains_ptr(&param.ty) {
-            return Some(span);
+        if let Some(ty) = &param.ty {
+            if let Some(span) = type_contains_ptr(ty) {
+                return Some(span);
+            }
         }
     }
     if let Some(span) = type_contains_ptr(&func.ret) {
@@ -726,7 +872,13 @@ fn check_function(
 ) -> Result<(), TypeError> {
     let mut params_map = HashMap::new();
     for param in &func.params {
-        let ty = lower_type(&param.ty, use_map, stdlib)?;
+        let Some(ty) = &param.ty else {
+            return Err(TypeError::new(
+                format!("parameter `{}` requires a type annotation", param.name.item),
+                param.name.span,
+            ));
+        };
+        let ty = lower_type(ty, use_map, stdlib)?;
         params_map.insert(param.name.item.clone(), ty);
     }
     let mut scopes = Scopes::from_flat_map(params_map);
@@ -1985,7 +2137,7 @@ fn lower_module(
                 hir_functions.push(hir_func);
             }
             Item::Impl(impl_block) => {
-                let type_name = resolve_impl_type_name(
+                let (_impl_module, type_name, _args) = resolve_impl_target(
                     &impl_block.target,
                     use_map,
                     stdlib,
@@ -1994,7 +2146,15 @@ fn lower_module(
                     impl_block.span,
                 )?;
                 for method in &impl_block.methods {
-                    let desugared = desugar_impl_method(&type_name, method);
+                    let params = validate_impl_method(
+                        &type_name,
+                        &module_name,
+                        method,
+                        use_map,
+                        stdlib,
+                        method.span,
+                    )?;
+                    let desugared = desugar_impl_method(&type_name, method, params);
                     let hir_func = lower_function(&desugared, &mut ctx)?;
                     hir_functions.push(hir_func);
                 }
@@ -2072,7 +2232,13 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         .params
         .iter()
         .map(|p| {
-            let ty = lower_type(&p.ty, ctx.use_map, ctx.stdlib)?;
+            let Some(ty) = &p.ty else {
+                return Err(TypeError::new(
+                    format!("parameter `{}` requires a type annotation", p.name.item),
+                    p.name.span,
+                ));
+            };
+            let ty = lower_type(ty, ctx.use_map, ctx.stdlib)?;
             let local_id = ctx.fresh_local(p.name.item.clone(), ty.clone());
             Ok(HirParam {
                 local_id,

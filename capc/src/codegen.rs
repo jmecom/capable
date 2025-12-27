@@ -1368,7 +1368,15 @@ fn register_extern_functions(
                 params: func
                     .params
                     .iter()
-                    .map(|p| lower_ty(&p.ty, &use_map, stdlib, enum_index))
+                    .map(|p| {
+                        let ty = p.ty.as_ref().ok_or_else(|| {
+                            CodegenError::Codegen(format!(
+                                "extern parameter `{}` requires a type annotation",
+                                p.name.item
+                            ))
+                        })?;
+                        lower_ty(ty, &use_map, stdlib, enum_index)
+                    })
                     .collect::<Result<Vec<TyKind>, CodegenError>>()?,
                 ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
             };

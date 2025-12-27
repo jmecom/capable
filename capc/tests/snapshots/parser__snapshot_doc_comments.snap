@@ -144,28 +144,30 @@ Module {
                                 end: 242,
                             },
                         },
-                        ty: Path {
-                            path: Path {
-                                segments: [
-                                    Spanned {
-                                        item: "i32",
-                                        span: Span {
-                                            start: 244,
-                                            end: 247,
+                        ty: Some(
+                            Path {
+                                path: Path {
+                                    segments: [
+                                        Spanned {
+                                            item: "i32",
+                                            span: Span {
+                                                start: 244,
+                                                end: 247,
+                                            },
                                         },
+                                    ],
+                                    span: Span {
+                                        start: 244,
+                                        end: 247,
                                     },
-                                ],
+                                },
+                                args: [],
                                 span: Span {
                                     start: 244,
                                     end: 247,
                                 },
                             },
-                            args: [],
-                            span: Span {
-                                start: 244,
-                                end: 247,
-                            },
-                        },
+                        ),
                     },
                 ],
                 ret: Path {
