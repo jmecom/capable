@@ -336,6 +336,7 @@ pub struct MatchExpr {
     pub expr: Box<Expr>,
     pub arms: Vec<MatchArm>,
     pub span: Span,
+    pub match_span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

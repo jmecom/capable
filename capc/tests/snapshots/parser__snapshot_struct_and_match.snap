@@ -525,6 +525,10 @@ Module {
                                             start: 136,
                                             end: 270,
                                         },
+                                        match_span: Span {
+                                            start: 136,
+                                            end: 141,
+                                        },
                                     },
                                 ),
                                 span: Span {

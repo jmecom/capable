@@ -1610,7 +1610,7 @@ fn check_match_stmt(
         use_map,
         enum_map,
         module_name,
-        match_expr.span,
+        match_expr.match_span,
     )?;
     merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(Ty::Builtin(BuiltinType::Unit))
@@ -1677,7 +1677,7 @@ fn check_match_expr_value(
         use_map,
         enum_map,
         module_name,
-        match_expr.span,
+        match_expr.match_span,
     )?;
     merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))

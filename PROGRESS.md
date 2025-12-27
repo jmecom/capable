@@ -42,4 +42,5 @@ This file summarizes major milestones added recently.
 
 ## Explicitness Policy (Phase 2)
 - Match exhaustiveness enforced with missing-variant diagnostics.
+- Exhaustiveness errors now point at the `match` keyword span.
 - Variable shadowing now rejected by the typechecker.
