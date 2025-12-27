@@ -1,0 +1,17 @@
+package safe
+module string_bytes_alias
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let s = "hello, bytes"
+  let a = s.as_slice()
+  let b = s.bytes()
+  c.assert(a.len() == b.len())
+  c.assert(a.at(0) == b.at(0))
+  c.assert(a.at(1) == b.at(1))
+  c.assert(a.at(5) == b.at(5))
+  c.assert(a.at(6) == b.at(6))
+  c.println("bytes alias ok")
+  return 0
+}

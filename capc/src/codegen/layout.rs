@@ -7,9 +7,9 @@ use std::collections::{HashMap, HashSet};
 use cranelift_codegen::ir::Type;
 
 use super::{
-    CodegenError, EnumIndex, StructFieldLayout, StructLayout, StructLayoutIndex, TypeLayout, TyKind,
+    CodegenError, EnumIndex, StructFieldLayout, StructLayout, StructLayoutIndex, TypeLayout,
 };
-use super::typeck_ty_to_tykind;
+use crate::abi::AbiType;
 
 /// Build an enum discriminant table for codegen.
 pub(super) fn build_enum_index(
@@ -122,8 +122,14 @@ fn compute_struct_layout(
     let mut offset = 0u32;
     let mut align = 1u32;
     for field in &st.fields {
-        let layout =
-            type_layout_for_ty(&field.ty, module_name, defs, layouts, visiting, ptr_ty)?;
+        let layout = type_layout_for_hir_type(
+            &field.ty,
+            module_name,
+            defs,
+            layouts,
+            visiting,
+            ptr_ty,
+        )?;
         offset = align_to(offset, layout.align);
         fields.insert(
             field.name.clone(),
@@ -152,8 +158,8 @@ fn compute_struct_layout(
 }
 
 /// Compute a layout for a typeck::Ty.
-fn type_layout_for_ty(
-    ty: &crate::typeck::Ty,
+fn type_layout_for_hir_type(
+    ty: &crate::hir::HirType,
     module_name: &str,
     defs: &HashMap<String, (&str, &crate::hir::HirStruct)>,
     layouts: &mut HashMap<String, StructLayout>,
@@ -162,18 +168,23 @@ fn type_layout_for_ty(
 ) -> Result<TypeLayout, CodegenError> {
     use crate::typeck::Ty;
 
-    if let Some(layout) = resolve_struct_layout(ty, module_name, layouts) {
+    if let Some(layout) = resolve_struct_layout(&ty.ty, module_name, layouts) {
         return Ok(TypeLayout {
             size: layout.size,
             align: layout.align,
         });
     }
 
-    match ty {
+    match &ty.ty {
         Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+            let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
+                return Err(CodegenError::Unsupported(
+                    "result abi mismatch in layout".to_string(),
+                ));
+            };
             let tag = TypeLayout { size: 1, align: 1 };
-            let ok = type_layout_for_ty(&args[0], module_name, defs, layouts, visiting, ptr_ty)?;
-            let err = type_layout_for_ty(&args[1], module_name, defs, layouts, visiting, ptr_ty)?;
+            let ok = type_layout_for_abi(ok_abi, ptr_ty)?;
+            let err = type_layout_for_abi(err_abi, ptr_ty)?;
             let mut offset = 0u32;
             let mut align = tag.align;
             offset = align_to(offset, tag.align);
@@ -207,28 +218,29 @@ fn type_layout_for_ty(
                     });
                 }
             }
-            let ty_kind = typeck_ty_to_tykind(ty, None)?;
-            type_layout_for_tykind(&ty_kind, ptr_ty)
+            type_layout_for_abi(&ty.abi, ptr_ty)
         }
         _ => {
-            let ty_kind = typeck_ty_to_tykind(ty, None)?;
-            type_layout_for_tykind(&ty_kind, ptr_ty)
+            type_layout_for_abi(&ty.abi, ptr_ty)
         }
     }
 }
 
-/// Compute a layout for a codegen TyKind.
-pub(super) fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLayout, CodegenError> {
+/// Compute a layout for an ABI type.
+pub(super) fn type_layout_for_abi(
+    ty: &AbiType,
+    ptr_ty: Type,
+) -> Result<TypeLayout, CodegenError> {
     match ty {
-        TyKind::Unit => Ok(TypeLayout { size: 0, align: 1 }),
-        TyKind::I32 | TyKind::U32 => Ok(TypeLayout { size: 4, align: 4 }),
-        TyKind::U8 | TyKind::Bool => Ok(TypeLayout { size: 1, align: 1 }),
-        TyKind::Handle => Ok(TypeLayout { size: 8, align: 8 }),
-        TyKind::Ptr => Ok(TypeLayout {
+        AbiType::Unit => Ok(TypeLayout { size: 0, align: 1 }),
+        AbiType::I32 | AbiType::U32 => Ok(TypeLayout { size: 4, align: 4 }),
+        AbiType::U8 | AbiType::Bool => Ok(TypeLayout { size: 1, align: 1 }),
+        AbiType::Handle => Ok(TypeLayout { size: 8, align: 8 }),
+        AbiType::Ptr => Ok(TypeLayout {
             size: ptr_ty.bytes() as u32,
             align: ptr_ty.bytes() as u32,
         }),
-        TyKind::String => {
+        AbiType::String => {
             let ptr_size = ptr_ty.bytes() as u32;
             let len_offset = align_to(ptr_size, 8);
             Ok(TypeLayout {
@@ -236,10 +248,10 @@ pub(super) fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLa
                 align: ptr_ty.bytes().max(8) as u32,
             })
         }
-        TyKind::Result(ok, err) => {
+        AbiType::Result(ok, err) => {
             let tag = TypeLayout { size: 1, align: 1 };
-            let ok = type_layout_for_tykind(ok, ptr_ty)?;
-            let err = type_layout_for_tykind(err, ptr_ty)?;
+            let ok = type_layout_for_abi(ok, ptr_ty)?;
+            let err = type_layout_for_abi(err, ptr_ty)?;
             let mut offset = 0u32;
             let mut align = tag.align;
             offset = align_to(offset, tag.align);
@@ -252,7 +264,7 @@ pub(super) fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLa
             let size = align_to(offset, align);
             Ok(TypeLayout { size, align })
         }
-        TyKind::ResultOut(_, _) | TyKind::ResultString => Err(CodegenError::Unsupported(
+        AbiType::ResultOut(_, _) | AbiType::ResultString => Err(CodegenError::Unsupported(
             "layout for result out params".to_string(),
         )),
     }

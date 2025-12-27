@@ -1229,6 +1229,7 @@ fn write_result(
     }
 }
 
+/// Write a Result[String, i32] payload using the ResultString ABI (u64 length).
 fn write_string_result(
     out_ptr: *mut *const u8,
     out_len: *mut u64,
