@@ -1016,6 +1016,10 @@
     "extra": true
   },
   {
+    "type": "copy",
+    "named": false
+  },
+  {
     "type": "else",
     "named": false
   },
@@ -1053,6 +1057,10 @@
   },
   {
     "type": "let",
+    "named": false
+  },
+  {
+    "type": "linear",
     "named": false
   },
   {

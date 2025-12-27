@@ -58,6 +58,8 @@ pub struct HirStruct {
     pub fields: Vec<HirField>,
     pub is_pub: bool,
     pub is_opaque: bool,
+    pub is_linear: bool,
+    pub is_copy: bool,
     pub span: Span,
 }
 
@@ -227,7 +229,7 @@ pub enum ResolvedCallee {
 /// Runtime intrinsic functions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntrinsicId {
-    // Add runtime intrinsics as needed
+    Drop,
 }
 
 #[derive(Debug, Clone)]

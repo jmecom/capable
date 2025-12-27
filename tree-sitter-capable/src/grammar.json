@@ -254,28 +254,28 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "pub"
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "opaque"
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "pub"
+              },
+              {
+                "type": "STRING",
+                "value": "linear"
+              },
+              {
+                "type": "STRING",
+                "value": "copy"
+              },
+              {
+                "type": "STRING",
+                "value": "opaque"
+              }
+            ]
+          }
         },
         {
           "type": "STRING",

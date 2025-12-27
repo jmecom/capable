@@ -1,0 +1,15 @@
+package safe
+module should_pass_linear_return
+
+linear opaque struct Token
+
+pub fn make() -> Token {
+  let t = Token{}
+  return t
+}
+
+pub fn main() -> i32 {
+  let t = make()
+  drop(t)
+  return 0
+}

@@ -33,6 +33,7 @@ struct FunctionSig {
 struct StructInfo {
     fields: HashMap<String, Ty>,
     is_opaque: bool,
+    kind: TypeKind,
     module: String,
 }
 
@@ -46,6 +47,13 @@ struct EnumInfo {
 enum MoveState {
     Available,
     Moved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeKind {
+    Unrestricted,
+    Affine,
+    Linear,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -598,9 +606,19 @@ fn collect_structs(
                         decl.name.span,
                     ));
                 }
+                let declared_kind = if decl.is_linear {
+                    TypeKind::Linear
+                } else if decl.is_copy {
+                    TypeKind::Unrestricted
+                } else if decl.is_opaque {
+                    TypeKind::Affine
+                } else {
+                    TypeKind::Unrestricted
+                };
                 let info = StructInfo {
                     fields,
                     is_opaque: decl.is_opaque,
+                    kind: declared_kind,
                     module: module_name.clone(),
                 };
                 structs.insert(qualified, info.clone());
@@ -688,6 +706,34 @@ fn collect_enums(
     Ok(enums)
 }
 
+fn validate_copy_structs(
+    modules: &[&Module],
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    stdlib: &StdlibIndex,
+) -> Result<(), TypeError> {
+    for module in modules {
+        let local_use = UseMap::new(module);
+        for item in &module.items {
+            if let Item::Struct(decl) = item {
+                if !decl.is_copy {
+                    continue;
+                }
+                for field in &decl.fields {
+                    let ty = lower_type(&field.ty, &local_use, stdlib)?;
+                    if type_kind(&ty, struct_map, enum_map) != TypeKind::Unrestricted {
+                        return Err(TypeError::new(
+                            "copy struct cannot contain move-only fields".to_string(),
+                            field.ty.span(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 use crate::hir::HirModule;
 
 pub fn type_check(module: &Module) -> Result<crate::hir::HirProgram, TypeError> {
@@ -713,6 +759,7 @@ pub fn type_check_program(
     }
     let struct_map = collect_structs(&modules, &module_name, &stdlib_index)?;
     let enum_map = collect_enums(&modules, &module_name, &stdlib_index)?;
+    validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)?;
     let functions = collect_functions(&modules, &module_name, &stdlib_index, &struct_map)?;
 
     for item in &module.items {
@@ -1018,6 +1065,8 @@ fn check_function(
         }
     }
 
+    ensure_linear_all_consumed(&scopes, struct_map, enum_map, func.body.span)?;
+
     Ok(())
 }
 
@@ -1113,6 +1162,7 @@ fn check_stmt(
                     ret_stmt.span,
                 ));
             }
+            ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
         }
         Stmt::If(if_stmt) => {
             let cond_ty = check_expr(
@@ -1266,6 +1316,7 @@ fn check_block(
             module_name,
         )?;
     }
+    ensure_linear_scope_consumed(scopes, struct_map, enum_map, block.span)?;
     scopes.pop_scope();
     Ok(())
 }
@@ -1290,14 +1341,26 @@ fn merge_branch_states(
             let right_info = right_scope.get(name).ok_or_else(|| {
                 TypeError::new(format!("unknown identifier `{name}`"), span)
             })?;
-            if is_affine_type(&info.ty, struct_map, enum_map) {
-                info.state = if left_info.state == MoveState::Moved
-                    || right_info.state == MoveState::Moved
-                {
-                    MoveState::Moved
-                } else {
-                    MoveState::Available
-                };
+            match type_kind(&info.ty, struct_map, enum_map) {
+                TypeKind::Affine => {
+                    info.state = if left_info.state == MoveState::Moved
+                        || right_info.state == MoveState::Moved
+                    {
+                        MoveState::Moved
+                    } else {
+                        MoveState::Available
+                    };
+                }
+                TypeKind::Linear => {
+                    if left_info.state != right_info.state {
+                        return Err(TypeError::new(
+                            format!("linear value `{name}` must be consumed on all paths"),
+                            span,
+                        ));
+                    }
+                    info.state = left_info.state;
+                }
+                TypeKind::Unrestricted => {}
             }
         }
     }
@@ -1316,11 +1379,53 @@ fn ensure_affine_states_match(
             let other_info = other_scope.get(name).ok_or_else(|| {
                 TypeError::new(format!("unknown identifier `{name}`"), span)
             })?;
-            if is_affine_type(&info.ty, struct_map, enum_map)
+            if type_kind(&info.ty, struct_map, enum_map) != TypeKind::Unrestricted
                 && info.state != other_info.state
             {
                 return Err(TypeError::new(
-                    format!("affine value `{name}` moved inside loop"),
+                    format!("move-only value `{name}` moved inside loop"),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_linear_scope_consumed(
+    scopes: &Scopes,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    if let Some(scope) = scopes.stack.last() {
+        for (name, info) in scope {
+            if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
+                && info.state != MoveState::Moved
+            {
+                return Err(TypeError::new(
+                    format!("linear value `{name}` not consumed"),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_linear_all_consumed(
+    scopes: &Scopes,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    for scope in &scopes.stack {
+        for (name, info) in scope {
+            if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
+                && info.state != MoveState::Moved
+            {
+                return Err(TypeError::new(
+                    format!("linear value `{name}` not consumed"),
                     span,
                 ));
             }
@@ -1345,24 +1450,45 @@ fn merge_match_states(
             let first_info = first_scope.get(name).ok_or_else(|| {
                 TypeError::new(format!("unknown identifier `{name}`"), span)
             })?;
-            if is_affine_type(&info.ty, struct_map, enum_map) {
-                let mut moved = first_info.state == MoveState::Moved;
-                for arm in rest {
-                    let arm_scope = arm.stack.get(depth).ok_or_else(|| {
-                        TypeError::new(format!("unknown identifier `{name}`"), span)
-                    })?;
-                    let arm_info = arm_scope.get(name).ok_or_else(|| {
-                        TypeError::new(format!("unknown identifier `{name}`"), span)
-                    })?;
-                    if arm_info.state == MoveState::Moved {
-                        moved = true;
+            match type_kind(&info.ty, struct_map, enum_map) {
+                TypeKind::Affine => {
+                    let mut moved = first_info.state == MoveState::Moved;
+                    for arm in rest {
+                        let arm_scope = arm.stack.get(depth).ok_or_else(|| {
+                            TypeError::new(format!("unknown identifier `{name}`"), span)
+                        })?;
+                        let arm_info = arm_scope.get(name).ok_or_else(|| {
+                            TypeError::new(format!("unknown identifier `{name}`"), span)
+                        })?;
+                        if arm_info.state == MoveState::Moved {
+                            moved = true;
+                        }
                     }
+                    info.state = if moved {
+                        MoveState::Moved
+                    } else {
+                        MoveState::Available
+                    };
                 }
-                info.state = if moved {
-                    MoveState::Moved
-                } else {
-                    MoveState::Available
-                };
+                TypeKind::Linear => {
+                    let state = first_info.state;
+                    for arm in rest {
+                        let arm_scope = arm.stack.get(depth).ok_or_else(|| {
+                            TypeError::new(format!("unknown identifier `{name}`"), span)
+                        })?;
+                        let arm_info = arm_scope.get(name).ok_or_else(|| {
+                            TypeError::new(format!("unknown identifier `{name}`"), span)
+                        })?;
+                        if arm_info.state != state {
+                            return Err(TypeError::new(
+                                format!("linear value `{name}` must be consumed on all paths"),
+                                span,
+                            ));
+                        }
+                    }
+                    info.state = state;
+                }
+                TypeKind::Unrestricted => {}
             }
         }
     }
@@ -1426,6 +1552,27 @@ fn check_expr(
             // Special handling for Ok(...) and Err(...) Result constructors
             if path.segments.len() == 1 {
                 let name = &path.segments[0].item;
+                if name == "drop" {
+                    if call.args.len() != 1 {
+                        return Err(TypeError::new(
+                            "drop expects exactly one argument".to_string(),
+                            call.span,
+                        ));
+                    }
+                    let _ = check_expr(
+                        &call.args[0],
+                        functions,
+                        scopes,
+                        UseMode::Move,
+                        use_map,
+                        struct_map,
+                        enum_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                    )?;
+                    return Ok(Ty::Builtin(BuiltinType::Unit));
+                }
                 if name == "Ok" || name == "Err" {
                     // Check that we have exactly one argument
                     if call.args.len() != 1 {
@@ -1924,7 +2071,7 @@ fn check_expr(
                 match use_mode {
                     UseMode::Read => {
                         return Err(TypeError::new(
-                            "cannot read affine field; moving it consumes the whole struct"
+                            "cannot read move-only field; moving it consumes the whole struct"
                                 .to_string(),
                             field_access.span,
                         ));
@@ -2342,63 +2489,69 @@ fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {
     }
 }
 
-// Add fully-qualified type names here when stdlib APIs are linear-ready.
-const AFFINE_ROOTS: [&str; 0] = [];
-
 fn is_affine_type(
     ty: &Ty,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
 ) -> bool {
-    let mut visiting = HashSet::new();
-    is_affine_type_inner(ty, struct_map, enum_map, &mut visiting)
+    type_kind(ty, struct_map, enum_map) != TypeKind::Unrestricted
 }
 
-fn is_affine_type_inner(
+fn type_kind(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+) -> TypeKind {
+    let mut visiting = HashSet::new();
+    type_kind_inner(ty, struct_map, enum_map, &mut visiting)
+}
+
+fn combine_kind(left: TypeKind, right: TypeKind) -> TypeKind {
+    match (left, right) {
+        (TypeKind::Linear, _) | (_, TypeKind::Linear) => TypeKind::Linear,
+        (TypeKind::Affine, _) | (_, TypeKind::Affine) => TypeKind::Affine,
+        _ => TypeKind::Unrestricted,
+    }
+}
+
+fn type_kind_inner(
     ty: &Ty,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
     visiting: &mut HashSet<String>,
-) -> bool {
+) -> TypeKind {
     match ty {
-        Ty::Builtin(_) | Ty::Ptr(_) => false,
+        Ty::Builtin(_) | Ty::Ptr(_) => TypeKind::Unrestricted,
         Ty::Path(name, args) => {
             if name == "Result" {
-                return args
-                    .iter()
-                    .any(|arg| is_affine_type_inner(arg, struct_map, enum_map, visiting));
-            }
-            if AFFINE_ROOTS.contains(&name.as_str()) {
-                return true;
+                return args.iter().fold(TypeKind::Unrestricted, |acc, arg| {
+                    combine_kind(acc, type_kind_inner(arg, struct_map, enum_map, visiting))
+                });
             }
             if visiting.contains(name) {
-                return false;
+                return TypeKind::Unrestricted;
             }
             if let Some(info) = struct_map.get(name) {
-                if info.is_opaque && !info.module.starts_with("sys.") {
-                    return true;
-                }
                 visiting.insert(name.clone());
-                let affine = info
-                    .fields
-                    .values()
-                    .any(|field_ty| is_affine_type_inner(field_ty, struct_map, enum_map, visiting));
+                let fields_kind = info.fields.values().fold(TypeKind::Unrestricted, |acc, field| {
+                    combine_kind(acc, type_kind_inner(field, struct_map, enum_map, visiting))
+                });
                 visiting.remove(name);
-                return affine;
+                return combine_kind(info.kind, fields_kind);
             }
             if let Some(info) = enum_map.get(name) {
                 visiting.insert(name.clone());
-                let affine = info.payloads.values().any(|payload| {
+                let payload_kind = info.payloads.values().fold(TypeKind::Unrestricted, |acc, payload| {
                     if let Some(payload_ty) = payload {
-                        is_affine_type_inner(payload_ty, struct_map, enum_map, visiting)
+                        combine_kind(acc, type_kind_inner(payload_ty, struct_map, enum_map, visiting))
                     } else {
-                        false
+                        acc
                     }
                 });
                 visiting.remove(name);
-                return affine;
+                return payload_kind;
             }
-            false
+            TypeKind::Unrestricted
         }
     }
 }
@@ -2411,7 +2564,8 @@ use crate::hir::{
     HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirField,
     HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
     HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
-    HirStructLiteralField, HirUnary, HirWhileStmt, HirAssignStmt, LocalId, ResolvedCallee,
+    HirStructLiteralField, HirUnary, HirWhileStmt, HirAssignStmt, IntrinsicId, LocalId,
+    ResolvedCallee,
 };
 
 struct LoweringCtx<'a> {
@@ -2522,6 +2676,8 @@ fn lower_module(
                 fields: fields?,
                 is_pub: decl.is_pub,
                 is_opaque: decl.is_opaque,
+                is_linear: decl.is_linear,
+                is_copy: decl.is_copy,
                 span: decl.span,
             });
         }
@@ -2789,6 +2945,19 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             // Special handling for Ok(...) and Err(...) Result constructors
             if path.segments.len() == 1 {
                 let name = &path.segments[0].item;
+                if name == "drop" {
+                    let args: Result<Vec<HirExpr>, TypeError> = call
+                        .args
+                        .iter()
+                        .map(|arg| lower_expr(arg, ctx, ret_ty))
+                        .collect();
+                    return Ok(HirExpr::Call(HirCall {
+                        callee: ResolvedCallee::Intrinsic(IntrinsicId::Drop),
+                        args: args?,
+                        ret_ty: ty,
+                        span: call.span,
+                    }));
+                }
                 if name == "Ok" || name == "Err" {
                     // Lower the argument
                     let arg = lower_expr(&call.args[0], ctx, ret_ty)?;

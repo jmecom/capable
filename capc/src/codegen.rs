@@ -451,12 +451,36 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![TyKind::Handle, TyKind::String],
         ret: TyKind::Handle,
     };
+    let system_filesystem = FnSig {
+        params: vec![TyKind::Handle, TyKind::String],
+        ret: TyKind::Handle,
+    };
+    let fs_root_dir = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Handle,
+    };
+    let fs_subdir = FnSig {
+        params: vec![TyKind::Handle, TyKind::String],
+        ret: TyKind::Handle,
+    };
+    let fs_open_read = FnSig {
+        params: vec![TyKind::Handle, TyKind::String],
+        ret: TyKind::Handle,
+    };
     let fs_read_to_string = FnSig {
         params: vec![TyKind::Handle, TyKind::String],
         ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
     };
     let fs_read_to_string_abi = FnSig {
         params: vec![TyKind::Handle, TyKind::String, TyKind::ResultString],
+        ret: TyKind::ResultString,
+    };
+    let fs_file_read_to_string = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+    };
+    let fs_file_read_to_string_abi = FnSig {
+        params: vec![TyKind::Handle, TyKind::ResultString],
         ret: TyKind::ResultString,
     };
     let console_println = FnSig {
@@ -761,6 +785,16 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.system.RootCap__mint_filesystem".to_string(),
+        FnInfo {
+            sig: system_filesystem,
+            abi_sig: None,
+            symbol: "capable_rt_mint_filesystem".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.system.RootCap__mint_args".to_string(),
         FnInfo {
             sig: system_mint_args,
@@ -876,6 +910,46 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: fs_read_to_string,
             abi_sig: Some(fs_read_to_string_abi),
             symbol: "capable_rt_fs_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Filesystem__root_dir".to_string(),
+        FnInfo {
+            sig: fs_root_dir,
+            abi_sig: None,
+            symbol: "capable_rt_fs_root_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__subdir".to_string(),
+        FnInfo {
+            sig: fs_subdir,
+            abi_sig: None,
+            symbol: "capable_rt_fs_subdir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__open_read".to_string(),
+        FnInfo {
+            sig: fs_open_read,
+            abi_sig: None,
+            symbol: "capable_rt_fs_open_read".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.FileRead__read_to_string".to_string(),
+        FnInfo {
+            sig: fs_file_read_to_string,
+            abi_sig: Some(fs_file_read_to_string_abi),
+            symbol: "capable_rt_fs_file_read_to_string".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -1888,8 +1962,20 @@ fn emit_hir_expr(
                 crate::hir::ResolvedCallee::Function { module, name, symbol } => {
                     (module.clone(), name.clone(), symbol.clone())
                 }
-                crate::hir::ResolvedCallee::Intrinsic(_) => {
-                    return Err(CodegenError::Unsupported("intrinsics".to_string()));
+                crate::hir::ResolvedCallee::Intrinsic(crate::hir::IntrinsicId::Drop) => {
+                    for arg in &call.args {
+                        let _ = emit_hir_expr(
+                            builder,
+                            arg,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            struct_layouts,
+                            module,
+                            data_counter,
+                        )?;
+                    }
+                    return Ok(ValueRepr::Unit);
                 }
             };
 
@@ -3872,6 +3958,9 @@ fn lower_ty(
     if resolved == "sys.system.RootCap"
         || resolved == "sys.console.Console"
         || resolved == "sys.fs.ReadFS"
+        || resolved == "sys.fs.Filesystem"
+        || resolved == "sys.fs.Dir"
+        || resolved == "sys.fs.FileRead"
         || resolved == "sys.buffer.Alloc"
         || resolved == "sys.buffer.Buffer"
         || resolved == "sys.buffer.Slice"

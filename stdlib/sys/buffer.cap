@@ -2,10 +2,10 @@ package safe
 module sys::buffer
 use sys::vec
 
-pub opaque struct Alloc
-pub opaque struct Buffer
-pub opaque struct Slice
-pub opaque struct MutSlice
+pub copy opaque struct Alloc
+pub copy opaque struct Buffer
+pub copy opaque struct Slice
+pub copy opaque struct MutSlice
 
 pub enum AllocErr {
   Oom

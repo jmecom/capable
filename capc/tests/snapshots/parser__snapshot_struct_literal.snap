@@ -96,6 +96,8 @@ Module {
                 ],
                 is_pub: false,
                 is_opaque: false,
+                is_linear: false,
+                is_copy: false,
                 doc: None,
                 span: Span {
                     start: 23,

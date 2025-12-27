@@ -6,7 +6,7 @@ use sys::args
 use sys::stdin
 use sys::buffer
 
-pub opaque struct RootCap
+pub copy opaque struct RootCap
 
 impl RootCap {
   pub fn mint_console(self) -> console::Console {
@@ -14,6 +14,10 @@ impl RootCap {
   }
 
   pub fn mint_readfs(self, root: string) -> fs::ReadFS {
+    return ()
+  }
+
+  pub fn mint_filesystem(self, root: string) -> fs::Filesystem {
     return ()
   }
 

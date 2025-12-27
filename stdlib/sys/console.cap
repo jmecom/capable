@@ -1,7 +1,7 @@
 package unsafe
 module sys::console
 
-pub opaque struct Console
+pub copy opaque struct Console
 
 impl Console {
   pub fn print(self, s: string) -> unit {

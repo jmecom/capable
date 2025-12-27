@@ -2,11 +2,36 @@ package unsafe
 module sys::fs
 
 pub opaque struct ReadFS
+pub opaque struct Filesystem
+pub opaque struct Dir
+pub linear opaque struct FileRead
 
 pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }
 
 impl ReadFS {
   pub fn read_to_string(self, path: string) -> Result[string, FsErr] {
+    return ()
+  }
+}
+
+impl Filesystem {
+  pub fn root_dir(self) -> Dir {
+    return ()
+  }
+}
+
+impl Dir {
+  pub fn subdir(self, name: string) -> Dir {
+    return ()
+  }
+
+  pub fn open_read(self, name: string) -> FileRead {
+    return ()
+  }
+}
+
+impl FileRead {
+  pub fn read_to_string(self) -> Result[string, FsErr] {
     return ()
   }
 }

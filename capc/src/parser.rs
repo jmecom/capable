@@ -113,30 +113,84 @@ impl Parser {
     }
 
     fn parse_item(&mut self, doc: Option<String>) -> Result<Item, ParseError> {
-        let is_pub = self.maybe_consume(TokenKind::Pub).is_some();
-        let is_opaque = self.maybe_consume(TokenKind::Opaque).is_some();
+        let mut is_pub = false;
+        let mut is_linear = false;
+        let mut is_copy = false;
+        let mut is_opaque = false;
+        loop {
+            match self.peek_kind() {
+                Some(TokenKind::Pub) => {
+                    if is_pub {
+                        return Err(self.error_current(
+                            "duplicate `pub` modifier".to_string(),
+                        ));
+                    }
+                    self.bump();
+                    is_pub = true;
+                }
+                Some(TokenKind::Linear) => {
+                    if is_linear {
+                        return Err(self.error_current(
+                            "duplicate `linear` modifier".to_string(),
+                        ));
+                    }
+                    self.bump();
+                    is_linear = true;
+                }
+                Some(TokenKind::Copy) => {
+                    if is_copy {
+                        return Err(self.error_current(
+                            "duplicate `copy` modifier".to_string(),
+                        ));
+                    }
+                    self.bump();
+                    is_copy = true;
+                }
+                Some(TokenKind::Opaque) => {
+                    if is_opaque {
+                        return Err(self.error_current(
+                            "duplicate `opaque` modifier".to_string(),
+                        ));
+                    }
+                    self.bump();
+                    is_opaque = true;
+                }
+                _ => break,
+            }
+        }
+        if is_linear && is_copy {
+            return Err(self.error_current(
+                "cannot combine `linear` and `copy` modifiers".to_string(),
+            ));
+        }
         if self.peek_kind() == Some(TokenKind::Extern) {
-            if is_opaque {
+            if is_opaque || is_linear || is_copy {
                 return Err(self.error_current(
-                    "opaque applies only to struct declarations".to_string(),
+                    "linear/copy/opaque applies only to struct declarations".to_string(),
                 ));
             }
             return Ok(Item::ExternFunction(self.parse_extern_function(is_pub, doc)?));
         }
         match self.peek_kind() {
             Some(TokenKind::Fn) => {
-                if is_opaque {
+                if is_opaque || is_linear || is_copy {
                     return Err(self.error_current(
-                        "opaque applies only to struct declarations".to_string(),
+                        "linear/copy/opaque applies only to struct declarations".to_string(),
                     ));
                 }
                 Ok(Item::Function(self.parse_function(is_pub, doc)?))
             }
-            Some(TokenKind::Struct) => Ok(Item::Struct(self.parse_struct(is_pub, is_opaque, doc)?)),
+            Some(TokenKind::Struct) => Ok(Item::Struct(self.parse_struct(
+                is_pub,
+                is_opaque,
+                is_linear,
+                is_copy,
+                doc,
+            )?)),
             Some(TokenKind::Enum) => {
-                if is_opaque {
+                if is_opaque || is_linear || is_copy {
                     return Err(self.error_current(
-                        "opaque applies only to struct declarations".to_string(),
+                        "linear/copy/opaque applies only to struct declarations".to_string(),
                     ));
                 }
                 Ok(Item::Enum(self.parse_enum(is_pub, doc)?))
@@ -147,9 +201,9 @@ impl Parser {
                         "impl blocks cannot be marked pub".to_string(),
                     ));
                 }
-                if is_opaque {
+                if is_opaque || is_linear || is_copy {
                     return Err(self.error_current(
-                        "opaque applies only to struct declarations".to_string(),
+                        "linear/copy/opaque applies only to struct declarations".to_string(),
                     ));
                 }
                 Ok(Item::Impl(self.parse_impl_block(doc)?))
@@ -264,7 +318,14 @@ impl Parser {
         })
     }
 
-    fn parse_struct(&mut self, is_pub: bool, is_opaque: bool, doc: Option<String>) -> Result<StructDecl, ParseError> {
+    fn parse_struct(
+        &mut self,
+        is_pub: bool,
+        is_opaque: bool,
+        is_linear: bool,
+        is_copy: bool,
+        doc: Option<String>,
+    ) -> Result<StructDecl, ParseError> {
         let start = self.expect(TokenKind::Struct)?.span.start;
         let name = self.expect_ident()?;
         let mut fields = Vec::new();
@@ -303,6 +364,8 @@ impl Parser {
             fields,
             is_pub,
             is_opaque,
+            is_linear,
+            is_copy,
             doc,
             span: Span::new(start, end),
         })
