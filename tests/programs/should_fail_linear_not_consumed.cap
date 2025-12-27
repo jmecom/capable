@@ -1,0 +1,9 @@
+package safe
+module should_fail_linear_not_consumed
+
+linear opaque struct Token
+
+pub fn main() -> i32 {
+  let t = Token{}
+  return 0
+}

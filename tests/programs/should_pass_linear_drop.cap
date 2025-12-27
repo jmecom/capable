@@ -1,0 +1,10 @@
+package safe
+module should_pass_linear_drop
+
+linear opaque struct Token
+
+pub fn main() -> i32 {
+  let t = Token{}
+  drop(t)
+  return 0
+}

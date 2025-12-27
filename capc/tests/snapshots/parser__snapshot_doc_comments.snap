@@ -72,6 +72,8 @@ Module {
                 ],
                 is_pub: true,
                 is_opaque: false,
+                is_linear: false,
+                is_copy: false,
                 doc: None,
                 span: Span {
                     start: 90,

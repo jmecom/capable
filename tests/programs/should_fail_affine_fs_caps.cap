@@ -1,0 +1,10 @@
+package safe
+module should_fail_affine_fs_caps
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let fs = rc.mint_filesystem("./")
+  let a = fs
+  let b = fs
+  return 0
+}

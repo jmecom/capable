@@ -1,0 +1,13 @@
+package safe
+module should_fail_linear_branch_merge
+
+linear opaque struct Token
+
+pub fn main() -> i32 {
+  let t = Token{}
+  if (true) {
+    drop(t)
+  } else {
+  }
+  return 0
+}

@@ -62,6 +62,23 @@ fn run_fs_traversal_kind() {
 }
 
 #[test]
+fn run_fs_attenuation() {
+    let out_dir = make_out_dir("fs_attenuation");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/fs_attenuation.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("Hello from config/app.txt"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
 fn run_match_expr() {
     let out_dir = make_out_dir("match_expr");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

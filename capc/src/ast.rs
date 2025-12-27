@@ -97,6 +97,8 @@ pub struct StructDecl {
     pub fields: Vec<Field>,
     pub is_pub: bool,
     pub is_opaque: bool,
+    pub is_linear: bool,
+    pub is_copy: bool,
     pub doc: Option<String>,
     pub span: Span,
 }

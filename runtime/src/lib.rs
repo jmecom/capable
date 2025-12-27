@@ -11,6 +11,12 @@ pub type Handle = u64;
 
 static READ_FS: LazyLock<Mutex<HashMap<Handle, ReadFsState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static FILESYSTEMS: LazyLock<Mutex<HashMap<Handle, FilesystemState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static DIRS: LazyLock<Mutex<HashMap<Handle, DirState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static FILE_READS: LazyLock<Mutex<HashMap<Handle, FileReadState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static BUFFERS: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
@@ -26,6 +32,23 @@ static ARGS: LazyLock<Vec<String>> = LazyLock::new(|| std::env::args().collect()
 #[derive(Debug, Clone)]
 struct ReadFsState {
     root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct FilesystemState {
+    root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct DirState {
+    root: PathBuf,
+    rel: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct FileReadState {
+    root: PathBuf,
+    rel: PathBuf,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -82,6 +105,110 @@ pub extern "C" fn capable_rt_mint_readfs(
     let handle = new_handle();
     let mut table = READ_FS.lock().expect("readfs table");
     table.insert(handle, ReadFsState { root: root_path });
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_mint_filesystem(
+    _sys: Handle,
+    root_ptr: *const u8,
+    root_len: usize,
+) -> Handle {
+    let root = unsafe { read_str(root_ptr, root_len) };
+    let root_path = match root {
+        Some(path) => normalize_root(Path::new(&path)),
+        None => normalize_root(Path::new("")),
+    };
+    let handle = new_handle();
+    let mut table = FILESYSTEMS.lock().expect("filesystem table");
+    table.insert(handle, FilesystemState { root: root_path });
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_root_dir(fs: Handle) -> Handle {
+    let state = {
+        let table = FILESYSTEMS.lock().expect("filesystem table");
+        table.get(&fs).cloned()
+    };
+    let Some(state) = state else {
+        return 0;
+    };
+    let handle = new_handle();
+    let mut table = DIRS.lock().expect("dir table");
+    table.insert(
+        handle,
+        DirState {
+            root: state.root,
+            rel: PathBuf::new(),
+        },
+    );
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_subdir(
+    dir: Handle,
+    name_ptr: *const u8,
+    name_len: usize,
+) -> Handle {
+    let name = unsafe { read_str(name_ptr, name_len) };
+    let state = {
+        let table = DIRS.lock().expect("dir table");
+        table.get(&dir).cloned()
+    };
+    let (Some(state), Some(name)) = (state, name) else {
+        return 0;
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return 0;
+    };
+    let combined = state.rel.join(name_rel);
+    let Some(rel) = normalize_relative(&combined) else {
+        return 0;
+    };
+    let handle = new_handle();
+    let mut table = DIRS.lock().expect("dir table");
+    table.insert(
+        handle,
+        DirState {
+            root: state.root,
+            rel,
+        },
+    );
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_open_read(
+    dir: Handle,
+    name_ptr: *const u8,
+    name_len: usize,
+) -> Handle {
+    let name = unsafe { read_str(name_ptr, name_len) };
+    let state = {
+        let table = DIRS.lock().expect("dir table");
+        table.get(&dir).cloned()
+    };
+    let (Some(state), Some(name)) = (state, name) else {
+        return 0;
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return 0;
+    };
+    let combined = state.rel.join(name_rel);
+    let Some(rel) = normalize_relative(&combined) else {
+        return 0;
+    };
+    let handle = new_handle();
+    let mut table = FILE_READS.lock().expect("file read table");
+    table.insert(
+        handle,
+        FileReadState {
+            root: state.root,
+            rel,
+        },
+    );
     handle
 }
 
@@ -143,6 +270,36 @@ pub extern "C" fn capable_rt_fs_read_to_string(
         None => return write_result(out_ptr, out_len, out_err, Err(FsErr::InvalidPath)),
     };
     let full = state.root.join(relative);
+    let full = match full.canonicalize() {
+        Ok(path) => path,
+        Err(err) => return write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
+    };
+    if !full.starts_with(&state.root) {
+        return write_result(out_ptr, out_len, out_err, Err(FsErr::InvalidPath));
+    }
+
+    match std::fs::read_to_string(&full) {
+        Ok(contents) => write_result(out_ptr, out_len, out_err, Ok(contents)),
+        Err(err) => write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_file_read_to_string(
+    file: Handle,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let state = {
+        let table = FILE_READS.lock().expect("file read table");
+        table.get(&file).cloned()
+    };
+
+    let Some(state) = state else {
+        return write_result(out_ptr, out_len, out_err, Err(FsErr::PermissionDenied));
+    };
+    let full = state.root.join(state.rel);
     let full = match full.canonicalize() {
         Ok(path) => path,
         Err(err) => return write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
@@ -1132,7 +1289,10 @@ fn normalize_root(root: &Path) -> PathBuf {
             Err(_) => root.to_path_buf(),
         }
     };
-    normalize_path(&path)
+    match path.canonicalize() {
+        Ok(canon) => canon,
+        Err(_) => normalize_path(&path),
+    }
 }
 
 fn normalize_relative(path: &Path) -> Option<PathBuf> {

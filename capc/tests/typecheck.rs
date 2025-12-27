@@ -201,6 +201,71 @@ fn typecheck_affine_call_moves_fails() {
 }
 
 #[test]
+fn typecheck_affine_fs_caps_fail() {
+    let source = load_program("should_fail_affine_fs_caps.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `fs`"));
+}
+
+#[test]
+fn typecheck_linear_drop_ok() {
+    let source = load_program("should_pass_linear_drop.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_linear_not_consumed_fails() {
+    let source = load_program("should_fail_linear_not_consumed.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("linear value `t` not consumed"));
+}
+
+#[test]
+fn typecheck_linear_drop_twice_fails() {
+    let source = load_program("should_fail_linear_drop_twice.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `t`"));
+}
+
+#[test]
+fn typecheck_linear_branch_merge_fails() {
+    let source = load_program("should_fail_linear_branch_merge.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("linear value `t` must be consumed on all paths"));
+}
+
+#[test]
+fn typecheck_copy_struct_move_field_fails() {
+    let source = load_program("should_fail_copy_struct_move_field.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("copy struct cannot contain move-only fields"));
+}
+
+#[test]
+fn typecheck_linear_return_ok() {
+    let source = load_program("should_pass_linear_return.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_affine_match_merge_fails() {
     let source = load_program("should_fail_affine_match_merge.cap");
     let module = parse_module(&source).expect("parse module");
@@ -215,7 +280,7 @@ fn typecheck_affine_loop_move_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("affine value `c` moved inside loop"));
+    assert!(err.to_string().contains("move-only value `c` moved inside loop"));
 }
 
 #[test]
