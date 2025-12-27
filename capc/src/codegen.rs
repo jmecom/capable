@@ -253,7 +253,7 @@ pub fn build_object(
                 .clone();
             if info.is_runtime {
                 debug_assert!(
-                    module_ref.name.starts_with("sys"),
+                    key.starts_with("sys."),
                     "runtime intrinsics should only shadow stdlib modules"
                 );
                 continue;
