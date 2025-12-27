@@ -171,7 +171,7 @@ module.exports = grammar({
         "if",
         $.expression,
         $.block,
-        optional(seq("else", $.block))
+        optional(seq("else", choice($.block, $.if_stmt)))
       ),
 
     while_stmt: ($) => seq("while", $.expression, $.block),
@@ -210,7 +210,7 @@ module.exports = grammar({
       ),
 
     pattern_call: ($) =>
-      seq($.path_expr, "(", optional($.identifier), ")"),
+      seq($.path_expr, "(", optional(choice($.identifier, "_")), ")"),
 
     call_expr: ($) =>
       prec(

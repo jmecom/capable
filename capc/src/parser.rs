@@ -503,7 +503,15 @@ impl Parser {
         let then_block = self.parse_block()?;
         let else_block = if self.peek_kind() == Some(TokenKind::Else) {
             self.bump();
-            Some(self.parse_block()?)
+            if self.peek_kind() == Some(TokenKind::If) {
+                let else_if = self.parse_if()?;
+                Some(Block {
+                    stmts: vec![Stmt::If(else_if.clone())],
+                    span: else_if.span,
+                })
+            } else {
+                Some(self.parse_block()?)
+            }
         } else {
             None
         };
@@ -838,6 +846,9 @@ impl Parser {
                     self.bump();
                     let binding = if self.peek_kind() == Some(TokenKind::Ident) {
                         Some(self.expect_ident()?)
+                    } else if self.peek_kind() == Some(TokenKind::Underscore) {
+                        self.bump();
+                        None
                     } else {
                         None
                     };
