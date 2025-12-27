@@ -1,0 +1,11 @@
+package safe
+module should_fail_attenuation_keep_dir
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let fs = rc.mint_filesystem("./")
+  let d = fs.root_dir()
+  let sub = d.subdir("config")
+  let file = d.open_read("app.txt")
+  return 0
+}
