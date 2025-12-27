@@ -1,0 +1,14 @@
+module attenuation_untrusted_pass
+use sys::system
+use sys::fs
+use untrusted_logs
+
+pub fn main(rc: RootCap) -> i32 {
+  let fs = rc.mint_filesystem("./config")
+  let d = fs.root_dir()
+  let res = untrusted_logs::read_log(d)
+  match (res) {
+    Ok(_) => { return 0 }
+    Err(_) => { return 1 }
+  }
+}

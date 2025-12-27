@@ -345,6 +345,29 @@ fn typecheck_attenuation_reuse_fileread_fails() {
 }
 
 #[test]
+fn typecheck_attenuation_untrusted_pass() {
+    let source = load_program("attenuation_untrusted_pass.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/attenuation_untrusted_pass.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    type_check_program(&module, &stdlib, &user_modules).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_attenuation_untrusted_fail() {
+    let source = load_program("attenuation_untrusted_fail.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/attenuation_untrusted_fail.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    let err = type_check_program(&module, &stdlib, &user_modules).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `d`"));
+}
+
+#[test]
 fn typecheck_borrow_self_ok() {
     let source = load_program("should_pass_borrow_self.cap");
     let module = parse_module(&source).expect("parse module");
