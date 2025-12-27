@@ -666,16 +666,34 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     };
 
     map.insert(
-        "sys.system.console".to_string(),
+        "sys.system.mint_console".to_string(),
         FnInfo {
-            sig: system_console,
+            sig: system_console.clone(),
             abi_sig: None,
             symbol: "capable_rt_system_console".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.system.fs_read".to_string(),
+        "sys.system.RootCap__mint_console".to_string(),
+        FnInfo {
+            sig: system_console.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_system_console".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.system.mint_readfs".to_string(),
+        FnInfo {
+            sig: system_fs_read.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_system_fs_read".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.system.RootCap__mint_readfs".to_string(),
         FnInfo {
             sig: system_fs_read,
             abi_sig: None,
@@ -4930,7 +4948,7 @@ fn lower_ty(
             }
         }
     }
-    if resolved == "sys.system.System"
+    if resolved == "sys.system.RootCap"
         || resolved == "sys.console.Console"
         || resolved == "sys.fs.ReadFS"
         || resolved == "sys.buffer.Alloc"

@@ -5,7 +5,7 @@ use sys.console
 
 extern fn demo_log(msg: string) -> unit
 
-pub fn main(sys: System) -> i32 {
+pub fn main(sys: RootCap) -> i32 {
   let c = system.console(sys)
   demo_log("hello from extern demo")
   console.println(c, "capable still works")

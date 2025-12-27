@@ -2,8 +2,8 @@ module early_return_while
 use sys::system
 use sys::console
 
-pub fn main(sys: System) -> i32 {
-  let c = system::console(sys)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
 
   let cond = true
   while (cond) {

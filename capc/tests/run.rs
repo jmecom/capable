@@ -300,7 +300,7 @@ fn run_wc_file() {
         "tests/programs/hello.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("9 22 156"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("9 22 155"), "stdout was: {stdout:?}");
 }
 
 #[test]

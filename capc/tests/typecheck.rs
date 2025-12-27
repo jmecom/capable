@@ -117,7 +117,7 @@ fn typecheck_mint_without_system() {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let text = err.to_string();
     assert!(text.contains("argument type mismatch"));
-    assert!(text.contains("Path(\"sys.system.System\""));
+    assert!(text.contains("Path(\"sys.system.RootCap\""));
     assert!(text.contains("Builtin(I32)"));
 }
 

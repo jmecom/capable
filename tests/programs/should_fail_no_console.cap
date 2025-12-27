@@ -1,8 +1,8 @@
 module should_fail_no_console
 use sys::console
 
-pub fn main(sys: System) -> i32 {
-  // Intentionally do NOT call system::console(sys)
+pub fn main(sys: RootCap) -> i32 {
+  // Intentionally do NOT call sys.mint_console()
   console::println(c, "nope")
   return 0
 }

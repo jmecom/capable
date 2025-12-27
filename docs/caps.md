@@ -20,7 +20,7 @@ A capability is an **unforgeable token of permission** (think: keycard).
 
 - `Console` capability → permission to print
 - `ReadFS` capability → permission to read files (scoped/attenuated)
-- `System` capability → root authority that can mint sub-capabilities
+- `RootCap` capability → root authority that can mint sub-capabilities
 
 No global “OS object” exists in safe code. Authority flows only via:
 - function parameters
@@ -48,17 +48,17 @@ All privileged operations live under `sys.*` and require the relevant capability
 
 So if you don’t have a `Console`, you cannot call `println`. The compiler will reject it.
 
-### 3) Root authority comes from `System`
+### 3) Root authority comes from `RootCap`
 The entrypoint receives a root capability:
 
 ```cap
-pub fn main(sys: System) -> i32
+pub fn main(rc: RootCap) -> i32
 ````
 
-`System` can mint attenuated capabilities:
+`RootCap` can mint attenuated capabilities:
 
-* `system.console(sys) -> Console`
-* `system.fs_read(sys, root: string) -> ReadFS`
+* `rc.mint_console() -> Console`
+* `rc.mint_readfs(root: string) -> ReadFS`
 
 This is the only “source” of capability tokens in safe code.
 
@@ -146,7 +146,7 @@ Examples:
 
 1. Missing cap in scope:
 
-* calling `console.println(c, ...)` without any `c` bound from `system.console(sys)` should fail.
+* calling `console.println(c, ...)` without any `c` bound from `rc.mint_console()` should fail.
 
 2. Forging opaque cap:
 
@@ -160,7 +160,7 @@ These tests validate the unforgeability + explicit passing model.
 
 * **A (static)**: no capability value ⇒ cannot compile privileged calls
 * **B (dynamic)**: capability value still enforces scope/rights at runtime
-* Capability types are **opaque tokens** minted only from `System`
+* Capability types are **opaque tokens** minted only from `RootCap`
 * `unsafe` is the explicit escape hatch and must be auditable
 
 ```

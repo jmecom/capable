@@ -7,8 +7,8 @@ use sys::bytes
 use sys::buffer
 use sys::vec
 
-pub fn main(sys: System) -> i32 {
-  let c = system::console(sys)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
   let s = "abc"
   let buf = string::bytes(s)
   let n = bytes::len(buf)

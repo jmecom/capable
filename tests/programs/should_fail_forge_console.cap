@@ -1,7 +1,7 @@
 module should_fail_forge_console
 use sys::console
 
-pub fn main(sys: System) -> i32 {
+pub fn main(sys: RootCap) -> i32 {
   let c = console.Console { }
   console::println(c, "nope")
   return 0

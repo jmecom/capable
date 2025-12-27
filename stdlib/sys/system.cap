@@ -3,12 +3,22 @@ module sys::system
 use sys::console
 use sys::fs
 
-pub opaque struct System
+pub opaque struct RootCap
 
-pub fn console(sys: System) -> console::Console {
+pub fn mint_console(rc: RootCap) -> console::Console {
   return ()
 }
 
-pub fn fs_read(sys: System, root: string) -> fs::ReadFS {
+pub fn mint_readfs(rc: RootCap, root: string) -> fs::ReadFS {
   return ()
+}
+
+impl RootCap {
+  pub fn mint_console(self) -> console::Console {
+    return mint_console(self)
+  }
+
+  pub fn mint_readfs(self, root: string) -> fs::ReadFS {
+    return mint_readfs(self, root)
+  }
 }

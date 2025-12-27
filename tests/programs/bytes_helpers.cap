@@ -5,8 +5,8 @@ use sys::console
 use sys::string
 use sys::bytes
 
-pub fn main(sys: System) -> i32 {
-  let c = system::console(sys)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
   let s = " \n"
   let buf = string::bytes(s)
   let b0 = bytes::at(buf, 0)
