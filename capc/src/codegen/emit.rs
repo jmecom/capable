@@ -1,1558 +1,28 @@
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
+//! HIR emission into Cranelift IR.
+//!
+//! This module is intentionally focused on expression/statement lowering and
+//! ABI-adjacent helper routines used by the main codegen entry point.
+
+use std::collections::HashMap;
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, MemFlags, Signature, Type, Value};
-use cranelift_codegen::isa::CallConv;
-use cranelift_codegen::settings::{Configurable, Flags};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_codegen::ir::{self, InstBuilder, MemFlags, Type, Value};
+use cranelift_frontend::FunctionBuilder;
 use cranelift_module::{DataDescription, Linkage, Module as ModuleTrait};
-use cranelift_native;
-use cranelift_object::{ObjectBuilder, ObjectModule};
-use thiserror::Error;
+use cranelift_object::ObjectModule;
 
-use crate::ast::{
-    BinaryOp, Item, Literal, Module as AstModule, Path as AstPath, Type as AstType, UnaryOp,
+use crate::ast::{BinaryOp, Literal, UnaryOp};
+
+use super::{
+    CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape, StructLayoutIndex,
+    TyKind, TypeLayout, ValueRepr,
 };
+use super::layout::{align_to, resolve_struct_layout, type_layout_for_tykind};
+use super::{sig_to_clif, typeck_ty_to_tykind};
 
-#[derive(Debug, Error)]
-pub enum CodegenError {
-    #[error("unsupported {0}")]
-    Unsupported(String),
-    #[error("unknown function `{0}`")]
-    UnknownFunction(String),
-    #[error("unknown variable `{0}`")]
-    UnknownVariable(String),
-    #[error("io error: {0}")]
-    Io(String),
-    #[error("codegen error: {0}")]
-    Codegen(String),
-}
 
-/// Tracks control flow state during code emission.
-/// Used to stop emitting statements after a terminator (return/jump).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Flow {
-    /// Control flow continues normally; more statements can be emitted.
-    Continues,
-    /// Block is terminated (return/unconditional jump); no more statements should be emitted.
-    Terminated,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum TyKind {
-    I32,
-    U32,
-    U8,
-    Bool,
-    Unit,
-    String,
-    Handle,
-    Ptr,
-    Result(Box<TyKind>, Box<TyKind>),
-    ResultOut(Box<TyKind>, Box<TyKind>),
-    ResultString,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct FnSig {
-    params: Vec<TyKind>,
-    ret: TyKind,
-}
-
-#[derive(Clone, Debug)]
-struct FnInfo {
-    sig: FnSig,
-    abi_sig: Option<FnSig>,
-    symbol: String,
-    runtime_symbol: Option<String>,
-    is_runtime: bool,
-}
-
-#[derive(Clone, Debug)]
-struct UseMap {
-    aliases: HashMap<String, Vec<String>>,
-}
-
-impl UseMap {
-    fn new(module: &AstModule) -> Self {
-        let mut aliases: HashMap<String, Vec<String>> = HashMap::new();
-        for use_decl in &module.uses {
-            let segments = use_decl
-                .path
-                .segments
-                .iter()
-                .map(|seg| seg.item.clone())
-                .collect::<Vec<_>>();
-            if let Some(alias) = segments.last() {
-                aliases.insert(alias.clone(), segments);
-            }
-        }
-        Self { aliases }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct StdlibIndex {
-    types: HashMap<String, String>,
-}
-
-#[derive(Clone, Debug)]
-struct EnumIndex {
-    variants: HashMap<String, HashMap<String, i32>>,
-}
-
-#[derive(Clone, Debug)]
-struct StructLayoutIndex {
-    layouts: HashMap<String, StructLayout>,
-}
-
-#[derive(Clone, Debug)]
-struct StructLayout {
-    size: u32,
-    align: u32,
-    fields: HashMap<String, StructFieldLayout>,
-    field_order: Vec<String>,
-}
-
-#[derive(Clone, Debug)]
-struct StructFieldLayout {
-    offset: u32,
-    ty: crate::typeck::Ty,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TypeLayout {
-    size: u32,
-    align: u32,
-}
-
-#[derive(Clone, Debug)]
-enum ValueRepr {
-    Unit,
-    Single(ir::Value),
-    Pair(ir::Value, ir::Value),
-    Result {
-        tag: ir::Value,
-        ok: Box<ValueRepr>,
-        err: Box<ValueRepr>,
-    },
-}
-
-#[derive(Clone, Debug)]
-enum LocalValue {
-    Value(ValueRepr),
-    Slot(ir::StackSlot, Type),
-    StructSlot(ir::StackSlot, crate::typeck::Ty, u32),
-}
-
-#[derive(Clone, Debug)]
-struct ResultShape {
-    kind: ResultKind,
-    slots: Vec<ir::StackSlot>,
-    types: Vec<Type>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ResultKind {
-    Unit,
-    Single,
-    Pair,
-}
-
-pub fn build_object(
-    program: &crate::hir::HirProgram,
-    entry_ast: &AstModule,
-    user_modules_ast: &[AstModule],
-    out_path: &Path,
-) -> Result<(), CodegenError> {
-    let mut flag_builder = cranelift_codegen::settings::builder();
-    flag_builder
-        .set("is_pic", "true")
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let isa = cranelift_native::builder()
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?
-        .finish(Flags::new(flag_builder))
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-
-    let mut module = ObjectModule::new(
-        ObjectBuilder::new(isa, "capable", cranelift_module::default_libcall_names())
-            .map_err(|err| CodegenError::Codegen(err.to_string()))?,
-    );
-
-    let stdlib_index = build_stdlib_index(&program.stdlib);
-    let enum_index = build_enum_index(&program.entry, &program.user_modules, &program.stdlib);
-    let struct_layouts = build_struct_layout_index(
-        &program.entry,
-        &program.user_modules,
-        &program.stdlib,
-        module.isa().pointer_type(),
-    )?;
-
-    let runtime_intrinsics = register_runtime_intrinsics(module.isa().pointer_type());
-    let mut fn_map = HashMap::new();
-    for module_ref in &program.stdlib {
-        register_user_functions(
-            module_ref,
-            &program.entry,
-            &stdlib_index,
-            &enum_index,
-            &struct_layouts,
-            &mut fn_map,
-            &runtime_intrinsics,
-            module.isa().pointer_type(),
-            true,
-        )?;
-    }
-    let missing_intrinsics = runtime_intrinsics
-        .keys()
-        .filter(|key| !fn_map.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing_intrinsics.is_empty() {
-        return Err(CodegenError::Codegen(format!(
-            "runtime intrinsics missing stdlib wrappers: {}",
-            missing_intrinsics.join(", ")
-        )));
-    }
-    for module_ref in &program.user_modules {
-        register_user_functions(
-            module_ref,
-            &program.entry,
-            &stdlib_index,
-            &enum_index,
-            &struct_layouts,
-            &mut fn_map,
-            &runtime_intrinsics,
-            module.isa().pointer_type(),
-            false,
-        )?;
-    }
-    register_user_functions(
-        &program.entry,
-        &program.entry,
-        &stdlib_index,
-        &enum_index,
-        &struct_layouts,
-        &mut fn_map,
-        &runtime_intrinsics,
-        module.isa().pointer_type(),
-        false,
-    )?;
-
-    let all_modules = program.user_modules
-        .iter()
-        .chain(program.stdlib.iter())
-        .chain(std::iter::once(&program.entry))
-        .collect::<Vec<_>>();
-
-    // Register extern functions from AST modules (not in HIR yet)
-    let all_ast_modules = user_modules_ast
-        .iter()
-        .chain(std::iter::once(entry_ast))
-        .collect::<Vec<_>>();
-    for ast_module in &all_ast_modules {
-        register_extern_functions(ast_module, &stdlib_index, &enum_index, &mut fn_map)?;
-    }
-
-    let mut data_counter = 0u32;
-    for module_ref in &all_modules {
-        let module_name = &module_ref.name;
-        for func in &module_ref.functions {
-            let key = format!("{}.{}", module_name, func.name);
-            let info = fn_map
-                .get(&key)
-                .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
-                .clone();
-            if info.is_runtime {
-                continue;
-            }
-            let func_id = module
-                .declare_function(
-                    &info.symbol,
-                    Linkage::Export,
-                    &sig_to_clif(&info.sig, module.isa().pointer_type()),
-                )
-                .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-            let mut ctx = module.make_context();
-            ctx.func = Function::with_name_signature(
-                ir::UserFuncName::user(0, func_id.as_u32()),
-                sig_to_clif(&info.sig, module.isa().pointer_type()),
-            );
-
-            let mut builder_ctx = FunctionBuilderContext::new();
-            let mut builder = FunctionBuilder::new(&mut ctx.func, &mut builder_ctx);
-            let block = builder.create_block();
-            builder.append_block_params_for_function_params(block);
-            builder.switch_to_block(block);
-            // Blocks sealed after body emission.
-
-            if info.runtime_symbol.is_some() {
-                let args = builder.block_params(block).to_vec();
-                let value = emit_runtime_wrapper_call(&mut builder, &mut module, &info, args)?;
-                match value {
-                    ValueRepr::Unit => builder.ins().return_(&[]),
-                    ValueRepr::Single(val) => builder.ins().return_(&[val]),
-                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
-                        let values = flatten_value(&value);
-                        builder.ins().return_(&values)
-                    }
-                };
-                builder.seal_all_blocks();
-                builder.finalize();
-                if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
-                    eprintln!("=== IR for {} ===\n{}", func.name, ctx.func.display());
-                    return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
-                }
-                module
-                    .define_function(func_id, &mut ctx)
-                    .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-                continue;
-            }
-
-            let mut locals: HashMap<String, LocalValue> = HashMap::new();
-            let params = builder.block_params(block).to_vec();
-            let mut param_index = 0;
-            for param in &func.params {
-                // HirParam already has resolved types - use typeck_ty_to_tykind
-                let ty_kind = typeck_ty_to_tykind(&param.ty, Some(&struct_layouts))?;
-                let value =
-                    value_from_params(&mut builder, &ty_kind, &params, &mut param_index)?;
-                let local = store_local(&mut builder, value);
-                // HirParam.name is String, not Spanned<String>
-                locals.insert(param.name.clone(), local);
-            }
-
-            let mut terminated = false;
-            for stmt in &func.body.stmts {
-                // Use HIR emission functions
-                let flow = emit_hir_stmt(
-                    &mut builder,
-                    stmt,
-                    &mut locals,
-                    &fn_map,
-                    &enum_index,
-                    &struct_layouts,
-                    &mut module,
-                    &mut data_counter,
-                )?;
-                if flow == Flow::Terminated {
-                    terminated = true;
-                    break;
-                }
-            }
-
-            // Only add implicit unit return if function body doesn't terminate
-            if info.sig.ret == TyKind::Unit && !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
-            if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
-                eprintln!("=== IR for {} ===\n{}", func.name, ctx.func.display());
-                return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
-            }
-            module
-                .define_function(func_id, &mut ctx)
-                .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-        }
-    }
-
-    let object = module.finish();
-    fs::write(
-        out_path,
-        object
-            .emit()
-            .map_err(|err| CodegenError::Codegen(err.to_string()))?,
-    )
-    .map_err(|err| CodegenError::Io(err.to_string()))?;
-    Ok(())
-}
-
-fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
-    let mut signature = Signature::new(CallConv::SystemV);
-    for param in &sig.params {
-        append_ty_params(&mut signature, param, ptr_ty);
-    }
-    append_ty_returns(&mut signature, &sig.ret, ptr_ty);
-    signature
-}
-
-fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
-    match ty {
-        TyKind::Unit => {}
-        TyKind::String => {
-            signature.params.push(AbiParam::new(ptr_ty));
-            signature.params.push(AbiParam::new(ir::types::I64));
-        }
-        TyKind::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
-        TyKind::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
-        TyKind::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
-        TyKind::U32 => signature.params.push(AbiParam::new(ir::types::I32)),
-        TyKind::U8 => signature.params.push(AbiParam::new(ir::types::I8)),
-        TyKind::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
-        TyKind::Result(ok, err) => {
-            signature.params.push(AbiParam::new(ir::types::I8)); // tag
-            append_ty_params(signature, ok, ptr_ty);
-            append_ty_params(signature, err, ptr_ty);
-        }
-        TyKind::ResultOut(ok, err) => {
-            if **ok != TyKind::Unit {
-                signature.params.push(AbiParam::new(ptr_ty));
-            }
-            if **err != TyKind::Unit {
-                signature.params.push(AbiParam::new(ptr_ty));
-            }
-        }
-        TyKind::ResultString => {
-            signature.params.push(AbiParam::new(ptr_ty)); // out_ptr
-            signature.params.push(AbiParam::new(ptr_ty)); // out_len
-            signature.params.push(AbiParam::new(ptr_ty)); // out_err
-        }
-    }
-}
-
-fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
-    match ty {
-        TyKind::Unit => {}
-        TyKind::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
-        TyKind::U32 => signature.returns.push(AbiParam::new(ir::types::I32)),
-        TyKind::U8 => signature.returns.push(AbiParam::new(ir::types::I8)),
-        TyKind::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
-        TyKind::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
-        TyKind::Ptr => signature.returns.push(AbiParam::new(ptr_ty)),
-        TyKind::String => {
-            signature.returns.push(AbiParam::new(ptr_ty));
-            signature.returns.push(AbiParam::new(ir::types::I64));
-        }
-        TyKind::Result(ok, err) => {
-            signature.returns.push(AbiParam::new(ir::types::I8)); // tag
-            append_ty_returns(signature, ok, ptr_ty);
-            append_ty_returns(signature, err, ptr_ty);
-        }
-        TyKind::ResultOut(_, _) => {
-            signature.returns.push(AbiParam::new(ir::types::I8)); // tag
-        }
-        TyKind::ResultString => {
-            signature.returns.push(AbiParam::new(ir::types::I8)); // tag
-        }
-    }
-}
-
-fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
-    let mut map = HashMap::new();
-    let system_console = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let system_fs_read = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
-    };
-    let system_filesystem = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
-    };
-    let fs_root_dir = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let fs_subdir = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
-    };
-    let fs_open_read = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
-    };
-    let fs_read_to_string = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
-    };
-    let fs_read_to_string_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::String, TyKind::ResultString],
-        ret: TyKind::ResultString,
-    };
-    let fs_file_read_to_string = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
-    };
-    let fs_file_read_to_string_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::ResultString],
-        ret: TyKind::ResultString,
-    };
-    let console_println = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Unit,
-    };
-    let console_print = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Unit,
-    };
-    let console_print_i32 = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Unit,
-    };
-    let mem_malloc = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Ptr,
-    };
-    let mem_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Ptr],
-        ret: TyKind::Unit,
-    };
-    let mem_cast = FnSig {
-        params: vec![TyKind::Handle, TyKind::Ptr],
-        ret: TyKind::Ptr,
-    };
-    let mem_alloc_default = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let system_mint_args = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let system_mint_stdin = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let mem_slice_from_ptr = FnSig {
-        params: vec![TyKind::Handle, TyKind::Ptr, TyKind::I32],
-        ret: TyKind::Handle,
-    };
-    let mem_slice_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
-    };
-    let mem_slice_at = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::U8,
-    };
-    let mem_buffer_new = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
-    };
-    let mem_buffer_new_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
-    };
-    let mem_buffer_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
-    };
-    let mem_buffer_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::U8],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let mem_buffer_push_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::U8,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let mem_buffer_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
-    };
-    let mem_buffer_as_slice = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let args_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
-    };
-    let args_at = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
-    };
-    let args_at_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::ResultString],
-        ret: TyKind::ResultString,
-    };
-    let io_read_stdin = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
-    };
-    let io_read_stdin_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::ResultString],
-        ret: TyKind::ResultString,
-    };
-    let console_assert = FnSig {
-        params: vec![TyKind::Handle, TyKind::Bool],
-        ret: TyKind::Unit,
-    };
-    let string_len = FnSig {
-        params: vec![TyKind::String],
-        ret: TyKind::I32,
-    };
-    let string_byte_at = FnSig {
-        params: vec![TyKind::String, TyKind::I32],
-        ret: TyKind::U8,
-    };
-    let string_as_slice = FnSig {
-        params: vec![TyKind::String],
-        ret: TyKind::Handle,
-    };
-    let string_split = FnSig {
-        params: vec![TyKind::String],
-        ret: TyKind::Handle,
-    };
-    let string_split_delim = FnSig {
-        params: vec![TyKind::String, TyKind::U8],
-        ret: TyKind::Handle,
-    };
-    let vec_new = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let vec_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
-    };
-    let vec_u8_get = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::U8), Box::new(TyKind::I32)),
-    };
-    let vec_u8_get_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
-    };
-    let vec_u8_set = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::U8],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_u8_set_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::U8,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_u8_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::U8],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_u8_push_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::U8,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_u8_pop = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::U8), Box::new(TyKind::I32)),
-    };
-    let vec_u8_pop_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
-    };
-    let vec_u8_as_slice = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
-    };
-    let vec_u8_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
-    };
-    let vec_i32_get = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::I32), Box::new(TyKind::I32)),
-    };
-    let vec_i32_get_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
-    };
-    let vec_i32_set = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_i32_set_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_i32_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_i32_push_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_i32_pop = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::I32), Box::new(TyKind::I32)),
-    };
-    let vec_i32_pop_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
-    };
-    let vec_i32_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
-    };
-    let vec_string_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
-    };
-    let vec_string_get = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
-    };
-    let vec_string_get_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::ResultString],
-        ret: TyKind::ResultString,
-    };
-    let vec_string_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_string_push_abi = FnSig {
-        params: vec![
-            TyKind::Handle,
-            TyKind::String,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-        ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
-    };
-    let vec_string_pop = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
-    };
-    let vec_string_pop_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::ResultString],
-        ret: TyKind::ResultString,
-    };
-    let vec_string_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
-    };
-
-    map.insert(
-        "sys.system.RootCap__mint_console".to_string(),
-        FnInfo {
-            sig: system_console.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_mint_console".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mint_readfs".to_string(),
-        FnInfo {
-            sig: system_fs_read.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_mint_readfs".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mint_filesystem".to_string(),
-        FnInfo {
-            sig: system_filesystem,
-            abi_sig: None,
-            symbol: "capable_rt_mint_filesystem".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mint_args".to_string(),
-        FnInfo {
-            sig: system_mint_args,
-            abi_sig: None,
-            symbol: "capable_rt_mint_args".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mint_stdin".to_string(),
-        FnInfo {
-            sig: system_mint_stdin,
-            abi_sig: None,
-            symbol: "capable_rt_mint_stdin".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.args.Args__len".to_string(),
-        FnInfo {
-            sig: args_len,
-            abi_sig: None,
-            symbol: "capable_rt_args_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.args.Args__at".to_string(),
-        FnInfo {
-            sig: args_at,
-            abi_sig: Some(args_at_abi),
-            symbol: "capable_rt_args_at".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.stdin.Stdin__read_to_string".to_string(),
-        FnInfo {
-            sig: io_read_stdin,
-            abi_sig: Some(io_read_stdin_abi),
-            symbol: "capable_rt_read_stdin_to_string".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mint_alloc_default".to_string(),
-        FnInfo {
-            sig: mem_alloc_default.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_alloc_default".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.Console__println".to_string(),
-        FnInfo {
-            sig: console_println,
-            abi_sig: None,
-            symbol: "capable_rt_console_println".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.Console__print".to_string(),
-        FnInfo {
-            sig: console_print,
-            abi_sig: None,
-            symbol: "capable_rt_console_print".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.Console__print_i32".to_string(),
-        FnInfo {
-            sig: console_print_i32.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_console_print_i32".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.Console__println_i32".to_string(),
-        FnInfo {
-            sig: console_print_i32,
-            abi_sig: None,
-            symbol: "capable_rt_console_println_i32".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.Console__assert".to_string(),
-        FnInfo {
-            sig: console_assert,
-            abi_sig: None,
-            symbol: "capable_rt_assert".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.fs.ReadFS__read_to_string".to_string(),
-        FnInfo {
-            sig: fs_read_to_string,
-            abi_sig: Some(fs_read_to_string_abi),
-            symbol: "capable_rt_fs_read_to_string".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.fs.Filesystem__root_dir".to_string(),
-        FnInfo {
-            sig: fs_root_dir,
-            abi_sig: None,
-            symbol: "capable_rt_fs_root_dir".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.fs.Dir__subdir".to_string(),
-        FnInfo {
-            sig: fs_subdir,
-            abi_sig: None,
-            symbol: "capable_rt_fs_subdir".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.fs.Dir__open_read".to_string(),
-        FnInfo {
-            sig: fs_open_read,
-            abi_sig: None,
-            symbol: "capable_rt_fs_open_read".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.fs.FileRead__read_to_string".to_string(),
-        FnInfo {
-            sig: fs_file_read_to_string,
-            abi_sig: Some(fs_file_read_to_string_abi),
-            symbol: "capable_rt_fs_file_read_to_string".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__buffer_new".to_string(),
-        FnInfo {
-            sig: mem_buffer_new.clone(),
-            abi_sig: Some(mem_buffer_new_abi.clone()),
-            symbol: "capable_rt_buffer_new".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__malloc".to_string(),
-        FnInfo {
-            sig: mem_malloc,
-            abi_sig: None,
-            symbol: "capable_rt_malloc".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__free".to_string(),
-        FnInfo {
-            sig: mem_free,
-            abi_sig: None,
-            symbol: "capable_rt_free".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__cast_u8_to_u32".to_string(),
-        FnInfo {
-            sig: mem_cast.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_cast_u8_to_u32".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__cast_u32_to_u8".to_string(),
-        FnInfo {
-            sig: mem_cast,
-            abi_sig: None,
-            symbol: "capable_rt_cast_u32_to_u8".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_from_ptr".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__mut_slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr,
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__buffer_free".to_string(),
-        FnInfo {
-            sig: mem_buffer_free,
-            abi_sig: None,
-            symbol: "capable_rt_buffer_free".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Buffer__len".to_string(),
-        FnInfo {
-            sig: mem_buffer_len,
-            abi_sig: None,
-            symbol: "capable_rt_buffer_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Buffer__push".to_string(),
-        FnInfo {
-            sig: mem_buffer_push,
-            abi_sig: Some(mem_buffer_push_abi),
-            symbol: "capable_rt_buffer_push".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Buffer__as_slice".to_string(),
-        FnInfo {
-            sig: mem_buffer_as_slice.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_buffer_as_slice".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Buffer__as_mut_slice".to_string(),
-        FnInfo {
-            sig: mem_buffer_as_slice,
-            abi_sig: None,
-            symbol: "capable_rt_buffer_as_mut_slice".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Slice__len".to_string(),
-        FnInfo {
-            sig: mem_slice_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Slice__at".to_string(),
-        FnInfo {
-            sig: mem_slice_at.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_at".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.MutSlice__at".to_string(),
-        FnInfo {
-            sig: mem_slice_at,
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_at".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__vec_u8_new".to_string(),
-        FnInfo {
-            sig: vec_new.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_vec_u8_new".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__vec_u8_free".to_string(),
-        FnInfo {
-            sig: vec_u8_free,
-            abi_sig: None,
-            symbol: "capable_rt_vec_u8_free".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__vec_i32_new".to_string(),
-        FnInfo {
-            sig: vec_new.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_vec_i32_new".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__vec_i32_free".to_string(),
-        FnInfo {
-            sig: vec_i32_free,
-            abi_sig: None,
-            symbol: "capable_rt_vec_i32_free".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__vec_string_new".to_string(),
-        FnInfo {
-            sig: vec_new,
-            abi_sig: None,
-            symbol: "capable_rt_vec_string_new".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__vec_string_free".to_string(),
-        FnInfo {
-            sig: vec_string_free,
-            abi_sig: None,
-            symbol: "capable_rt_vec_string_free".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecU8__len".to_string(),
-        FnInfo {
-            sig: vec_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_vec_u8_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecU8__get".to_string(),
-        FnInfo {
-            sig: vec_u8_get.clone(),
-            abi_sig: Some(vec_u8_get_abi),
-            symbol: "capable_rt_vec_u8_get".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecU8__set".to_string(),
-        FnInfo {
-            sig: vec_u8_set.clone(),
-            abi_sig: Some(vec_u8_set_abi),
-            symbol: "capable_rt_vec_u8_set".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecU8__push".to_string(),
-        FnInfo {
-            sig: vec_u8_push.clone(),
-            abi_sig: Some(vec_u8_push_abi),
-            symbol: "capable_rt_vec_u8_push".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecU8__pop".to_string(),
-        FnInfo {
-            sig: vec_u8_pop.clone(),
-            abi_sig: Some(vec_u8_pop_abi),
-            symbol: "capable_rt_vec_u8_pop".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecU8__as_slice".to_string(),
-        FnInfo {
-            sig: vec_u8_as_slice,
-            abi_sig: None,
-            symbol: "capable_rt_vec_u8_as_slice".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecI32__len".to_string(),
-        FnInfo {
-            sig: vec_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_vec_i32_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecI32__get".to_string(),
-        FnInfo {
-            sig: vec_i32_get.clone(),
-            abi_sig: Some(vec_i32_get_abi),
-            symbol: "capable_rt_vec_i32_get".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecI32__set".to_string(),
-        FnInfo {
-            sig: vec_i32_set.clone(),
-            abi_sig: Some(vec_i32_set_abi),
-            symbol: "capable_rt_vec_i32_set".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecI32__push".to_string(),
-        FnInfo {
-            sig: vec_i32_push.clone(),
-            abi_sig: Some(vec_i32_push_abi),
-            symbol: "capable_rt_vec_i32_push".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecI32__pop".to_string(),
-        FnInfo {
-            sig: vec_i32_pop.clone(),
-            abi_sig: Some(vec_i32_pop_abi),
-            symbol: "capable_rt_vec_i32_pop".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecString__len".to_string(),
-        FnInfo {
-            sig: vec_string_len,
-            abi_sig: None,
-            symbol: "capable_rt_vec_string_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecString__get".to_string(),
-        FnInfo {
-            sig: vec_string_get,
-            abi_sig: Some(vec_string_get_abi),
-            symbol: "capable_rt_vec_string_get".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecString__push".to_string(),
-        FnInfo {
-            sig: vec_string_push,
-            abi_sig: Some(vec_string_push_abi),
-            symbol: "capable_rt_vec_string_push".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.VecString__pop".to_string(),
-        FnInfo {
-            sig: vec_string_pop,
-            abi_sig: Some(vec_string_pop_abi),
-            symbol: "capable_rt_vec_string_pop".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__len".to_string(),
-        FnInfo {
-            sig: string_len,
-            abi_sig: None,
-            symbol: "capable_rt_string_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__byte_at".to_string(),
-        FnInfo {
-            sig: string_byte_at,
-            abi_sig: None,
-            symbol: "capable_rt_string_byte_at".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__as_slice".to_string(),
-        FnInfo {
-            sig: string_as_slice.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_string_as_slice".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__bytes".to_string(),
-        FnInfo {
-            // bytes() is an alias for as_slice(); both map to the same runtime symbol.
-            sig: string_as_slice,
-            abi_sig: None,
-            symbol: "capable_rt_string_as_slice".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__split_whitespace".to_string(),
-        FnInfo {
-            sig: string_split,
-            abi_sig: None,
-            symbol: "capable_rt_string_split_whitespace".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__split".to_string(),
-        FnInfo {
-            sig: string_split_delim,
-            abi_sig: None,
-            symbol: "capable_rt_string_split".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.bytes.u8__is_whitespace".to_string(),
-        FnInfo {
-            sig: FnSig {
-                params: vec![TyKind::U8],
-                ret: TyKind::Bool,
-            },
-            abi_sig: None,
-            symbol: "capable_rt_bytes_is_whitespace".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-
-    let _ = ptr_ty;
-    map
-}
-
-/// Convert typeck::Ty to codegen::TyKind
-fn typeck_ty_to_tykind(
-    ty: &crate::typeck::Ty,
-    struct_layouts: Option<&StructLayoutIndex>,
-) -> Result<TyKind, CodegenError> {
-    use crate::typeck::{BuiltinType, Ty};
-    match ty {
-        Ty::Builtin(b) => match b {
-            BuiltinType::I32 => Ok(TyKind::I32),
-            BuiltinType::I64 => Err(CodegenError::Unsupported("i64 not yet supported".to_string())),
-            BuiltinType::U32 => Ok(TyKind::U32),
-            BuiltinType::U8 => Ok(TyKind::U8),
-            BuiltinType::Bool => Ok(TyKind::Bool),
-            BuiltinType::String => Ok(TyKind::String),
-            BuiltinType::Unit => Ok(TyKind::Unit),
-        },
-        Ty::Path(path, args) => {
-            if path == "Result" && args.len() == 2 {
-                let ok = typeck_ty_to_tykind(&args[0], struct_layouts)?;
-                let err = typeck_ty_to_tykind(&args[1], struct_layouts)?;
-                return Ok(TyKind::Result(Box::new(ok), Box::new(err)));
-            }
-            if let Some(layouts) = struct_layouts {
-                if resolve_struct_layout(ty, "", &layouts.layouts).is_some() {
-                    return Ok(TyKind::Ptr);
-                }
-            }
-            // Handle known types
-            if path.ends_with(".Slice") {
-                Ok(TyKind::Handle)
-            } else if path.ends_with(".Buffer") {
-                Ok(TyKind::Handle)
-            } else if path.ends_with(".FsErr") || path.contains("Err") {
-                Ok(TyKind::I32)  // Enums are i32
-            } else if path.contains('.') {
-                // Other module types are generally handles
-                Ok(TyKind::Handle)
-            } else {
-                // Local enum
-                Ok(TyKind::I32)
-            }
-        },
-        Ty::Ptr(_inner) => Ok(TyKind::Ptr),
-        Ty::Ref(inner) => typeck_ty_to_tykind(inner, struct_layouts),
-    }
-}
-
-fn register_user_functions(
-    module: &crate::hir::HirModule,
-    entry: &crate::hir::HirModule,
-    _stdlib: &StdlibIndex,
-    _enum_index: &EnumIndex,
-    struct_layouts: &StructLayoutIndex,
-    map: &mut HashMap<String, FnInfo>,
-    runtime_intrinsics: &HashMap<String, FnInfo>,
-    _ptr_ty: Type,
-    is_stdlib: bool,
-) -> Result<(), CodegenError> {
-    let module_name = &module.name;
-    // HIR functions already have resolved types
-    for func in &module.functions {
-        let sig = FnSig {
-            params: func
-                .params
-                .iter()
-                .map(|p| typeck_ty_to_tykind(&p.ty, Some(struct_layouts)))
-                .collect::<Result<Vec<TyKind>, CodegenError>>()?,
-            ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
-        };
-        let key = format!("{}.{}", module_name, func.name);
-        if map.contains_key(&key) {
-            return Err(CodegenError::Codegen(format!(
-                "duplicate function `{key}`"
-            )));
-        }
-        let symbol = if module_name == &entry.name && func.name == "main" {
-            "capable_main".to_string()
-        } else {
-            mangle_symbol(module_name, &func.name)
-        };
-        let (runtime_symbol, abi_sig) = if is_stdlib {
-            runtime_intrinsics
-                .get(&key)
-                .map(|intrinsic| (Some(intrinsic.symbol.clone()), intrinsic.abi_sig.clone()))
-                .unwrap_or((None, None))
-        } else {
-            (None, None)
-        };
-        map.insert(
-            key,
-            FnInfo {
-                sig,
-                abi_sig,
-                symbol,
-                runtime_symbol,
-                is_runtime: false,
-            },
-        );
-    }
-    // Note: HirModule doesn't have extern functions as separate items
-    // They would be in the functions list if needed
-    Ok(())
-}
-
-fn register_extern_functions(
-    module: &AstModule,
-    stdlib: &StdlibIndex,
-    enum_index: &EnumIndex,
-    map: &mut HashMap<String, FnInfo>,
-) -> Result<(), CodegenError> {
-    let module_name = module.name.to_string();
-    let use_map = UseMap::new(module);
-
-    for item in &module.items {
-        if let Item::ExternFunction(func) = item {
-            let sig = FnSig {
-                params: func
-                    .params
-                    .iter()
-                    .map(|p| {
-                        let ty = p.ty.as_ref().ok_or_else(|| {
-                            CodegenError::Codegen(format!(
-                                "extern parameter `{}` requires a type annotation",
-                                p.name.item
-                            ))
-                        })?;
-                        lower_ty(ty, &use_map, stdlib, enum_index)
-                    })
-                    .collect::<Result<Vec<TyKind>, CodegenError>>()?,
-                ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
-            };
-            let key = format!("{}.{}", module_name, func.name.item);
-            map.insert(
-                key,
-                FnInfo {
-                    sig,
-                    abi_sig: None,
-                    symbol: func.name.item.clone(),
-                    runtime_symbol: None,
-                    is_runtime: true,
-                },
-            );
-        }
-    }
-    Ok(())
-}
-
-fn mangle_symbol(module_name: &str, func_name: &str) -> String {
-    let mut out = String::from("capable_");
-    out.push_str(&module_name.replace('.', "_"));
-    out.push('_');
-    out.push_str(func_name);
-    out
-}
-
-// ============================================================================
-// HIR Emission Functions
-// ============================================================================
-
-fn emit_hir_stmt(
+/// Emit a single HIR statement.
+pub(super) fn emit_hir_stmt(
     builder: &mut FunctionBuilder,
     stmt: &crate::hir::HirStmt,
     locals: &mut HashMap<String, LocalValue>,
@@ -1839,6 +309,7 @@ fn emit_hir_stmt(
     Ok(Flow::Continues)
 }
 
+/// Emit a single HIR expression and return its lowered value representation.
 fn emit_hir_expr(
     builder: &mut FunctionBuilder,
     expr: &crate::hir::HirExpr,
@@ -2045,11 +516,10 @@ fn emit_hir_expr(
                 } else {
                     let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
                     debug_assert!(ty.bytes().is_power_of_two());
-                debug_assert!(ty.bytes().is_power_of_two());
-                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    ty.bytes().max(1) as u32,
-                ));
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        ty.bytes().max(1) as u32,
+                    ));
                     let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
                     args.push(addr);
                     Some((slot, ty))
@@ -2328,6 +798,7 @@ fn emit_hir_expr(
     }
 }
 
+/// Emit a struct literal into a stack slot and return its address value.
 fn emit_hir_struct_literal(
     builder: &mut FunctionBuilder,
     literal: &crate::hir::HirStructLiteral,
@@ -2385,6 +856,7 @@ fn emit_hir_struct_literal(
     Ok(ValueRepr::Single(base_ptr))
 }
 
+/// Emit field access by computing the field address/offset.
 fn emit_hir_field_access(
     builder: &mut FunctionBuilder,
     field_access: &crate::hir::HirFieldAccess,
@@ -2438,6 +910,7 @@ fn emit_hir_field_access(
     )
 }
 
+/// Store a lowered value into memory using a typeck::Ty layout.
 fn store_value_by_ty(
     builder: &mut FunctionBuilder,
     base_ptr: ir::Value,
@@ -2562,6 +1035,7 @@ fn store_value_by_ty(
     }
 }
 
+/// Store a lowered value into memory using a codegen TyKind layout.
 fn store_value_by_tykind(
     builder: &mut FunctionBuilder,
     addr: ir::Value,
@@ -2583,6 +1057,7 @@ fn store_value_by_tykind(
     }
 }
 
+/// Load a value from memory using a typeck::Ty layout.
 fn load_value_by_ty(
     builder: &mut FunctionBuilder,
     base_ptr: ir::Value,
@@ -2669,6 +1144,7 @@ fn load_value_by_ty(
     }
 }
 
+/// Load a value from memory using a codegen TyKind layout.
 fn load_value_by_tykind(
     builder: &mut FunctionBuilder,
     addr: ir::Value,
@@ -2691,6 +1167,7 @@ fn load_value_by_tykind(
     ))
 }
 
+/// Pointer addition helper (byte offset).
 fn ptr_add(builder: &mut FunctionBuilder, base: ir::Value, offset: u32) -> ir::Value {
     if offset == 0 {
         base
@@ -2699,6 +1176,7 @@ fn ptr_add(builder: &mut FunctionBuilder, base: ir::Value, offset: u32) -> ir::V
     }
 }
 
+/// Compute an aligned stack address for a struct slot.
 fn aligned_stack_addr(
     builder: &mut FunctionBuilder,
     slot: ir::StackSlot,
@@ -2714,12 +1192,14 @@ fn aligned_stack_addr(
     builder.ins().band_imm(bumped, align_mask)
 }
 
+/// Compute pointer/len offsets for the string layout.
 fn string_offsets(ptr_ty: Type) -> (u32, u32) {
     let ptr_size = ptr_ty.bytes() as u32;
     let len_offset = align_to(ptr_size, 8);
     (0, len_offset)
 }
 
+/// Compute offsets for Result layout (tag, ok, err).
 fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
     let tag_offset = 0u32;
     let ok_offset = align_to(1, ok.align);
@@ -2727,6 +1207,7 @@ fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
     (tag_offset, ok_offset, err_offset)
 }
 
+/// Lookup a layout for a typeck::Ty from the struct layout index.
 fn type_layout_from_index(
     ty: &crate::typeck::Ty,
     struct_layouts: &StructLayoutIndex,
@@ -2742,6 +1223,7 @@ fn type_layout_from_index(
     type_layout_for_tykind(&ty_kind, ptr_ty)
 }
 
+/// Emit short-circuit logic for `&&` and `||`.
 fn emit_hir_short_circuit_expr(
     builder: &mut FunctionBuilder,
     lhs_val: ir::Value,
@@ -2794,6 +1276,7 @@ fn emit_hir_short_circuit_expr(
 }
 
 /// Emit HIR match as statement (arms can contain returns, don't produce values)
+/// Emit HIR match as statement (arms can contain returns, don't produce values).
 fn emit_hir_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
@@ -2908,6 +1391,7 @@ fn emit_hir_match_stmt(
 }
 
 /// Emit HIR match expression
+/// Emit HIR match expression (arms produce a value).
 fn emit_hir_match_expr(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
@@ -3102,6 +1586,7 @@ fn emit_hir_match_expr(
 }
 
 /// Compute the condition for an HIR pattern match
+/// Compute the condition for an HIR pattern match.
 fn hir_match_pattern_cond(
     builder: &mut FunctionBuilder,
     pattern: &crate::hir::HirPattern,
@@ -3179,6 +1664,7 @@ fn hir_match_pattern_cond(
 }
 
 /// Bind pattern variables for HIR patterns
+/// Bind pattern variables for HIR patterns.
 fn hir_bind_match_pattern_value(
     builder: &mut FunctionBuilder,
     pattern: &crate::hir::HirPattern,
@@ -3215,6 +1701,7 @@ fn hir_bind_match_pattern_value(
     }
 }
 
+/// Convert a ValueRepr into a boolean condition value.
 fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, CodegenError> {
     match value {
         ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
@@ -3225,6 +1712,7 @@ fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, C
     }
 }
 
+/// Normalize boolean values to i8 for ABI uses.
 fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
     let ty = builder.func.dfg.value_type(value);
     if ty == ir::types::I8 {
@@ -3234,6 +1722,7 @@ fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
     }
 }
 
+/// Emit a string literal into the data section and return (ptr, len).
 fn emit_string(
     builder: &mut FunctionBuilder,
     value: &str,
@@ -3258,7 +1747,8 @@ fn emit_string(
     Ok(ValueRepr::Pair(ptr, len))
 }
 
-fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
+/// Flatten a ValueRepr into ABI-ready Cranelift values.
+pub(super) fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
     match value {
         ValueRepr::Unit => vec![],
         ValueRepr::Single(val) => vec![*val],
@@ -3272,7 +1762,8 @@ fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
     }
 }
 
-fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
+/// Store a value into a local slot where needed.
+pub(super) fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
     match value {
         ValueRepr::Unit => LocalValue::Value(ValueRepr::Unit),
         ValueRepr::Single(val) => {
@@ -3288,6 +1779,7 @@ fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
     }
 }
 
+/// Load a local value from its storage representation.
 fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -> ValueRepr {
     match local {
         LocalValue::Slot(slot, ty) => ValueRepr::Single(builder.ins().stack_load(*ty, *slot, 0)),
@@ -3299,6 +1791,7 @@ fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -
     }
 }
 
+/// Compute the ABI type used for ResultOut payloads.
 fn value_type_for_result_out(ty: &TyKind, ptr_ty: Type) -> Result<ir::Type, CodegenError> {
     match ty {
         TyKind::I32 | TyKind::U32 => Ok(ir::types::I32),
@@ -3310,6 +1803,7 @@ fn value_type_for_result_out(ty: &TyKind, ptr_ty: Type) -> Result<ir::Type, Code
     }
 }
 
+/// Construct a zero/empty value for a codegen TyKind.
 fn zero_value_for_tykind(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
@@ -3341,6 +1835,7 @@ fn zero_value_for_tykind(
     }
 }
 
+/// Construct a zero/empty value for a typeck::Ty.
 fn zero_value_for_ty(
     builder: &mut FunctionBuilder,
     ty: &crate::typeck::Ty,
@@ -3371,7 +1866,8 @@ fn zero_value_for_ty(
     }
 }
 
-fn value_from_params(
+/// Reconstruct a ValueRepr from ABI parameters.
+pub(super) fn value_from_params(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
     params: &[ir::Value],
@@ -3416,6 +1912,7 @@ fn value_from_params(
     }
 }
 
+/// Reconstruct a ValueRepr from ABI return values.
 fn value_from_results(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
@@ -3458,245 +1955,8 @@ fn value_from_results(
     }
 }
 
-fn resolve_path(path: &AstPath, use_map: &UseMap) -> Vec<String> {
-    if path.segments.len() > 1 {
-        let first = &path.segments[0].item;
-        if let Some(prefix) = use_map.aliases.get(first) {
-            let mut resolved = prefix.clone();
-            for seg in path.segments.iter().skip(1) {
-                resolved.push(seg.item.clone());
-            }
-            return resolved;
-        }
-    }
-    path.segments.iter().map(|seg| seg.item.clone()).collect()
-}
-
-fn build_stdlib_index(stdlib: &[crate::hir::HirModule]) -> StdlibIndex {
-    let mut types = HashMap::new();
-    for module in stdlib {
-        let module_name = &module.name;
-        // Add public structs
-        for st in &module.structs {
-            if st.is_pub {
-                let qualified = format!("{}.{}", module_name, st.name);
-                types.insert(st.name.clone(), qualified);
-            }
-        }
-        // Add public enums
-        for en in &module.enums {
-            if en.is_pub {
-                let qualified = format!("{}.{}", module_name, en.name);
-                types.insert(en.name.clone(), qualified);
-            }
-        }
-    }
-    StdlibIndex { types }
-}
-
-fn build_enum_index(
-    entry: &crate::hir::HirModule,
-    user_modules: &[crate::hir::HirModule],
-    stdlib: &[crate::hir::HirModule],
-) -> EnumIndex {
-    let mut variants = HashMap::new();
-    let entry_name = &entry.name;
-    let modules = stdlib
-        .iter()
-        .chain(user_modules.iter())
-        .chain(std::iter::once(entry));
-    for module in modules {
-        let module_name = &module.name;
-        for en in &module.enums {
-            let mut map = HashMap::new();
-            for (idx, variant) in en.variants.iter().enumerate() {
-                map.insert(variant.name.clone(), idx as i32);
-            }
-            let qualified = format!("{}.{}", module_name, en.name);
-            variants.insert(qualified, map.clone());
-            if module_name == entry_name {
-                variants.insert(en.name.clone(), map);
-            }
-        }
-    }
-    EnumIndex { variants }
-}
-
-fn build_struct_layout_index(
-    entry: &crate::hir::HirModule,
-    user_modules: &[crate::hir::HirModule],
-    stdlib: &[crate::hir::HirModule],
-    ptr_ty: Type,
-) -> Result<StructLayoutIndex, CodegenError> {
-    let modules = stdlib
-        .iter()
-        .chain(user_modules.iter())
-        .chain(std::iter::once(entry))
-        .collect::<Vec<_>>();
-
-    let mut defs: HashMap<String, (&str, &crate::hir::HirStruct)> = HashMap::new();
-    let mut name_counts: HashMap<String, usize> = HashMap::new();
-    for module in &modules {
-        for st in &module.structs {
-            if st.is_opaque {
-                continue;
-            }
-            let qualified = format!("{}.{}", module.name, st.name);
-            defs.insert(qualified, (&module.name, st));
-            *name_counts.entry(st.name.clone()).or_insert(0) += 1;
-        }
-    }
-
-    let mut layouts = HashMap::new();
-    let mut visiting = HashSet::new();
-    for (qualified, (module_name, st)) in &defs {
-        compute_struct_layout(
-            qualified,
-            module_name,
-            st,
-            &defs,
-            &mut layouts,
-            &mut visiting,
-            ptr_ty,
-        )?;
-    }
-
-    // Also register unqualified names when unambiguous.
-    for module in &modules {
-        for st in &module.structs {
-            if st.is_opaque {
-                continue;
-            }
-            let qualified = format!("{}.{}", module.name, st.name);
-            if let Some(layout) = layouts.get(&qualified).cloned() {
-                if name_counts.get(&st.name).copied().unwrap_or(0) == 1 {
-                    layouts.entry(st.name.clone()).or_insert(layout);
-                }
-            }
-        }
-    }
-
-    Ok(StructLayoutIndex { layouts })
-}
-
-fn compute_struct_layout(
-    qualified: &str,
-    module_name: &str,
-    st: &crate::hir::HirStruct,
-    defs: &HashMap<String, (&str, &crate::hir::HirStruct)>,
-    layouts: &mut HashMap<String, StructLayout>,
-    visiting: &mut HashSet<String>,
-    ptr_ty: Type,
-) -> Result<(), CodegenError> {
-    if layouts.contains_key(qualified) {
-        return Ok(());
-    }
-    if !visiting.insert(qualified.to_string()) {
-        return Err(CodegenError::Unsupported(format!(
-            "recursive struct layout for {qualified}"
-        )));
-    }
-
-    let mut fields = HashMap::new();
-    let mut field_order = Vec::new();
-    let mut offset = 0u32;
-    let mut align = 1u32;
-    for field in &st.fields {
-        let layout =
-            type_layout_for_ty(&field.ty, module_name, defs, layouts, visiting, ptr_ty)?;
-        offset = align_to(offset, layout.align);
-        fields.insert(
-            field.name.clone(),
-            StructFieldLayout {
-                offset,
-                ty: field.ty.clone(),
-            },
-        );
-        field_order.push(field.name.clone());
-        offset = offset.saturating_add(layout.size);
-        align = align.max(layout.align);
-    }
-    let size = align_to(offset, align);
-
-    layouts.insert(
-        qualified.to_string(),
-        StructLayout {
-            size,
-            align,
-            fields,
-            field_order,
-        },
-    );
-    visiting.remove(qualified);
-    Ok(())
-}
-
-fn type_layout_for_ty(
-    ty: &crate::typeck::Ty,
-    module_name: &str,
-    defs: &HashMap<String, (&str, &crate::hir::HirStruct)>,
-    layouts: &mut HashMap<String, StructLayout>,
-    visiting: &mut HashSet<String>,
-    ptr_ty: Type,
-) -> Result<TypeLayout, CodegenError> {
-    use crate::typeck::Ty;
-
-    if let Some(layout) = resolve_struct_layout(ty, module_name, layouts) {
-        return Ok(TypeLayout {
-            size: layout.size,
-            align: layout.align,
-        });
-    }
-
-    match ty {
-        Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
-            let tag = TypeLayout { size: 1, align: 1 };
-            let ok = type_layout_for_ty(&args[0], module_name, defs, layouts, visiting, ptr_ty)?;
-            let err = type_layout_for_ty(&args[1], module_name, defs, layouts, visiting, ptr_ty)?;
-            let mut offset = 0u32;
-            let mut align = tag.align;
-            offset = align_to(offset, tag.align);
-            offset = offset.saturating_add(tag.size);
-            offset = align_to(offset, ok.align);
-            offset = offset.saturating_add(ok.size);
-            offset = align_to(offset, err.align);
-            offset = offset.saturating_add(err.size);
-            align = align.max(ok.align).max(err.align);
-            let size = align_to(offset, align);
-            Ok(TypeLayout { size, align })
-        }
-        Ty::Path(name, _) => {
-            if let Some((struct_module, struct_def)) = resolve_struct_def(name, module_name, defs)
-            {
-                compute_struct_layout(
-                    &format!("{}.{}", struct_module, struct_def.name),
-                    struct_module,
-                    struct_def,
-                    defs,
-                    layouts,
-                    visiting,
-                    ptr_ty,
-                )?;
-                if let Some(layout) =
-                    resolve_struct_layout(&Ty::Path(name.clone(), Vec::new()), module_name, layouts)
-                {
-                    return Ok(TypeLayout {
-                        size: layout.size,
-                        align: layout.align,
-                    });
-                }
-            }
-            let ty_kind = typeck_ty_to_tykind(ty, None)?;
-            type_layout_for_tykind(&ty_kind, ptr_ty)
-        }
-        _ => {
-            let ty_kind = typeck_ty_to_tykind(ty, None)?;
-            type_layout_for_tykind(&ty_kind, ptr_ty)
-        }
-    }
-}
-
-fn emit_runtime_wrapper_call(
+/// Emit a call to a runtime intrinsic with ABI adaptation when needed.
+pub(super) fn emit_runtime_wrapper_call(
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,
     info: &FnInfo,
@@ -3874,165 +2134,4 @@ fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
             info.symbol
         ))),
     }
-}
-
-fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLayout, CodegenError> {
-    match ty {
-        TyKind::Unit => Ok(TypeLayout { size: 0, align: 1 }),
-        TyKind::I32 | TyKind::U32 => Ok(TypeLayout { size: 4, align: 4 }),
-        TyKind::U8 | TyKind::Bool => Ok(TypeLayout { size: 1, align: 1 }),
-        TyKind::Handle => Ok(TypeLayout { size: 8, align: 8 }),
-        TyKind::Ptr => Ok(TypeLayout {
-            size: ptr_ty.bytes() as u32,
-            align: ptr_ty.bytes() as u32,
-        }),
-        TyKind::String => {
-            let ptr_size = ptr_ty.bytes() as u32;
-            let len_offset = align_to(ptr_size, 8);
-            Ok(TypeLayout {
-                size: len_offset + 8,
-                align: ptr_ty.bytes().max(8) as u32,
-            })
-        }
-        TyKind::Result(ok, err) => {
-            let tag = TypeLayout { size: 1, align: 1 };
-            let ok = type_layout_for_tykind(ok, ptr_ty)?;
-            let err = type_layout_for_tykind(err, ptr_ty)?;
-            let mut offset = 0u32;
-            let mut align = tag.align;
-            offset = align_to(offset, tag.align);
-            offset = offset.saturating_add(tag.size);
-            offset = align_to(offset, ok.align);
-            offset = offset.saturating_add(ok.size);
-            offset = align_to(offset, err.align);
-            offset = offset.saturating_add(err.size);
-            align = align.max(ok.align).max(err.align);
-            let size = align_to(offset, align);
-            Ok(TypeLayout { size, align })
-        }
-        TyKind::ResultOut(_, _) | TyKind::ResultString => Err(CodegenError::Unsupported(
-            "layout for result out params".to_string(),
-        )),
-    }
-}
-
-fn resolve_struct_layout<'a>(
-    ty: &crate::typeck::Ty,
-    module_name: &str,
-    layouts: &'a HashMap<String, StructLayout>,
-) -> Option<&'a StructLayout> {
-    match ty {
-        crate::typeck::Ty::Path(name, _) => {
-            if name.contains('.') {
-                layouts.get(name)
-            } else {
-                let qualified = format!("{module_name}.{name}");
-                layouts.get(&qualified).or_else(|| layouts.get(name))
-            }
-        }
-        _ => None,
-    }
-}
-
-fn resolve_struct_def<'a>(
-    name: &str,
-    module_name: &str,
-    defs: &'a HashMap<String, (&'a str, &'a crate::hir::HirStruct)>,
-) -> Option<(&'a str, &'a crate::hir::HirStruct)> {
-    if name.contains('.') {
-        defs.get(name).copied()
-    } else {
-        let qualified = format!("{module_name}.{name}");
-        defs.get(&qualified)
-            .copied()
-            .or_else(|| defs.get(name).copied())
-    }
-}
-
-fn align_to(value: u32, align: u32) -> u32 {
-    if align == 0 {
-        return value;
-    }
-    let rem = value % align;
-    if rem == 0 {
-        value
-    } else {
-        value + (align - rem)
-    }
-}
-
-fn lower_ty(
-    ty: &AstType,
-    use_map: &UseMap,
-    stdlib: &StdlibIndex,
-    enum_index: &EnumIndex,
-) -> Result<TyKind, CodegenError> {
-    let resolved = match ty {
-        AstType::Ptr { .. } => {
-            return Ok(TyKind::Ptr);
-        }
-        AstType::Ref { target, .. } => {
-            return lower_ty(target, use_map, stdlib, enum_index);
-        }
-        AstType::Path { path, .. } => resolve_type_name(path, use_map, stdlib),
-    };
-    if resolved == "i32" {
-        return Ok(TyKind::I32);
-    }
-    if resolved == "u32" {
-        return Ok(TyKind::U32);
-    }
-    if resolved == "u8" {
-        return Ok(TyKind::U8);
-    }
-    if resolved == "bool" {
-        return Ok(TyKind::Bool);
-    }
-    if resolved == "unit" {
-        return Ok(TyKind::Unit);
-    }
-    if resolved == "string" {
-        return Ok(TyKind::String);
-    }
-    if resolved == "Result" {
-        if let AstType::Path { args, .. } = ty {
-            if args.len() == 2 {
-                let ok = lower_ty(&args[0], use_map, stdlib, enum_index)?;
-                let err = lower_ty(&args[1], use_map, stdlib, enum_index)?;
-                return Ok(TyKind::Result(Box::new(ok), Box::new(err)));
-            }
-        }
-    }
-    if resolved == "sys.system.RootCap"
-        || resolved == "sys.console.Console"
-        || resolved == "sys.fs.ReadFS"
-        || resolved == "sys.fs.Filesystem"
-        || resolved == "sys.fs.Dir"
-        || resolved == "sys.fs.FileRead"
-        || resolved == "sys.buffer.Alloc"
-        || resolved == "sys.buffer.Buffer"
-        || resolved == "sys.buffer.Slice"
-        || resolved == "sys.buffer.MutSlice"
-        || resolved == "sys.vec.VecU8"
-        || resolved == "sys.vec.VecI32"
-        || resolved == "sys.vec.VecString"
-    {
-        return Ok(TyKind::Handle);
-    }
-    if enum_index.variants.contains_key(&resolved) {
-        return Ok(TyKind::I32);
-    }
-    return Err(CodegenError::Unsupported(format!(
-        "unknown type `{resolved}`"
-    )));
-}
-
-fn resolve_type_name(path: &AstPath, use_map: &UseMap, stdlib: &StdlibIndex) -> String {
-    let resolved = resolve_path(path, use_map);
-    if resolved.len() == 1 {
-        if let Some(full) = stdlib.types.get(&resolved[0]) {
-            return full.clone();
-        }
-    }
-    resolved.join(".")
 }

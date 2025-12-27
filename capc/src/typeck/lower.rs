@@ -1,0 +1,831 @@
+use std::collections::HashMap;
+
+use crate::ast::*;
+use crate::error::TypeError;
+use crate::hir::{
+    HirAssignStmt, HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr,
+    HirExpr, HirExprStmt, HirExternFunction, HirField, HirFieldAccess, HirFunction, HirIfStmt,
+    HirLetStmt, HirLiteral, HirLocal, HirMatch, HirMatchArm, HirParam, HirPattern, HirReturnStmt,
+    HirStmt, HirStruct, HirStructLiteral, HirStructLiteralField, HirUnary, HirWhileStmt,
+    IntrinsicId, LocalId, ResolvedCallee,
+};
+
+use super::{
+    check, lower_type, resolve_enum_variant, resolve_method_target, resolve_type_name, EnumInfo,
+    FunctionSig, SpanExt, StructInfo, StdlibIndex, Ty, UseMap,
+};
+
+/// Context for HIR lowering (uses the type checker as source of truth).
+struct LoweringCtx<'a> {
+    functions: &'a HashMap<String, FunctionSig>,
+    structs: &'a HashMap<String, StructInfo>,
+    enums: &'a HashMap<String, EnumInfo>,
+    use_map: &'a UseMap,
+    stdlib: &'a StdlibIndex,
+    module_name: &'a str,
+    /// Maps variable names to their LocalId
+    local_map: HashMap<String, LocalId>,
+    /// Maps variable names to their types (needed for type checking during lowering)
+    local_types: HashMap<String, Ty>,
+    local_counter: usize,
+}
+
+impl<'a> LoweringCtx<'a> {
+    fn new(
+        functions: &'a HashMap<String, FunctionSig>,
+        structs: &'a HashMap<String, StructInfo>,
+        enums: &'a HashMap<String, EnumInfo>,
+        use_map: &'a UseMap,
+        stdlib: &'a StdlibIndex,
+        module_name: &'a str,
+    ) -> Self {
+        Self {
+            functions,
+            structs,
+            enums,
+            use_map,
+            stdlib,
+            module_name,
+            local_map: HashMap::new(),
+            local_types: HashMap::new(),
+            local_counter: 0,
+        }
+    }
+
+    fn fresh_local(&mut self, name: String, ty: Ty) -> LocalId {
+        let id = LocalId(self.local_counter);
+        self.local_counter += 1;
+        self.local_map.insert(name.clone(), id);
+        self.local_types.insert(name, ty);
+        id
+    }
+
+    fn get_local(&self, name: &str) -> Option<LocalId> {
+        self.local_map.get(name).copied()
+    }
+
+    /// Push a new scope for name bindings (shadowing is not yet modeled here).
+    fn push_scope(&mut self) {
+    }
+
+    /// Pop the most recent scope (placeholder for future scope stacks).
+    fn pop_scope(&mut self) {
+    }
+}
+
+/// Lower a fully type-checked module into HIR.
+pub(super) fn lower_module(
+    module: &Module,
+    functions: &HashMap<String, FunctionSig>,
+    structs: &HashMap<String, StructInfo>,
+    enums: &HashMap<String, EnumInfo>,
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+) -> Result<crate::hir::HirModule, TypeError> {
+    let module_name = module.name.to_string();
+    let mut ctx = LoweringCtx::new(functions, structs, enums, use_map, stdlib, &module_name);
+
+    let mut hir_functions = Vec::new();
+    let mut hir_extern_functions = Vec::new();
+    for item in &module.items {
+        match item {
+            Item::Function(func) => {
+                let hir_func = lower_function(func, &mut ctx)?;
+                hir_functions.push(hir_func);
+            }
+            Item::Impl(impl_block) => {
+                let methods = super::desugar_impl_methods(
+                    impl_block,
+                    &module_name,
+                    use_map,
+                    stdlib,
+                    structs,
+                )?;
+                for method in methods {
+                    let hir_func = lower_function(&method, &mut ctx)?;
+                    hir_functions.push(hir_func);
+                }
+            }
+            Item::ExternFunction(func) => {
+                let params: Result<Vec<HirParam>, TypeError> = func
+                    .params
+                    .iter()
+                    .map(|param| {
+                        let Some(ty) = &param.ty else {
+                            return Err(TypeError::new(
+                                format!("parameter `{}` requires a type annotation", param.name.item),
+                                param.name.span,
+                            ));
+                        };
+                        Ok(HirParam {
+                            local_id: LocalId(0),
+                            name: param.name.item.clone(),
+                            ty: lower_type(ty, use_map, stdlib)?,
+                        })
+                    })
+                    .collect();
+                hir_extern_functions.push(HirExternFunction {
+                    name: func.name.item.clone(),
+                    params: params?,
+                    ret_ty: lower_type(&func.ret, use_map, stdlib)?,
+                    is_pub: func.is_pub,
+                    span: func.span,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let mut hir_structs = Vec::new();
+    for item in &module.items {
+        if let Item::Struct(decl) = item {
+            let fields: Result<Vec<HirField>, TypeError> = decl
+                .fields
+                .iter()
+                .map(|f| {
+                    Ok(HirField {
+                        name: f.name.item.clone(),
+                        ty: lower_type(&f.ty, use_map, stdlib)?,
+                    })
+                })
+                .collect();
+            hir_structs.push(HirStruct {
+                name: decl.name.item.clone(),
+                fields: fields?,
+                is_pub: decl.is_pub,
+                is_opaque: decl.is_opaque,
+                is_linear: decl.is_linear,
+                is_copy: decl.is_copy,
+                span: decl.span,
+            });
+        }
+    }
+
+    let mut hir_enums = Vec::new();
+    for item in &module.items {
+        if let Item::Enum(decl) = item {
+            let variants: Result<Vec<HirEnumVariant>, TypeError> = decl
+                .variants
+                .iter()
+                .map(|v| {
+                    let payload = v.payload.as_ref()
+                        .map(|ty| lower_type(ty, use_map, stdlib))
+                        .transpose()?;
+                    Ok(HirEnumVariant {
+                        name: v.name.item.clone(),
+                        payload,
+                    })
+                })
+                .collect();
+            hir_enums.push(HirEnum {
+                name: decl.name.item.clone(),
+                variants: variants?,
+                is_pub: decl.is_pub,
+                span: decl.span,
+            });
+        }
+    }
+
+    Ok(crate::hir::HirModule {
+        name: module_name,
+        functions: hir_functions,
+        extern_functions: hir_extern_functions,
+        structs: hir_structs,
+        enums: hir_enums,
+    })
+}
+
+/// Lower a type-checked function into HIR, assigning LocalIds.
+fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction, TypeError> {
+    ctx.local_counter = 0;
+    ctx.local_map.clear();
+    ctx.local_types.clear();
+
+    let params: Result<Vec<HirParam>, TypeError> = func
+        .params
+        .iter()
+        .map(|p| {
+            let Some(ty) = &p.ty else {
+                return Err(TypeError::new(
+                    format!("parameter `{}` requires a type annotation", p.name.item),
+                    p.name.span,
+                ));
+            };
+            let ty = lower_type(ty, ctx.use_map, ctx.stdlib)?;
+            let local_id = ctx.fresh_local(p.name.item.clone(), ty.clone());
+            Ok(HirParam {
+                local_id,
+                name: p.name.item.clone(),
+                ty,
+            })
+        })
+        .collect();
+    let params = params?;
+
+    let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib)?;
+    let body = lower_block(&func.body, ctx, &ret_ty)?;
+
+    Ok(HirFunction {
+        name: func.name.item.clone(),
+        params,
+        ret_ty,
+        body,
+        is_pub: func.is_pub,
+        span: func.span,
+    })
+}
+
+/// Lower a block into HIR.
+fn lower_block(block: &Block, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirBlock, TypeError> {
+    ctx.push_scope();
+    let stmts: Result<Vec<HirStmt>, TypeError> = block
+        .stmts
+        .iter()
+        .map(|stmt| lower_stmt(stmt, ctx, ret_ty))
+        .collect();
+    ctx.pop_scope();
+
+    Ok(HirBlock {
+        stmts: stmts?,
+        span: block.span,
+    })
+}
+
+/// Lower a statement into HIR.
+fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt, TypeError> {
+    match stmt {
+        Stmt::Let(let_stmt) => {
+            let expr = lower_expr(&let_stmt.expr, ctx, ret_ty)?;
+            let ty = expr_type(&expr);
+            let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.clone());
+
+            Ok(HirStmt::Let(HirLetStmt {
+                local_id,
+                name: let_stmt.name.item.clone(),
+                ty,
+                expr,
+                span: let_stmt.span,
+            }))
+        }
+        Stmt::Assign(assign) => {
+            let expr = lower_expr(&assign.expr, ctx, ret_ty)?;
+            let local_id = ctx
+                .get_local(&assign.name.item)
+                .ok_or_else(|| TypeError::new("unknown variable".to_string(), assign.name.span))?;
+
+            Ok(HirStmt::Assign(HirAssignStmt {
+                local_id,
+                name: assign.name.item.clone(),
+                expr,
+                span: assign.span,
+            }))
+        }
+        Stmt::Return(ret) => {
+            let expr = ret.expr.as_ref().map(|e| lower_expr(e, ctx, ret_ty)).transpose()?;
+            Ok(HirStmt::Return(HirReturnStmt {
+                expr,
+                span: ret.span,
+            }))
+        }
+        Stmt::If(if_stmt) => {
+            let cond = lower_expr(&if_stmt.cond, ctx, ret_ty)?;
+            let then_block = lower_block(&if_stmt.then_block, ctx, ret_ty)?;
+            let else_block = if_stmt
+                .else_block
+                .as_ref()
+                .map(|b| lower_block(b, ctx, ret_ty))
+                .transpose()?;
+
+            Ok(HirStmt::If(HirIfStmt {
+                cond,
+                then_block,
+                else_block,
+                span: if_stmt.span,
+            }))
+        }
+        Stmt::While(while_stmt) => {
+            let cond = lower_expr(&while_stmt.cond, ctx, ret_ty)?;
+            let body = lower_block(&while_stmt.body, ctx, ret_ty)?;
+
+            Ok(HirStmt::While(HirWhileStmt {
+                cond,
+                body,
+                span: while_stmt.span,
+            }))
+        }
+        Stmt::Expr(expr_stmt) => {
+            if let Expr::Match(match_expr) = &expr_stmt.expr {
+                match lower_expr(&expr_stmt.expr, ctx, ret_ty) {
+                    Ok(expr) => {
+                        return Ok(HirStmt::Expr(HirExprStmt {
+                            expr,
+                            span: expr_stmt.span,
+                        }));
+                    }
+                    Err(_) => {
+                        let expr = lower_match_stmt(match_expr, ctx, ret_ty)?;
+                        return Ok(HirStmt::Expr(HirExprStmt {
+                            expr,
+                            span: expr_stmt.span,
+                        }));
+                    }
+                }
+            }
+
+            let expr = lower_expr(&expr_stmt.expr, ctx, ret_ty)?;
+            Ok(HirStmt::Expr(HirExprStmt {
+                expr,
+                span: expr_stmt.span,
+            }))
+        }
+    }
+}
+
+/// Helper to get the type of an AST expression using the existing typechecker.
+/// This ensures we have a single source of truth for types.
+fn type_of_ast_expr(
+    expr: &Expr,
+    ctx: &LoweringCtx,
+    ret_ty: &Ty,
+) -> Result<Ty, TypeError> {
+    let mut scopes = super::Scopes::from_flat_map(ctx.local_types.clone());
+    check::check_expr(
+        expr,
+        ctx.functions,
+        &mut scopes,
+        super::UseMode::Read,
+        ctx.use_map,
+        ctx.structs,
+        ctx.enums,
+        ctx.stdlib,
+        ret_ty,
+        ctx.module_name,
+    )
+}
+
+/// Lower an expression into HIR with resolved callee information.
+fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr, TypeError> {
+    let ty = type_of_ast_expr(expr, ctx, ret_ty)?;
+
+    match expr {
+        Expr::Literal(lit) => Ok(HirExpr::Literal(HirLiteral {
+            value: lit.value.clone(),
+            ty,
+            span: lit.span,
+        })),
+        Expr::Grouping(grouping) => lower_expr(&grouping.expr, ctx, ret_ty),
+        Expr::Path(path) => {
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].item;
+                if ctx.local_types.contains_key(name) {
+                    let local_id = ctx.get_local(name).unwrap();
+                    return Ok(HirExpr::Local(HirLocal {
+                        local_id,
+                        name: name.clone(),
+                        ty,
+                        span: path.span,
+                    }));
+                }
+            }
+
+            let variant_name = path.segments.last()
+                .map(|s| s.item.clone())
+                .unwrap_or_else(|| String::from("unknown"));
+
+            Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                enum_ty: ty,
+                variant_name,
+                payload: None,
+                span: path.span,
+            }))
+        }
+        Expr::Call(call) => {
+            let path = call.callee.to_path().ok_or_else(|| {
+                TypeError::new(
+                    "call target must be a function path".to_string(),
+                    call.callee.span(),
+                )
+            })?;
+
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].item;
+                if name == "drop" {
+                    let args: Result<Vec<HirExpr>, TypeError> = call
+                        .args
+                        .iter()
+                        .map(|arg| lower_expr(arg, ctx, ret_ty))
+                        .collect();
+                    return Ok(HirExpr::Call(HirCall {
+                        callee: ResolvedCallee::Intrinsic(IntrinsicId::Drop),
+                        args: args?,
+                        ret_ty: ty,
+                        span: call.span,
+                    }));
+                }
+                if name == "Ok" || name == "Err" {
+                    let arg = lower_expr(&call.args[0], ctx, ret_ty)?;
+                    let variant_name = name.clone();
+
+                    return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                        enum_ty: ty.clone(),
+                        variant_name,
+                        payload: Some(Box::new(arg)),
+                        span: call.span,
+                    }));
+                }
+            }
+
+            let mut resolved = super::resolve_path(&path, ctx.use_map);
+
+            if resolved.len() == 1 {
+                resolved.insert(0, ctx.module_name.to_string());
+            }
+
+            let key = resolved.join(".");
+
+            let args: Result<Vec<HirExpr>, TypeError> = call
+                .args
+                .iter()
+                .map(|arg| lower_expr(arg, ctx, ret_ty))
+                .collect();
+
+            let module = resolved[..resolved.len() - 1].join(".");
+            let name = resolved.last().unwrap().clone();
+            let symbol = format!("capable_{}", key.replace('.', "_"));
+
+            Ok(HirExpr::Call(HirCall {
+                callee: ResolvedCallee::Function {
+                    module,
+                    name,
+                    symbol,
+                },
+                args: args?,
+                ret_ty: ty,
+                span: call.span,
+            }))
+        }
+        Expr::MethodCall(method_call) => {
+            fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
+                    Expr::FieldAccess(fa) => get_leftmost_segment(&fa.object),
+                    _ => None,
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+                ctx.local_types.contains_key(base_name)
+            } else {
+                true
+            };
+
+            let path_call = method_call.receiver.to_path().map(|mut path| {
+                path.segments.push(method_call.method.clone());
+                path.span = Span::new(path.span.start, method_call.method.span.end);
+                path
+            });
+
+            let is_function = if let Some(path) = &path_call {
+                let resolved = super::resolve_path(path, ctx.use_map);
+                let key = resolved.join(".");
+                ctx.functions.contains_key(&key)
+            } else {
+                false
+            };
+
+            if !base_is_local && is_function {
+                let path = path_call.expect("path exists for function call");
+                let resolved = super::resolve_path(&path, ctx.use_map);
+                let key = resolved.join(".");
+                let args: Result<Vec<HirExpr>, TypeError> = method_call
+                    .args
+                    .iter()
+                    .map(|arg| lower_expr(arg, ctx, ret_ty))
+                    .collect();
+
+                let module = resolved[..resolved.len() - 1].join(".");
+                let name = resolved.last().unwrap().clone();
+                let symbol = format!("capable_{}", key.replace('.', "_"));
+
+                return Ok(HirExpr::Call(HirCall {
+                    callee: ResolvedCallee::Function {
+                        module,
+                        name,
+                        symbol,
+                    },
+                    args: args?,
+                    ret_ty: ty,
+                    span: method_call.span,
+                }));
+            }
+
+            let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
+            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let (method_module, type_name, _) = resolve_method_target(
+                &receiver_ty,
+                ctx.module_name,
+                ctx.structs,
+                method_call.receiver.span(),
+            )?;
+            let method_fn = format!("{type_name}__{}", method_call.method.item);
+            let key = format!("{method_module}.{method_fn}");
+            let symbol = format!("capable_{}", key.replace('.', "_"));
+
+            let mut args = Vec::with_capacity(method_call.args.len() + 1);
+            args.push(receiver);
+            for arg in &method_call.args {
+                args.push(lower_expr(arg, ctx, ret_ty)?);
+            }
+
+            Ok(HirExpr::Call(HirCall {
+                callee: ResolvedCallee::Function {
+                    module: method_module,
+                    name: method_fn,
+                    symbol,
+                },
+                args,
+                ret_ty: ty,
+                span: method_call.span,
+            }))
+        }
+        Expr::Binary(bin) => {
+            let left = lower_expr(&bin.left, ctx, ret_ty)?;
+            let right = lower_expr(&bin.right, ctx, ret_ty)?;
+
+            Ok(HirExpr::Binary(HirBinary {
+                left: Box::new(left),
+                op: bin.op.clone(),
+                right: Box::new(right),
+                ty,
+                span: bin.span,
+            }))
+        }
+        Expr::Unary(un) => {
+            let operand = lower_expr(&un.expr, ctx, ret_ty)?;
+
+            Ok(HirExpr::Unary(HirUnary {
+                op: un.op.clone(),
+                expr: Box::new(operand),
+                ty,
+                span: un.span,
+            }))
+        }
+        Expr::FieldAccess(field_access) => {
+            fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
+                    Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
+                    _ => None,
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                ctx.local_types.contains_key(base_name)
+            } else {
+                true
+            };
+
+            if !base_is_local {
+                if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
+                    if let Some(enum_ty) =
+                        resolve_enum_variant(&path, ctx.use_map, ctx.enums, ctx.module_name)
+                    {
+                        let variant_name = path.segments.last()
+                            .map(|s| s.item.clone())
+                            .unwrap_or_else(|| String::from("unknown"));
+
+                        return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                            enum_ty,
+                            variant_name,
+                            payload: None,
+                            span: field_access.span,
+                        }));
+                    }
+                }
+            }
+
+            let object = lower_expr(&field_access.object, ctx, ret_ty)?;
+            let object_ty = type_of_ast_expr(&field_access.object, ctx, ret_ty)?;
+
+            Ok(HirExpr::FieldAccess(HirFieldAccess {
+                object: Box::new(object),
+                object_ty,
+                field_name: field_access.field.item.clone(),
+                field_ty: ty,
+                span: field_access.span,
+            }))
+        }
+        Expr::StructLiteral(lit) => {
+            let type_name = resolve_type_name(&lit.path, ctx.use_map, ctx.stdlib);
+            let key = if lit.path.segments.len() == 1 {
+                if ctx.stdlib.types.contains_key(&lit.path.segments[0].item) {
+                    type_name.clone()
+                } else {
+                    lit.path.segments[0].item.clone()
+                }
+            } else {
+                type_name.clone()
+            };
+
+            let info = ctx.structs.get(&key).ok_or_else(|| {
+                TypeError::new(format!("unknown struct `{}`", key), lit.span)
+            })?;
+
+            if info.is_opaque && info.module != ctx.module_name {
+                return Err(TypeError::new(
+                    format!(
+                        "cannot construct opaque type `{}` outside module `{}`",
+                        key, info.module
+                    ),
+                    lit.span,
+                ));
+            }
+
+            let mut hir_fields = Vec::new();
+            for field in &lit.fields {
+                let hir_expr = lower_expr(&field.expr, ctx, ret_ty)?;
+                hir_fields.push(HirStructLiteralField {
+                    name: field.name.item.clone(),
+                    expr: hir_expr,
+                });
+            }
+
+            let struct_ty = Ty::Path(type_name, vec![]);
+
+            Ok(HirExpr::StructLiteral(HirStructLiteral {
+                struct_ty,
+                fields: hir_fields,
+                span: lit.span,
+            }))
+        }
+        Expr::Match(match_expr) => {
+            let scrutinee = lower_expr(&match_expr.expr, ctx, ret_ty)?;
+            let scrutinee_ty = expr_type(&scrutinee);
+
+            let mut hir_arms = Vec::new();
+            for arm in &match_expr.arms {
+                ctx.push_scope();
+
+                let hir_pattern = lower_pattern(&arm.pattern, &scrutinee_ty, ctx)?;
+
+                let hir_body = lower_block(&arm.body, ctx, ret_ty)?;
+
+                ctx.pop_scope();
+
+                hir_arms.push(HirMatchArm {
+                    pattern: hir_pattern,
+                    body: hir_body,
+                });
+            }
+
+            Ok(HirExpr::Match(HirMatch {
+                expr: Box::new(scrutinee),
+                expr_ty: scrutinee_ty,
+                arms: hir_arms,
+                result_ty: ty,
+                span: match_expr.span,
+            }))
+        }
+    }
+}
+
+/// Lower a match-as-statement (arms can contain returns, don't need to produce values).
+fn lower_match_stmt(
+    match_expr: &MatchExpr,
+    ctx: &mut LoweringCtx,
+    ret_ty: &Ty,
+) -> Result<HirExpr, TypeError> {
+    let scrutinee = lower_expr(&match_expr.expr, ctx, ret_ty)?;
+    let scrutinee_ty = expr_type(&scrutinee);
+
+    let mut hir_arms = Vec::new();
+    for arm in &match_expr.arms {
+        ctx.push_scope();
+
+        let hir_pattern = lower_pattern(&arm.pattern, &scrutinee_ty, ctx)?;
+
+        let hir_body = lower_block(&arm.body, ctx, ret_ty)?;
+
+        ctx.pop_scope();
+
+        hir_arms.push(HirMatchArm {
+            pattern: hir_pattern,
+            body: hir_body,
+        });
+    }
+
+    Ok(HirExpr::Match(HirMatch {
+        expr: Box::new(scrutinee),
+        expr_ty: scrutinee_ty,
+        arms: hir_arms,
+        result_ty: Ty::Builtin(super::BuiltinType::Unit),
+        span: match_expr.span,
+    }))
+}
+
+/// Lower an AST pattern to an HIR pattern, adding any bindings to the context.
+fn lower_pattern(
+    pattern: &Pattern,
+    match_ty: &Ty,
+    ctx: &mut LoweringCtx,
+) -> Result<HirPattern, TypeError> {
+    match pattern {
+        Pattern::Wildcard(_) => Ok(HirPattern::Wildcard),
+
+        Pattern::Literal(lit) => Ok(HirPattern::Literal(lit.clone())),
+
+        Pattern::Binding(ident) => {
+            let local_id = ctx.fresh_local(ident.item.clone(), match_ty.clone());
+            Ok(HirPattern::Binding(local_id, ident.item.clone()))
+        }
+
+        Pattern::Path(path) => {
+            if let Some(enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
+                let variant_name = path.segments.last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                Ok(HirPattern::Variant {
+                    enum_ty,
+                    variant_name,
+                    binding: None,
+                })
+            } else {
+                Err(TypeError::new(
+                    format!("unknown enum variant in pattern: {}", path),
+                    path.span,
+                ))
+            }
+        }
+
+        Pattern::Call { path, binding, span } => {
+            if path.segments.len() == 1 {
+                let name = &path.segments[0].item;
+                if name == "Ok" || name == "Err" {
+                    if let Ty::Path(ty_name, args) = match_ty {
+                        if ty_name == "Result" && args.len() == 2 {
+                            let variant_name = name.clone();
+
+                            let binding_info = if let Some(bind_ident) = binding {
+                                let bind_ty = if variant_name == "Ok" {
+                                    args[0].clone()
+                                } else {
+                                    args[1].clone()
+                                };
+                                let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
+                                Some((local_id, bind_ident.item.clone()))
+                            } else {
+                                None
+                            };
+
+                            return Ok(HirPattern::Variant {
+                                enum_ty: match_ty.clone(),
+                                variant_name,
+                                binding: binding_info,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if let Some(enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
+                let variant_name = path.segments.last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                let binding_info = if let Some(bind_ident) = binding {
+                    let bind_ty = match_ty.clone();
+                    let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
+                    Some((local_id, bind_ident.item.clone()))
+                } else {
+                    None
+                };
+
+                Ok(HirPattern::Variant {
+                    enum_ty,
+                    variant_name,
+                    binding: binding_info,
+                })
+            } else {
+                Err(TypeError::new(
+                    format!("unknown enum variant in pattern: {}", path),
+                    *span,
+                ))
+            }
+        }
+    }
+}
+
+/// Extract the type from an HIR expression.
+fn expr_type(expr: &HirExpr) -> Ty {
+    match expr {
+        HirExpr::Literal(lit) => lit.ty.clone(),
+        HirExpr::Local(local) => local.ty.clone(),
+        HirExpr::EnumVariant(variant) => variant.enum_ty.clone(),
+        HirExpr::Call(call) => call.ret_ty.clone(),
+        HirExpr::FieldAccess(fa) => fa.field_ty.clone(),
+        HirExpr::StructLiteral(sl) => sl.struct_ty.clone(),
+        HirExpr::Binary(bin) => bin.ty.clone(),
+        HirExpr::Unary(un) => un.ty.clone(),
+        HirExpr::Match(m) => m.result_ty.clone(),
+    }
+}
