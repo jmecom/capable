@@ -259,7 +259,7 @@ fn validate_impl_method(
     stdlib: &StdlibIndex,
     span: Span,
 ) -> Result<Vec<Param>, TypeError> {
-    if method.name.item.contains("__") || method.name.item.starts_with(&format!("{type_name}__")) {
+    if method.name.item.contains("__") {
         return Err(TypeError::new(
             "method name in impl should be unqualified (write sum, not Pair__sum)".to_string(),
             method.name.span,
@@ -269,13 +269,13 @@ fn validate_impl_method(
     let Some(first_param) = method.params.first() else {
         return Err(TypeError::new(
             format!("first parameter must be self: {type_name}"),
-            span,
+            method.name.span,
         ));
     };
     if first_param.name.item != "self" {
         return Err(TypeError::new(
             format!("first parameter must be self: {type_name}"),
-            span,
+            first_param.name.span,
         ));
     }
 
@@ -293,8 +293,10 @@ fn validate_impl_method(
             && lowered != expected_ptr_qualified
         {
             return Err(TypeError::new(
-                format!("first parameter must be self: {type_name}"),
-                span,
+                format!(
+                    "first parameter must be self: {type_name} (found {lowered:?})"
+                ),
+                ty.span(),
             ));
         }
     } else {
@@ -406,6 +408,7 @@ fn collect_functions(
     for module in modules {
         let module_name = module.name.to_string();
         let local_use = UseMap::new(module);
+        let mut impl_methods = std::collections::HashSet::new();
         for item in &module.items {
             let mut add_function = |name: &Ident,
                                     params: &[Param],
@@ -478,6 +481,17 @@ fn collect_functions(
                     let methods =
                         desugar_impl_methods(impl_block, &module_name, &local_use, stdlib, struct_map)?;
                     for method in methods {
+                        if let Some((impl_ty, method_name)) = method.name.item.split_once("__") {
+                            let key = format!("{impl_ty}::{method_name}");
+                            if !impl_methods.insert(key.clone()) {
+                                return Err(TypeError::new(
+                                    format!(
+                                        "duplicate method `{method_name}` for `{impl_ty}`"
+                                    ),
+                                    method.name.span,
+                                ));
+                            }
+                        }
                         add_function(
                             &method.name,
                             &method.params,
