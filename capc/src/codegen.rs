@@ -1508,6 +1508,7 @@ fn mangle_symbol(module_name: &str, func_name: &str) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn emit_stmt(
     builder: &mut FunctionBuilder,
     stmt: &Stmt,
@@ -1786,6 +1787,7 @@ fn emit_stmt(
     Ok(Flow::Continues)
 }
 
+#[allow(dead_code)]
 fn emit_expr(
     builder: &mut FunctionBuilder,
     expr: &Expr,
@@ -2231,6 +2233,7 @@ fn emit_expr(
     }
 }
 
+#[allow(dead_code)]
 fn emit_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::ast::MatchExpr,
@@ -2365,6 +2368,7 @@ fn emit_match_stmt(
     }
 }
 
+#[allow(dead_code)]
 fn emit_match_expr(
     builder: &mut FunctionBuilder,
     match_expr: &crate::ast::MatchExpr,
@@ -4207,6 +4211,7 @@ fn hir_bind_match_pattern_value(
     }
 }
 
+#[allow(dead_code)]
 fn match_pattern_cond(
     builder: &mut FunctionBuilder,
     pattern: &Pattern,
@@ -4271,6 +4276,7 @@ fn match_pattern_cond(
     }
 }
 
+#[allow(dead_code)]
 fn bind_match_pattern_value(
     builder: &mut FunctionBuilder,
     pattern: &Pattern,
@@ -4336,6 +4342,7 @@ fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
     }
 }
 
+#[allow(dead_code)]
 fn emit_short_circuit_expr(
     builder: &mut FunctionBuilder,
     lhs: ir::Value,
@@ -4622,6 +4629,7 @@ fn value_from_results(
     }
 }
 
+#[allow(dead_code)]
 fn resolve_call_path(path: &AstPath, module_name: &str, use_map: &UseMap) -> String {
     let resolved = resolve_path(path, use_map);
     if resolved.len() == 1 {
@@ -4645,6 +4653,7 @@ fn resolve_path(path: &AstPath, use_map: &UseMap) -> Vec<String> {
     path.segments.iter().map(|seg| seg.item.clone()).collect()
 }
 
+#[allow(dead_code)]
 fn resolve_enum_variant(path: &AstPath, use_map: &UseMap, enum_index: &EnumIndex) -> Option<i32> {
     let resolved = resolve_path(path, use_map);
     if resolved.len() < 2 {
