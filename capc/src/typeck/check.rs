@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::error::TypeError;
@@ -1531,6 +1531,14 @@ fn check_match_stmt(
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
     }
+    check_match_exhaustive(
+        &match_ty,
+        &match_expr.arms,
+        use_map,
+        enum_map,
+        module_name,
+        match_expr.span,
+    )?;
     merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(Ty::Builtin(BuiltinType::Unit))
 }
@@ -1590,6 +1598,14 @@ fn check_match_expr_value(
             result_ty = Some(arm_ty);
         }
     }
+    check_match_exhaustive(
+        &match_ty,
+        &match_expr.arms,
+        use_map,
+        enum_map,
+        module_name,
+        match_expr.span,
+    )?;
     merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))
 }
@@ -1649,6 +1665,108 @@ fn check_match_arm_value(
             block.span,
         )),
     }
+}
+
+fn check_match_exhaustive(
+    match_ty: &Ty,
+    arms: &[MatchArm],
+    use_map: &UseMap,
+    enum_map: &HashMap<String, EnumInfo>,
+    module_name: &str,
+    span: Span,
+) -> Result<(), TypeError> {
+    if arms
+        .iter()
+        .any(|arm| matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Binding(_)))
+    {
+        return Ok(());
+    }
+
+    match match_ty {
+        Ty::Builtin(BuiltinType::Bool) => {
+            let mut seen_true = false;
+            let mut seen_false = false;
+            for arm in arms {
+                if let Pattern::Literal(Literal::Bool(value)) = arm.pattern {
+                    if value {
+                        seen_true = true;
+                    } else {
+                        seen_false = true;
+                    }
+                }
+            }
+            if seen_true && seen_false {
+                return Ok(());
+            }
+            return Err(TypeError::new(
+                "non-exhaustive match on bool".to_string(),
+                span,
+            ));
+        }
+        Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+            let mut seen_ok = false;
+            let mut seen_err = false;
+            for arm in arms {
+                if let Pattern::Call { path, .. } = &arm.pattern {
+                    if path.segments.len() == 1 {
+                        let variant = path.segments[0].item.as_str();
+                        if variant == "Ok" {
+                            seen_ok = true;
+                        } else if variant == "Err" {
+                            seen_err = true;
+                        }
+                    }
+                }
+            }
+            if seen_ok && seen_err {
+                return Ok(());
+            }
+            return Err(TypeError::new(
+                "non-exhaustive match on Result".to_string(),
+                span,
+            ));
+        }
+        Ty::Path(name, _) => {
+            let info = enum_map.get(name).or_else(|| {
+                if name.contains('.') {
+                    None
+                } else {
+                    enum_map.get(&format!("{module_name}.{name}"))
+                }
+            });
+            let Some(info) = info else {
+                return Ok(());
+            };
+            let mut seen = HashSet::new();
+            for arm in arms {
+                if let Pattern::Path(path) = &arm.pattern {
+                    if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
+                        if &ty == match_ty {
+                            if let Some(seg) = path.segments.last() {
+                                seen.insert(seg.item.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            if info.variants.iter().all(|v| seen.contains(v)) {
+                return Ok(());
+            }
+            let missing: Vec<String> = info
+                .variants
+                .iter()
+                .filter(|v| !seen.contains(*v))
+                .cloned()
+                .collect();
+            return Err(TypeError::new(
+                format!("non-exhaustive match, missing variants: {}", missing.join(", ")),
+                span,
+            ));
+        }
+        _ => {}
+    }
+
+    Ok(())
 }
 
 /// Check a struct literal and ensure all fields are present and typed.

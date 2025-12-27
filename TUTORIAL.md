@@ -105,6 +105,15 @@ fn use_value() -> Result[i32, i32] {
 }
 ```
 
+Matches must be exhaustive; use `_` to cover the rest:
+
+```cap
+match flag {
+  true => { }
+  false => { }
+}
+```
+
 ## 6) Capabilities and attenuation
 
 Capabilities live in `sys.*` and are opaque. You can only get them from `RootCap`.

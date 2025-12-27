@@ -1,0 +1,9 @@
+module should_fail_match_bool_non_exhaustive
+
+pub fn main() -> i32 {
+  match true {
+    true => {
+    }
+  }
+  return 0
+}

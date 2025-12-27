@@ -50,6 +50,43 @@ fn typecheck_match_bool_ok() {
 }
 
 #[test]
+fn typecheck_match_bool_non_exhaustive_fails() {
+    let source = load_program("should_fail_match_bool_non_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("non-exhaustive match on bool"));
+}
+
+#[test]
+fn typecheck_match_enum_non_exhaustive_fails() {
+    let source = load_program("should_fail_match_enum_non_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("non-exhaustive match, missing variants"));
+}
+
+#[test]
+fn typecheck_match_enum_exhaustive_ok() {
+    let source = load_program("should_pass_match_enum_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_match_result_non_exhaustive_fails() {
+    let source = load_program("should_fail_match_result_non_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("non-exhaustive match on Result"));
+}
+
+#[test]
 fn typecheck_match_expr_ok() {
     let source = load_program("match_expr.cap");
     let module = parse_module(&source).expect("parse module");
