@@ -268,11 +268,11 @@ fn validate_impl_method(
     type_name: &str,
     target_ty: &Ty,
     target_ast: &Type,
-    module_name: &str,
+    _module_name: &str,
     method: &Function,
     use_map: &UseMap,
     stdlib: &StdlibIndex,
-    span: Span,
+    _span: Span,
 ) -> Result<Vec<Param>, TypeError> {
     if method.name.item.contains("__") {
         return Err(TypeError::new(

@@ -2,7 +2,6 @@ package safe
 module wc_file
 use sys::system
 use sys::console
-use sys::fs
 use sys::buffer
 
 fn count_text(c: Console, alloc: Alloc, s: string) -> i32 {

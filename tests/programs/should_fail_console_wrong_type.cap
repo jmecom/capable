@@ -1,5 +1,4 @@
 module should_fail_console_wrong_type
-use sys::console
 
 pub fn main(sys: RootCap) -> i32 {
   let c: i32 = 0

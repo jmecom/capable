@@ -1,6 +1,5 @@
 module early_return_block
 use sys::system
-use sys::console
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()

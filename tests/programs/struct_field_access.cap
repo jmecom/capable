@@ -1,6 +1,5 @@
 module struct_field_access
 use sys::system
-use sys::console
 
 struct Pair { left: i32, right: i32 }
 

@@ -1,6 +1,5 @@
 module fs_traversal_denied
 use sys::system
-use sys::fs
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()

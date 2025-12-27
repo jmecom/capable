@@ -1,6 +1,5 @@
 module unit_match_multi
 use sys::system
-use sys::console
 
 fn helper() -> unit {
   return ()

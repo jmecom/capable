@@ -1229,15 +1229,15 @@ fn typeck_ty_to_tykind(
                 Ok(TyKind::I32)
             }
         },
-        Ty::Ptr(inner) => Ok(TyKind::Ptr),
+        Ty::Ptr(_inner) => Ok(TyKind::Ptr),
     }
 }
 
 fn register_user_functions(
     module: &crate::hir::HirModule,
     entry: &crate::hir::HirModule,
-    stdlib: &StdlibIndex,
-    enum_index: &EnumIndex,
+    _stdlib: &StdlibIndex,
+    _enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
     _ptr_ty: Type,
@@ -2844,7 +2844,7 @@ fn emit_hir_expr(
         }
         HirExpr::Call(call) => {
             // HIR calls are already fully resolved - no path resolution needed!
-            let (module_path, func_name, symbol) = match &call.callee {
+            let (module_path, func_name, _symbol) = match &call.callee {
                 crate::hir::ResolvedCallee::Function { module, name, symbol } => {
                     (module.clone(), name.clone(), symbol.clone())
                 }
@@ -4046,7 +4046,7 @@ fn hir_bind_match_pattern_value(
             Ok(())
         }
         HirPattern::Variant { variant_name, binding, .. } => {
-            if let Some((local_id, name)) = binding {
+            if let Some((_local_id, name)) = binding {
                 // Bind the inner value based on variant
                 let Some((ok_val, err_val)) = result else {
                     return Err(CodegenError::Unsupported(

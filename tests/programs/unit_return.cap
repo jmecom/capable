@@ -1,6 +1,5 @@
 module unit_return
 use sys::system
-use sys::console
 
 fn helper() -> unit {
   return ()
