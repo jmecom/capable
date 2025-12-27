@@ -910,3 +910,44 @@ fn expr_type(expr: &HirExpr) -> HirType {
         HirExpr::Match(m) => m.result_ty.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Span;
+    use std::collections::HashMap;
+    use super::super::TypeKind;
+
+    #[test]
+    fn abi_type_for_resolves_module_local_structs() {
+        let mut structs = HashMap::new();
+        structs.insert(
+            "foo.Pair".to_string(),
+            StructInfo {
+                fields: HashMap::new(),
+                is_opaque: false,
+                kind: TypeKind::Unrestricted,
+                module: "foo".to_string(),
+            },
+        );
+        let functions = HashMap::new();
+        let enums = HashMap::new();
+        let use_map = UseMap {
+            aliases: HashMap::new(),
+        };
+        let stdlib = StdlibIndex {
+            types: HashMap::new(),
+        };
+        let ctx = LoweringCtx::new(
+            &functions,
+            &structs,
+            &enums,
+            &use_map,
+            &stdlib,
+            "foo",
+        );
+        let ty = Ty::Path("Pair".to_string(), Vec::new());
+        let abi = abi_type_for(&ty, &ctx, Span::new(0, 0)).expect("abi");
+        assert_eq!(abi, AbiType::Ptr);
+    }
+}
