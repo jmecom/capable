@@ -1,20 +1,17 @@
 package safe
 module bytes_helpers
 use sys::system
-use sys::console
-use sys::string
-use sys::bytes
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let s = " \n"
-  let buf = string::bytes(s)
-  let b0 = bytes::at(buf, 0)
-  let b1 = bytes::at(buf, 1)
-  if (bytes::is_whitespace(b0) && bytes::is_whitespace(b1)) {
-    console::println(c, "bytes ok")
+  let buf = s.bytes()
+  let b0 = buf.at(0)
+  let b1 = buf.at(1)
+  if (b0.is_whitespace() && b1.is_whitespace()) {
+    c.println("bytes ok")
     return 0
   }
-  console::println(c, "bytes bad")
+  c.println("bytes bad")
   return 1
 }

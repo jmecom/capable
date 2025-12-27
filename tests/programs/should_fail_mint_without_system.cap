@@ -3,6 +3,6 @@ use sys::system
 
 pub fn main(sys: RootCap) -> i32 {
   let s: i32 = 0
-  let c = system::mint_console(s)
+  let c = s.mint_console()
   return 0
 }

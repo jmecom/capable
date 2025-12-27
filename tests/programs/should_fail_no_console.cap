@@ -3,6 +3,6 @@ use sys::console
 
 pub fn main(sys: RootCap) -> i32 {
   // Intentionally do NOT call sys.mint_console()
-  console::println(c, "nope")
+  c.println("nope")
   return 0
 }

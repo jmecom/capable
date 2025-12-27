@@ -1,6 +1,5 @@
 module method_calls
 use sys::system
-use sys::console
 
 struct Pair { left: i32, right: i32 }
 
@@ -20,11 +19,11 @@ pub fn main(sys: RootCap) -> i32 {
   let a = p.sum()
   let b = Pair { left: 5, right: 6 }.sum()
   let c2 = p.add(10)
-  console::print_i32(c, a)
-  console::print(c, " ")
-  console::print_i32(c, b)
-  console::print(c, " ")
-  console::print_i32(c, c2)
-  console::println(c, "")
+  c.print_i32(a)
+  c.print(" ")
+  c.print_i32(b)
+  c.print(" ")
+  c.print_i32(c2)
+  c.println("")
   return 0
 }

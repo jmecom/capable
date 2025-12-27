@@ -11,7 +11,7 @@ pub fn main(sys: RootCap) -> i32 {
     x = 2
   }
 
-  console::println(c, "x was mutated in inner scope")
-  console::println(c, "scoping assign test ok")
+  c.println("x was mutated in inner scope")
+  c.println("scoping assign test ok")
   return 0
 }

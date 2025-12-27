@@ -2,23 +2,58 @@ package unsafe
 module sys::system
 use sys::console
 use sys::fs
+use sys::args
+use sys::io
+use sys::buffer
 
 pub opaque struct RootCap
 
-pub fn mint_console(rc: RootCap) -> console::Console {
-  return ()
-}
-
-pub fn mint_readfs(rc: RootCap, root: string) -> fs::ReadFS {
-  return ()
-}
-
 impl RootCap {
   pub fn mint_console(self) -> console::Console {
-    return mint_console(self)
+    return ()
   }
 
   pub fn mint_readfs(self, root: string) -> fs::ReadFS {
-    return mint_readfs(self, root)
+    return ()
+  }
+
+  pub fn args_len(self) -> i32 {
+    return 0
+  }
+
+  pub fn args_at(self, index: i32) -> Result[string, args::ArgsErr] {
+    return Err(args::ArgsErr::OutOfRange)
+  }
+
+  pub fn read_stdin_to_string(self) -> Result[string, io::IoErr] {
+    return Err(io::IoErr::IoError)
+  }
+
+  pub fn alloc_default(self) -> buffer::Alloc {
+    return ()
+  }
+
+  pub fn malloc(self, size: i32) -> *u8 {
+    return ()
+  }
+
+  pub fn free(self, ptr: *u8) -> unit {
+    return ()
+  }
+
+  pub fn cast_u8_to_u32(self, ptr: *u8) -> *u32 {
+    return ()
+  }
+
+  pub fn cast_u32_to_u8(self, ptr: *u32) -> *u8 {
+    return ()
+  }
+
+  pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> buffer::Slice[u8] {
+    return ()
+  }
+
+  pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> buffer::MutSlice[u8] {
+    return ()
   }
 }

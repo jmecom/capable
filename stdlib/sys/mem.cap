@@ -1,22 +1,2 @@
 package unsafe
 module sys::mem
-
-use sys::buffer
-
-pub extern fn malloc(size: i32) -> *u8
-pub extern fn free(ptr: *u8) -> unit
-pub extern fn cast_u8_to_u32(ptr: *u8) -> *u32
-pub extern fn cast_u32_to_u8(ptr: *u32) -> *u8
-
-pub extern fn alloc_default() -> Alloc
-pub extern fn buffer_new(a: Alloc, initial_len: i32) -> Result[Buffer, AllocErr]
-pub extern fn buffer_len(b: Buffer) -> i32
-pub extern fn buffer_push(b: Buffer, x: u8) -> Result[unit, AllocErr]
-pub extern fn buffer_free(a: Alloc, b: Buffer) -> unit
-pub extern fn buffer_as_slice(b: Buffer) -> Slice[u8]
-pub extern fn buffer_as_mut_slice(b: Buffer) -> MutSlice[u8]
-pub extern fn slice_len(s: Slice[u8]) -> i32
-pub extern fn slice_at(s: Slice[u8], i: i32) -> u8
-pub extern fn mut_slice_at(s: MutSlice[u8], i: i32) -> u8
-pub extern fn slice_from_ptr(ptr: *u8, len: i32) -> Slice[u8]
-pub extern fn mut_slice_from_ptr(ptr: *u8, len: i32) -> MutSlice[u8]

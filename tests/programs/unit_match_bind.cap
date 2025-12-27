@@ -5,7 +5,7 @@ use sys::console
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   match () {
-    x => { console::println(c, "unit match bind ok") }
+    x => { c.println("unit match bind ok") }
   }
   return 0
 }

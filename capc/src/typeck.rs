@@ -160,11 +160,28 @@ fn resolve_method_target(
     struct_map: &HashMap<String, StructInfo>,
     span: Span,
 ) -> Result<(String, String, Vec<Ty>), TypeError> {
-    let Ty::Path(receiver_name, receiver_args) = receiver_ty else {
-        return Err(TypeError::new(
-            "method receiver must be a struct value".to_string(),
-            span,
-        ));
+    let (receiver_name, receiver_args) = match receiver_ty {
+        Ty::Path(name, args) => (name.as_str(), args),
+        Ty::Builtin(BuiltinType::String) => {
+            return Ok((
+                "sys.string".to_string(),
+                "string".to_string(),
+                Vec::new(),
+            ));
+        }
+        Ty::Builtin(BuiltinType::U8) => {
+            return Ok((
+                "sys.bytes".to_string(),
+                "u8".to_string(),
+                Vec::new(),
+            ));
+        }
+        _ => {
+            return Err(TypeError::new(
+                "method receiver must be a struct value".to_string(),
+                span,
+            ));
+        }
     };
 
     if let Some(info) = struct_map.get(receiver_name) {
@@ -188,11 +205,7 @@ fn resolve_method_target(
     }
 
     if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
-        return Ok((
-            info.module.clone(),
-            receiver_name.clone(),
-            receiver_args.clone(),
-        ));
+        return Ok((info.module.clone(), receiver_name.to_string(), receiver_args.clone()));
     }
 
     Err(TypeError::new(
@@ -208,39 +221,39 @@ fn resolve_impl_target(
     struct_map: &HashMap<String, StructInfo>,
     module_name: &str,
     span: Span,
-) -> Result<(String, String, Vec<Ty>), TypeError> {
+) -> Result<(String, String, Ty), TypeError> {
     let target_ty = lower_type(target, use_map, stdlib)?;
-    let Ty::Path(target_name, target_args) = &target_ty else {
-        return Err(TypeError::new(
-            "impl target must be a struct type name".to_string(),
-            span,
-        ));
-    };
-    if !target_args.is_empty() {
-        return Err(TypeError::new(
-            "generic impl targets not supported yet".to_string(),
-            span,
-        ));
-    }
-    let (impl_module, type_name, args) = if let Some(info) = struct_map.get(target_name) {
-        let type_name = target_name
-            .rsplit_once('.')
-            .map(|(_, t)| t)
-            .unwrap_or(target_name)
-            .to_string();
-        (info.module.clone(), type_name, target_args.clone())
-    } else if target_name.contains('.') {
-        let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
-            TypeError::new("invalid type path".to_string(), span)
-        })?;
-        (mod_part.to_string(), type_part.to_string(), target_args.clone())
-    } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
-        (info.module.clone(), target_name.clone(), target_args.clone())
-    } else {
-        return Err(TypeError::new(
-            "impl target must be a struct type name".to_string(),
-            span,
-        ));
+    let (impl_module, type_name) = match &target_ty {
+        Ty::Path(target_name, _target_args) => {
+            if let Some(info) = struct_map.get(target_name) {
+                let type_name = target_name
+                    .rsplit_once('.')
+                    .map(|(_, t)| t)
+                    .unwrap_or(target_name)
+                    .to_string();
+                (info.module.clone(), type_name)
+            } else if target_name.contains('.') {
+                let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
+                    TypeError::new("invalid type path".to_string(), span)
+                })?;
+                (mod_part.to_string(), type_part.to_string())
+            } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
+                (info.module.clone(), target_name.clone())
+            } else {
+                return Err(TypeError::new(
+                    "impl target must be a struct type name".to_string(),
+                    span,
+                ));
+            }
+        }
+        Ty::Builtin(BuiltinType::String) => ("sys.string".to_string(), "string".to_string()),
+        Ty::Builtin(BuiltinType::U8) => ("sys.bytes".to_string(), "u8".to_string()),
+        _ => {
+            return Err(TypeError::new(
+                "impl target must be a struct type name".to_string(),
+                span,
+            ));
+        }
     };
     if impl_module != module_name {
         return Err(TypeError::new(
@@ -248,11 +261,13 @@ fn resolve_impl_target(
             span,
         ));
     }
-    Ok((impl_module, type_name, args))
+    Ok((impl_module, type_name, target_ty))
 }
 
 fn validate_impl_method(
     type_name: &str,
+    target_ty: &Ty,
+    target_ast: &Type,
     module_name: &str,
     method: &Function,
     use_map: &UseMap,
@@ -280,18 +295,12 @@ fn validate_impl_method(
     }
 
     let mut params = method.params.clone();
-    let expected_unqualified = Ty::Path(type_name.to_string(), Vec::new());
-    let expected_qualified = Ty::Path(format!("{module_name}.{type_name}"), Vec::new());
-    let expected_ptr_unqualified = Ty::Ptr(Box::new(expected_unqualified.clone()));
-    let expected_ptr_qualified = Ty::Ptr(Box::new(expected_qualified.clone()));
+    let expected = target_ty.clone();
+    let expected_ptr = Ty::Ptr(Box::new(target_ty.clone()));
 
     if let Some(ty) = &first_param.ty {
         let lowered = lower_type(ty, use_map, stdlib)?;
-        if lowered != expected_unqualified
-            && lowered != expected_qualified
-            && lowered != expected_ptr_unqualified
-            && lowered != expected_ptr_qualified
-        {
+        if lowered != expected && lowered != expected_ptr {
             return Err(TypeError::new(
                 format!(
                     "first parameter must be self: {type_name} (found {lowered:?})"
@@ -300,15 +309,7 @@ fn validate_impl_method(
             ));
         }
     } else {
-        let path = Path {
-            segments: vec![Spanned::new(type_name.to_string(), span)],
-            span,
-        };
-        params[0].ty = Some(Type::Path {
-            path,
-            args: Vec::new(),
-            span,
-        });
+        params[0].ty = Some(target_ast.clone());
     }
 
     for param in params.iter().skip(1) {
@@ -346,7 +347,7 @@ fn desugar_impl_methods(
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
 ) -> Result<Vec<Function>, TypeError> {
-    let (_impl_module, type_name, _args) = resolve_impl_target(
+    let (_impl_module, type_name, target_ty) = resolve_impl_target(
         &impl_block.target,
         use_map,
         stdlib,
@@ -365,6 +366,8 @@ fn desugar_impl_methods(
         }
         let params = validate_impl_method(
             &type_name,
+            &target_ty,
+            &impl_block.target,
             module_name,
             method,
             use_map,
@@ -2030,6 +2033,10 @@ fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, T
         Type::Path { path, args, .. } => {
             let resolved = resolve_path(path, use_map);
             let path_segments = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
+            let args = args
+                .iter()
+                .map(|arg| lower_type(arg, use_map, stdlib))
+                .collect::<Result<_, _>>()?;
             if path_segments.len() == 1 {
                 let builtin = match path_segments[0] {
                     "i32" => Some(BuiltinType::I32),
@@ -2046,14 +2053,10 @@ fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, T
                 }
                 let alias = resolve_type_name(path, use_map, stdlib);
                 if alias != resolved.join(".") {
-                    return Ok(Ty::Path(alias, Vec::new()));
+                    return Ok(Ty::Path(alias, args));
                 }
             }
             let joined = path_segments.join(".");
-            let args = args
-                .iter()
-                .map(|arg| lower_type(arg, use_map, stdlib))
-                .collect::<Result<_, _>>()?;
             Ok(Ty::Path(joined, args))
         }
     }

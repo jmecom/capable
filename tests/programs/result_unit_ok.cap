@@ -1,27 +1,25 @@
 package safe
 module result_unit_ok
 use sys::system
-use sys::console
-use sys::buffer
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  let alloc = buffer::alloc_default()
-  match buffer::buffer_new(alloc, 1) {
+  let alloc = sys.alloc_default()
+  match alloc.buffer_new(1) {
     Ok(b) => {
-      match buffer::buffer_push(b, 42u8) {
+      match b.push(42u8) {
         Ok(unit_val) => {
-          console::println(c, "result unit ok - got Ok(unit)")
+          c.println("result unit ok - got Ok(unit)")
         }
         Err(e) => {
-          console::println(c, "result unit err - unexpected")
+          c.println("result unit err - unexpected")
         }
       }
-      buffer::buffer_free(alloc, b)
+      alloc.buffer_free(b)
       return 0
     }
     Err(e) => {
-      console::println(c, "buffer new failed")
+      c.println("buffer new failed")
       return 1
     }
   }

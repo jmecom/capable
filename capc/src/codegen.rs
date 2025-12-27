@@ -438,23 +438,23 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         ret: TyKind::Unit,
     };
     let mem_malloc = FnSig {
-        params: vec![TyKind::I32],
+        params: vec![TyKind::Handle, TyKind::I32],
         ret: TyKind::Ptr,
     };
     let mem_free = FnSig {
-        params: vec![TyKind::Ptr],
+        params: vec![TyKind::Handle, TyKind::Ptr],
         ret: TyKind::Unit,
     };
     let mem_cast = FnSig {
-        params: vec![TyKind::Ptr],
+        params: vec![TyKind::Handle, TyKind::Ptr],
         ret: TyKind::Ptr,
     };
     let mem_alloc_default = FnSig {
-        params: vec![],
+        params: vec![TyKind::Handle],
         ret: TyKind::Handle,
     };
     let mem_slice_from_ptr = FnSig {
-        params: vec![TyKind::Ptr, TyKind::I32],
+        params: vec![TyKind::Handle, TyKind::Ptr, TyKind::I32],
         ret: TyKind::Handle,
     };
     let mem_slice_len = FnSig {
@@ -514,11 +514,11 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         ret: TyKind::ResultString,
     };
     let io_read_stdin = FnSig {
-        params: vec![],
+        params: vec![TyKind::Handle],
         ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
     };
     let io_read_stdin_abi = FnSig {
-        params: vec![TyKind::ResultString],
+        params: vec![TyKind::Handle, TyKind::ResultString],
         ret: TyKind::ResultString,
     };
     let string_len = FnSig {
@@ -695,7 +695,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
     };
 
     map.insert(
-        "sys.system.mint_console".to_string(),
+        "sys.system.RootCap__mint_console".to_string(),
         FnInfo {
             sig: system_console.clone(),
             abi_sig: None,
@@ -704,7 +704,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.system.mint_readfs".to_string(),
+        "sys.system.RootCap__mint_readfs".to_string(),
         FnInfo {
             sig: system_fs_read.clone(),
             abi_sig: None,
@@ -713,316 +713,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.console.println".to_string(),
-        FnInfo {
-            sig: console_println,
-            abi_sig: None,
-            symbol: "capable_rt_console_println".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.print".to_string(),
-        FnInfo {
-            sig: console_print,
-            abi_sig: None,
-            symbol: "capable_rt_console_print".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.print_i32".to_string(),
-        FnInfo {
-            sig: console_print_i32.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_console_print_i32".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.console.println_i32".to_string(),
-        FnInfo {
-            sig: console_print_i32,
-            abi_sig: None,
-            symbol: "capable_rt_console_println_i32".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.fs.read_to_string".to_string(),
-        FnInfo {
-            sig: fs_read_to_string,
-            abi_sig: Some(fs_read_to_string_abi),
-            symbol: "capable_rt_fs_read_to_string".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.malloc".to_string(),
-        FnInfo {
-            sig: mem_malloc,
-            abi_sig: None,
-            symbol: "capable_rt_malloc".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.free".to_string(),
-        FnInfo {
-            sig: mem_free,
-            abi_sig: None,
-            symbol: "capable_rt_free".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.cast_u8_to_u32".to_string(),
-        FnInfo {
-            sig: mem_cast.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_cast_u8_to_u32".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.cast_u32_to_u8".to_string(),
-        FnInfo {
-            sig: mem_cast,
-            abi_sig: None,
-            symbol: "capable_rt_cast_u32_to_u8".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.alloc_default".to_string(),
-        FnInfo {
-            sig: mem_alloc_default.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_alloc_default".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.alloc_default".to_string(),
-        FnInfo {
-            sig: mem_alloc_default,
-            abi_sig: None,
-            symbol: "capable_rt_alloc_default".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_from_ptr".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.mut_slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr,
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.slice_len".to_string(),
-        FnInfo {
-            sig: mem_slice_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_len".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.slice_len".to_string(),
-        FnInfo {
-            sig: mem_slice_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_len".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.bytes.len".to_string(),
-        FnInfo {
-            sig: mem_slice_len,
-            abi_sig: None,
-            symbol: "capable_rt_slice_len".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.slice_at".to_string(),
-        FnInfo {
-            sig: mem_slice_at.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_at".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.slice_at".to_string(),
-        FnInfo {
-            sig: mem_slice_at.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_at".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.bytes.at".to_string(),
-        FnInfo {
-            sig: mem_slice_at.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_at".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.bytes.is_whitespace".to_string(),
-        FnInfo {
-            sig: FnSig {
-                params: vec![TyKind::U8],
-                ret: TyKind::Bool,
-            },
-            abi_sig: None,
-            symbol: "capable_rt_bytes_is_whitespace".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.mut_slice_at".to_string(),
-        FnInfo {
-            sig: mem_slice_at.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_at".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.mut_slice_at".to_string(),
-        FnInfo {
-            sig: mem_slice_at,
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_at".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.buffer_new".to_string(),
-        FnInfo {
-            sig: mem_buffer_new.clone(),
-            abi_sig: Some(mem_buffer_new_abi.clone()),
-            symbol: "capable_rt_buffer_new".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.buffer_new".to_string(),
-        FnInfo {
-            sig: mem_buffer_new,
-            abi_sig: Some(mem_buffer_new_abi),
-            symbol: "capable_rt_buffer_new".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.buffer_len".to_string(),
-        FnInfo {
-            sig: mem_buffer_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_buffer_len".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.buffer_len".to_string(),
-        FnInfo {
-            sig: mem_buffer_len,
-            abi_sig: None,
-            symbol: "capable_rt_buffer_len".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.buffer_push".to_string(),
-        FnInfo {
-            sig: mem_buffer_push.clone(),
-            abi_sig: Some(mem_buffer_push_abi.clone()),
-            symbol: "capable_rt_buffer_push".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.buffer_push".to_string(),
-        FnInfo {
-            sig: mem_buffer_push,
-            abi_sig: Some(mem_buffer_push_abi),
-            symbol: "capable_rt_buffer_push".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.buffer_free".to_string(),
-        FnInfo {
-            sig: mem_buffer_free.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_buffer_free".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.buffer_free".to_string(),
-        FnInfo {
-            sig: mem_buffer_free,
-            abi_sig: None,
-            symbol: "capable_rt_buffer_free".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.buffer_as_slice".to_string(),
-        FnInfo {
-            sig: mem_buffer_as_slice.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_buffer_as_slice".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.buffer_as_slice".to_string(),
-        FnInfo {
-            sig: mem_buffer_as_slice.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_buffer_as_slice".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.mem.buffer_as_mut_slice".to_string(),
-        FnInfo {
-            sig: mem_buffer_as_slice.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_buffer_as_mut_slice".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.buffer_as_mut_slice".to_string(),
-        FnInfo {
-            sig: mem_buffer_as_slice,
-            abi_sig: None,
-            symbol: "capable_rt_buffer_as_mut_slice".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.args.len".to_string(),
+        "sys.system.RootCap__args_len".to_string(),
         FnInfo {
             sig: args_len,
             abi_sig: None,
@@ -1031,7 +722,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.args.at".to_string(),
+        "sys.system.RootCap__args_at".to_string(),
         FnInfo {
             sig: args_at,
             abi_sig: Some(args_at_abi),
@@ -1040,7 +731,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.io.read_stdin_to_string".to_string(),
+        "sys.system.RootCap__read_stdin_to_string".to_string(),
         FnInfo {
             sig: io_read_stdin,
             abi_sig: Some(io_read_stdin_abi),
@@ -1049,61 +740,196 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.string.len".to_string(),
+        "sys.system.RootCap__alloc_default".to_string(),
         FnInfo {
-            sig: string_len,
+            sig: mem_alloc_default.clone(),
             abi_sig: None,
-            symbol: "capable_rt_string_len".to_string(),
+            symbol: "capable_rt_alloc_default".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.string.byte_at".to_string(),
+        "sys.system.RootCap__malloc".to_string(),
         FnInfo {
-            sig: string_byte_at,
+            sig: mem_malloc,
             abi_sig: None,
-            symbol: "capable_rt_string_byte_at".to_string(),
+            symbol: "capable_rt_malloc".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.string.as_slice".to_string(),
+        "sys.system.RootCap__free".to_string(),
         FnInfo {
-            sig: string_as_slice.clone(),
+            sig: mem_free,
             abi_sig: None,
-            symbol: "capable_rt_string_as_slice".to_string(),
+            symbol: "capable_rt_free".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.string.bytes".to_string(),
+        "sys.system.RootCap__cast_u8_to_u32".to_string(),
         FnInfo {
-            sig: string_as_slice,
+            sig: mem_cast.clone(),
             abi_sig: None,
-            symbol: "capable_rt_string_as_slice".to_string(),
+            symbol: "capable_rt_cast_u8_to_u32".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.string.split_whitespace".to_string(),
+        "sys.system.RootCap__cast_u32_to_u8".to_string(),
         FnInfo {
-            sig: string_split,
+            sig: mem_cast,
             abi_sig: None,
-            symbol: "capable_rt_string_split_whitespace".to_string(),
+            symbol: "capable_rt_cast_u32_to_u8".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.string.split".to_string(),
+        "sys.system.RootCap__slice_from_ptr".to_string(),
         FnInfo {
-            sig: string_split_delim,
+            sig: mem_slice_from_ptr.clone(),
             abi_sig: None,
-            symbol: "capable_rt_string_split".to_string(),
+            symbol: "capable_rt_slice_from_ptr".to_string(),
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.vec.vec_u8_new".to_string(),
+        "sys.system.RootCap__mut_slice_from_ptr".to_string(),
+        FnInfo {
+            sig: mem_slice_from_ptr,
+            abi_sig: None,
+            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__println".to_string(),
+        FnInfo {
+            sig: console_println,
+            abi_sig: None,
+            symbol: "capable_rt_console_println".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__print".to_string(),
+        FnInfo {
+            sig: console_print,
+            abi_sig: None,
+            symbol: "capable_rt_console_print".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__print_i32".to_string(),
+        FnInfo {
+            sig: console_print_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_console_print_i32".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__println_i32".to_string(),
+        FnInfo {
+            sig: console_print_i32,
+            abi_sig: None,
+            symbol: "capable_rt_console_println_i32".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.ReadFS__read_to_string".to_string(),
+        FnInfo {
+            sig: fs_read_to_string,
+            abi_sig: Some(fs_read_to_string_abi),
+            symbol: "capable_rt_fs_read_to_string".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__buffer_new".to_string(),
+        FnInfo {
+            sig: mem_buffer_new.clone(),
+            abi_sig: Some(mem_buffer_new_abi.clone()),
+            symbol: "capable_rt_buffer_new".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__buffer_free".to_string(),
+        FnInfo {
+            sig: mem_buffer_free,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_free".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__len".to_string(),
+        FnInfo {
+            sig: mem_buffer_len,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__push".to_string(),
+        FnInfo {
+            sig: mem_buffer_push,
+            abi_sig: Some(mem_buffer_push_abi),
+            symbol: "capable_rt_buffer_push".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__as_slice".to_string(),
+        FnInfo {
+            sig: mem_buffer_as_slice.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_buffer_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__as_mut_slice".to_string(),
+        FnInfo {
+            sig: mem_buffer_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_as_mut_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Slice__len".to_string(),
+        FnInfo {
+            sig: mem_slice_len.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Slice__at".to_string(),
+        FnInfo {
+            sig: mem_slice_at.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.MutSlice__at".to_string(),
+        FnInfo {
+            sig: mem_slice_at,
+            abi_sig: None,
+            symbol: "capable_rt_mut_slice_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__vec_u8_new".to_string(),
         FnInfo {
             sig: vec_new.clone(),
             abi_sig: None,
@@ -1112,61 +938,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_u8_len".to_string(),
-        FnInfo {
-            sig: vec_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_vec_u8_len".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_u8_get".to_string(),
-        FnInfo {
-            sig: vec_u8_get.clone(),
-            abi_sig: Some(vec_u8_get_abi),
-            symbol: "capable_rt_vec_u8_get".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_u8_set".to_string(),
-        FnInfo {
-            sig: vec_u8_set.clone(),
-            abi_sig: Some(vec_u8_set_abi),
-            symbol: "capable_rt_vec_u8_set".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_u8_push".to_string(),
-        FnInfo {
-            sig: vec_u8_push.clone(),
-            abi_sig: Some(vec_u8_push_abi),
-            symbol: "capable_rt_vec_u8_push".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_u8_pop".to_string(),
-        FnInfo {
-            sig: vec_u8_pop.clone(),
-            abi_sig: Some(vec_u8_pop_abi),
-            symbol: "capable_rt_vec_u8_pop".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_u8_as_slice".to_string(),
-        FnInfo {
-            sig: vec_u8_as_slice,
-            abi_sig: None,
-            symbol: "capable_rt_vec_u8_as_slice".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_u8_free".to_string(),
+        "sys.buffer.Alloc__vec_u8_free".to_string(),
         FnInfo {
             sig: vec_u8_free,
             abi_sig: None,
@@ -1175,7 +947,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_i32_new".to_string(),
+        "sys.buffer.Alloc__vec_i32_new".to_string(),
         FnInfo {
             sig: vec_new.clone(),
             abi_sig: None,
@@ -1184,52 +956,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_i32_len".to_string(),
-        FnInfo {
-            sig: vec_len.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_vec_i32_len".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_i32_get".to_string(),
-        FnInfo {
-            sig: vec_i32_get.clone(),
-            abi_sig: Some(vec_i32_get_abi),
-            symbol: "capable_rt_vec_i32_get".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_i32_set".to_string(),
-        FnInfo {
-            sig: vec_i32_set.clone(),
-            abi_sig: Some(vec_i32_set_abi),
-            symbol: "capable_rt_vec_i32_set".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_i32_push".to_string(),
-        FnInfo {
-            sig: vec_i32_push.clone(),
-            abi_sig: Some(vec_i32_push_abi),
-            symbol: "capable_rt_vec_i32_push".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_i32_pop".to_string(),
-        FnInfo {
-            sig: vec_i32_pop.clone(),
-            abi_sig: Some(vec_i32_pop_abi),
-            symbol: "capable_rt_vec_i32_pop".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.vec.vec_i32_free".to_string(),
+        "sys.buffer.Alloc__vec_i32_free".to_string(),
         FnInfo {
             sig: vec_i32_free,
             abi_sig: None,
@@ -1238,7 +965,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_string_new".to_string(),
+        "sys.buffer.Alloc__vec_string_new".to_string(),
         FnInfo {
             sig: vec_new,
             abi_sig: None,
@@ -1247,7 +974,115 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_string_len".to_string(),
+        "sys.buffer.Alloc__vec_string_free".to_string(),
+        FnInfo {
+            sig: vec_string_free,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_free".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__len".to_string(),
+        FnInfo {
+            sig: vec_len.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__get".to_string(),
+        FnInfo {
+            sig: vec_u8_get.clone(),
+            abi_sig: Some(vec_u8_get_abi),
+            symbol: "capable_rt_vec_u8_get".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__set".to_string(),
+        FnInfo {
+            sig: vec_u8_set.clone(),
+            abi_sig: Some(vec_u8_set_abi),
+            symbol: "capable_rt_vec_u8_set".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__push".to_string(),
+        FnInfo {
+            sig: vec_u8_push.clone(),
+            abi_sig: Some(vec_u8_push_abi),
+            symbol: "capable_rt_vec_u8_push".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__pop".to_string(),
+        FnInfo {
+            sig: vec_u8_pop.clone(),
+            abi_sig: Some(vec_u8_pop_abi),
+            symbol: "capable_rt_vec_u8_pop".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__as_slice".to_string(),
+        FnInfo {
+            sig: vec_u8_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__len".to_string(),
+        FnInfo {
+            sig: vec_len.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__get".to_string(),
+        FnInfo {
+            sig: vec_i32_get.clone(),
+            abi_sig: Some(vec_i32_get_abi),
+            symbol: "capable_rt_vec_i32_get".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__set".to_string(),
+        FnInfo {
+            sig: vec_i32_set.clone(),
+            abi_sig: Some(vec_i32_set_abi),
+            symbol: "capable_rt_vec_i32_set".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__push".to_string(),
+        FnInfo {
+            sig: vec_i32_push.clone(),
+            abi_sig: Some(vec_i32_push_abi),
+            symbol: "capable_rt_vec_i32_push".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__pop".to_string(),
+        FnInfo {
+            sig: vec_i32_pop.clone(),
+            abi_sig: Some(vec_i32_pop_abi),
+            symbol: "capable_rt_vec_i32_pop".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecString__len".to_string(),
         FnInfo {
             sig: vec_string_len,
             abi_sig: None,
@@ -1256,7 +1091,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_string_get".to_string(),
+        "sys.vec.VecString__get".to_string(),
         FnInfo {
             sig: vec_string_get,
             abi_sig: Some(vec_string_get_abi),
@@ -1265,7 +1100,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_string_push".to_string(),
+        "sys.vec.VecString__push".to_string(),
         FnInfo {
             sig: vec_string_push,
             abi_sig: Some(vec_string_push_abi),
@@ -1274,7 +1109,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_string_pop".to_string(),
+        "sys.vec.VecString__pop".to_string(),
         FnInfo {
             sig: vec_string_pop,
             abi_sig: Some(vec_string_pop_abi),
@@ -1283,11 +1118,68 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         },
     );
     map.insert(
-        "sys.vec.vec_string_free".to_string(),
+        "sys.string.string__len".to_string(),
         FnInfo {
-            sig: vec_string_free,
+            sig: string_len,
             abi_sig: None,
-            symbol: "capable_rt_vec_string_free".to_string(),
+            symbol: "capable_rt_string_len".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__byte_at".to_string(),
+        FnInfo {
+            sig: string_byte_at,
+            abi_sig: None,
+            symbol: "capable_rt_string_byte_at".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__as_slice".to_string(),
+        FnInfo {
+            sig: string_as_slice.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_string_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__bytes".to_string(),
+        FnInfo {
+            sig: string_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_string_as_slice".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__split_whitespace".to_string(),
+        FnInfo {
+            sig: string_split,
+            abi_sig: None,
+            symbol: "capable_rt_string_split_whitespace".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__split".to_string(),
+        FnInfo {
+            sig: string_split_delim,
+            abi_sig: None,
+            symbol: "capable_rt_string_split".to_string(),
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.bytes.u8__is_whitespace".to_string(),
+        FnInfo {
+            sig: FnSig {
+                params: vec![TyKind::U8],
+                ret: TyKind::Bool,
+            },
+            abi_sig: None,
+            symbol: "capable_rt_bytes_is_whitespace".to_string(),
             is_runtime: true,
         },
     );

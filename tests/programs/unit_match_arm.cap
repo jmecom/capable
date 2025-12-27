@@ -5,8 +5,8 @@ use sys::console
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   match true {
-    true => { console::println(c, "unit match arm ok") }
-    false => { console::println(c, "wrong branch") }
+    true => { c.println("unit match arm ok") }
+    false => { c.println("wrong branch") }
   }
   return 0
 }

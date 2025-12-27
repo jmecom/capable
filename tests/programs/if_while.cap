@@ -1,10 +1,9 @@
 module if_while
 use sys::system
-use sys::console
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  if true { console::println(c, "yes") }
-  while false { console::println(c, "loop") }
+  if true { c.println("yes") }
+  while false { c.println("loop") }
   return 0
 }

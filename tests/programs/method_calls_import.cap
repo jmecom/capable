@@ -1,13 +1,12 @@
 module method_calls_import
 use method_helper
 use sys::system
-use sys::console
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let p = method_helper::Pair { left: 2, right: 5 }
   let sum = p.sum()
-  console::print_i32(c, sum)
-  console::println(c, "")
+  c.print_i32(sum)
+  c.println("")
   return 0
 }

@@ -6,6 +6,6 @@ use sys::console
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let total = helper::add(1, 2)
-  console::println(c, "ok")
+  c.println("ok")
   return total
 }

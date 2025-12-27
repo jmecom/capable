@@ -1,14 +1,12 @@
 module fs_read
 use sys::system
-use sys::fs
-use sys::console
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let rfs = sys.mint_readfs("./config")
 
-  match fs::read_to_string(rfs, "app.txt") {
-    Ok(s) => { console::println(c, s); return 0 }
-    Err(e) => { console::println(c, "read failed"); return 1 }
+  match rfs.read_to_string("app.txt") {
+    Ok(s) => { c.println(s); return 0 }
+    Err(e) => { c.println("read failed"); return 1 }
   }
 }

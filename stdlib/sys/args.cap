@@ -4,15 +4,3 @@ module sys::args
 pub enum ArgsErr {
   OutOfRange
 }
-
-/// Returns the number of command-line arguments.
-/// This is an intrinsic function and the body is replaced by the compiler.
-pub fn len(sys: RootCap) -> i32 {
-  return 0
-}
-
-/// Returns the command-line argument at the given index.
-/// This is an intrinsic function and the body is replaced by the compiler.
-pub fn at(sys: RootCap, index: i32) -> Result[string, ArgsErr] {
-  return Err(ArgsErr::OutOfRange)
-}

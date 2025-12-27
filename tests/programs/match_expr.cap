@@ -8,6 +8,6 @@ pub fn main(sys: RootCap) -> i32 {
     true => { "yes" }
     false => { "no" }
   }
-  console::println(c, v)
+  c.println(v)
   return 0
 }

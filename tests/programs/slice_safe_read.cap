@@ -1,26 +1,24 @@
 package safe
 module slice_safe_read
 use sys::system
-use sys::console
-use sys::buffer
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  let alloc = buffer::alloc_default()
-  match buffer::buffer_new(alloc, 1) {
+  let alloc = sys.alloc_default()
+  match alloc.buffer_new(1) {
     Ok(b) => {
-      let slice = buffer::buffer_as_slice(b)
-      let v = buffer::slice_at(slice, 0)
+      let slice = b.as_slice()
+      let v = slice.at(0)
       if (v == 0u8) {
-        console::println(c, "slice read ok")
+        c.println("slice read ok")
       } else {
-        console::println(c, "slice read bad")
+        c.println("slice read bad")
       }
-      buffer::buffer_free(alloc, b)
+      alloc.buffer_free(b)
       return 0
     }
     Err(e) => {
-      console::println(c, "buffer err")
+      c.println("buffer err")
       return 1
     }
   }

@@ -104,9 +104,7 @@ fn typecheck_console_wrong_type() {
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let text = err.to_string();
-    assert!(text.contains("argument type mismatch"));
-    assert!(text.contains("Path(\"sys.console.Console\""));
-    assert!(text.contains("Builtin(I32)"));
+    assert!(text.contains("method receiver must be a struct value"));
 }
 
 #[test]
@@ -116,9 +114,7 @@ fn typecheck_mint_without_system() {
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let text = err.to_string();
-    assert!(text.contains("argument type mismatch"));
-    assert!(text.contains("Path(\"sys.system.RootCap\""));
-    assert!(text.contains("Builtin(I32)"));
+    assert!(text.contains("method receiver must be a struct value"));
 }
 
 #[test]

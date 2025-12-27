@@ -1,9 +1,8 @@
 module hello
 use sys::system
-use sys::console
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  console::println(c, "hello")
+  c.println("hello")
   return 0
 }

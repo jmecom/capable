@@ -1,26 +1,21 @@
 package safe
 module string_helpers
 use sys::system
-use sys::console
-use sys::string
-use sys::bytes
-use sys::buffer
-use sys::vec
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let s = "abc"
-  let buf = string::bytes(s)
-  let n = bytes::len(buf)
-  let b = bytes::at(buf, 0)
-  let words = string::split_whitespace("a b  c")
-  let count = vec::vec_string_len(words)
-  let alloc = buffer::alloc_default()
-  vec::vec_string_free(alloc, words)
+  let buf = s.bytes()
+  let n = buf.len()
+  let b = buf.at(0)
+  let words = "a b  c".split_whitespace()
+  let count = words.len()
+  let alloc = sys.alloc_default()
+  alloc.vec_string_free(words)
   if (n == 3 && b == 97u8 && count == 3) {
-    console::println(c, "string ok")
+    c.println("string ok")
     return 0
   }
-  console::println(c, "string bad")
+  c.println("string bad")
   return 1
 }

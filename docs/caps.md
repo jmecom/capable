@@ -41,10 +41,10 @@ Capabilities are **opaque structs** defined in `sys.*`:
 This prevents forging authority “out of nowhere.”
 
 ### 2) Privileged APIs require the capability value
-All privileged operations live under `sys.*` and require the relevant capability:
+All privileged operations live under `sys.*` as methods on capability types:
 
-- `sys.console.println(c: Console, s: string)`
-- `sys.fs.read_to_string(fs: ReadFS, path: string)`
+- `Console.println(s: string)`
+- `ReadFS.read_to_string(path: string)`
 
 So if you don’t have a `Console`, you cannot call `println`. The compiler will reject it.
 
@@ -96,7 +96,7 @@ fn add(a: i32, b: i32) -> i32 { a + b } // cannot print/read/net: no caps in sco
 
 Capabilities can encode *attenuation* (scoping / rights). Example: `ReadFS` is not “the whole filesystem,” but “read-only access rooted at ./config”.
 
-So `sys.fs.read_to_string(fs, path)` performs runtime checks:
+So `fs.read_to_string(path)` performs runtime checks:
 
 * reject absolute paths
 * normalize `.` / `..`
@@ -146,7 +146,7 @@ Examples:
 
 1. Missing cap in scope:
 
-* calling `console.println(c, ...)` without any `c` bound from `rc.mint_console()` should fail.
+* calling `c.println(...)` without any `c` bound from `rc.mint_console()` should fail.
 
 2. Forging opaque cap:
 

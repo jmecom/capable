@@ -9,6 +9,6 @@ fn helper() -> unit {
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   helper()
-  console::println(c, "unit return ok")
+  c.println("unit return ok")
   return 0
 }

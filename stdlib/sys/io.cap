@@ -4,7 +4,3 @@ module sys::io
 pub enum IoErr {
   IoError
 }
-
-pub fn read_stdin_to_string() -> Result[string, IoErr] {
-  return Err(IoErr::IoError)
-}

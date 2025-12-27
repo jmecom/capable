@@ -9,15 +9,15 @@ pub fn main(sys: RootCap) -> i32 {
   let b = make(false)
 
   match (a) {
-    Ok(s) => { console::println(c, s) }
-    Err(e) => { console::println(c, "bad a"); return 1 }
+    Ok(s) => { c.println(s) }
+    Err(e) => { c.println("bad a"); return 1 }
   }
 
   match (b) {
-    Ok(s) => { console::println(c, "bad b"); return 1 }
+    Ok(s) => { c.println("bad b"); return 1 }
     Err(e) => {
-      console::print_i32(c, e)
-      console::println(c, "")
+      c.print_i32(e)
+      c.println("")
     }
   }
 

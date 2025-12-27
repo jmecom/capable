@@ -8,10 +8,10 @@ pub fn main(sys: RootCap) -> i32 {
 
   if (true) {
     let x = 2
-    console::println(c, "inner x should be 2")
+    c.println("inner x should be 2")
   }
 
-  console::println(c, "outer x should still be 1")
-  console::println(c, "scoping let block test ok")
+  c.println("outer x should still be 1")
+  c.println("scoping let block test ok")
   return 0
 }
