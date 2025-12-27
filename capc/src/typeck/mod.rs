@@ -754,6 +754,7 @@ impl SpanExt for Expr {
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,
             Expr::Match(m) => m.span,
+            Expr::Try(try_expr) => try_expr.span,
             Expr::Grouping(group) => group.span,
         }
     }

@@ -438,6 +438,64 @@ fn emit_hir_expr(
                 qualified, variant.variant_name
             )))
         }
+        HirExpr::Try(try_expr) => {
+            let value = emit_hir_expr(
+                builder,
+                &try_expr.expr,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
+            let ValueRepr::Result { tag, ok, err } = value else {
+                return Err(CodegenError::Unsupported(
+                    "try expects a Result value".to_string(),
+                ));
+            };
+
+            let ok_block = builder.create_block();
+            let err_block = builder.create_block();
+
+            let is_ok = builder.ins().icmp_imm(IntCC::Equal, tag, 0);
+            builder.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+            builder.switch_to_block(err_block);
+            let ret_value = match &try_expr.ret_ty.ty {
+                crate::typeck::Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+                    let AbiType::Result(ok_abi, _err_abi) = &try_expr.ret_ty.abi else {
+                        return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    };
+                    let ok_ty = crate::hir::HirType {
+                        ty: args[0].clone(),
+                        abi: (**ok_abi).clone(),
+                    };
+                    let ptr_ty = module.isa().pointer_type();
+                    let ok_zero =
+                        zero_value_for_ty(builder, &ok_ty, ptr_ty, Some(struct_layouts))?;
+                    let tag_val = builder.ins().iconst(ir::types::I8, 1);
+                    ValueRepr::Result {
+                        tag: tag_val,
+                        ok: Box::new(ok_zero),
+                        err,
+                    }
+                }
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "try expects a Result return type".to_string(),
+                    ))
+                }
+            };
+            let ret_values = flatten_value(&ret_value);
+            builder.ins().return_(&ret_values);
+            builder.seal_block(err_block);
+
+            builder.switch_to_block(ok_block);
+            builder.seal_block(ok_block);
+
+            Ok(*ok)
+        }
         HirExpr::Call(call) => {
             // HIR calls are already fully resolved - no path resolution needed!
             let (module_path, func_name, _symbol) = match &call.callee {

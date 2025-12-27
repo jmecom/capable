@@ -207,6 +207,7 @@ pub enum Expr {
     Unary(UnaryExpr),
     Binary(BinaryExpr),
     Match(MatchExpr),
+    Try(TryExpr),
     Grouping(GroupingExpr),
 }
 
@@ -305,6 +306,12 @@ pub struct BinaryExpr {
     pub op: BinaryOp,
     pub left: Box<Expr>,
     pub right: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TryExpr {
+    pub expr: Box<Expr>,
     pub span: Span,
 }
 

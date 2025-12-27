@@ -192,6 +192,34 @@ fn run_malloc_demo() {
 }
 
 #[test]
+fn run_config_loader() {
+    let out_dir = make_out_dir("config_loader");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "examples/config_loader/config_loader.cap",
+    ]);
+    assert_eq!(code, 0);
+    let lines: Vec<&str> = stdout
+        .lines()
+        .map(|line| line.trim_end())
+        .filter(|line| !line.is_empty())
+        .collect();
+    let expected = vec![
+        "key: host",
+        "value: localhost",
+        "key: port",
+        "value: 8080",
+        "key: log_level",
+        "value: info",
+        "config ok",
+    ];
+    assert_eq!(lines, expected, "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_slice_unsafe() {
     let out_dir = make_out_dir("slice_unsafe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

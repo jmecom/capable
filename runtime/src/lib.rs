@@ -128,8 +128,8 @@ pub extern "C" fn capable_rt_mint_filesystem(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_root_dir(fs: Handle) -> Handle {
     let state = {
-        let table = FILESYSTEMS.lock().expect("filesystem table");
-        table.get(&fs).cloned()
+        let mut table = FILESYSTEMS.lock().expect("filesystem table");
+        table.remove(&fs)
     };
     let Some(state) = state else {
         return 0;
@@ -154,8 +154,8 @@ pub extern "C" fn capable_rt_fs_subdir(
 ) -> Handle {
     let name = unsafe { read_str(name_ptr, name_len) };
     let state = {
-        let table = DIRS.lock().expect("dir table");
-        table.get(&dir).cloned()
+        let mut table = DIRS.lock().expect("dir table");
+        table.remove(&dir)
     };
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
@@ -187,8 +187,8 @@ pub extern "C" fn capable_rt_fs_open_read(
 ) -> Handle {
     let name = unsafe { read_str(name_ptr, name_len) };
     let state = {
-        let table = DIRS.lock().expect("dir table");
-        table.get(&dir).cloned()
+        let mut table = DIRS.lock().expect("dir table");
+        table.remove(&dir)
     };
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
@@ -255,8 +255,8 @@ pub extern "C" fn capable_rt_fs_read_to_string(
 ) -> u8 {
     let path = unsafe { read_str(path_ptr, path_len) };
     let state = {
-        let table = READ_FS.lock().expect("readfs table");
-        table.get(&fs).cloned()
+        let mut table = READ_FS.lock().expect("readfs table");
+        table.remove(&fs)
     };
 
     let Some(state) = state else {
@@ -292,8 +292,8 @@ pub extern "C" fn capable_rt_fs_file_read_to_string(
     out_err: *mut i32,
 ) -> u8 {
     let state = {
-        let table = FILE_READS.lock().expect("file read table");
-        table.get(&file).cloned()
+        let mut table = FILE_READS.lock().expect("file read table");
+        table.remove(&file)
     };
 
     let Some(state) = state else {
@@ -1048,6 +1048,37 @@ pub extern "C" fn capable_rt_string_split(
     let mut table = VECS_STRING.lock().expect("vec string table");
     table.insert(handle, vec);
     handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_split_lines(ptr: *const u8, len: usize) -> Handle {
+    let value = unsafe { read_str(ptr, len) };
+    let mut vec = Vec::new();
+    if let Some(value) = value {
+        for line in value.split('\n') {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            vec.push(line.to_string());
+        }
+    }
+    let handle = new_handle();
+    let mut table = VECS_STRING.lock().expect("vec string table");
+    table.insert(handle, vec);
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_starts_with(
+    ptr: *const u8,
+    len: usize,
+    prefix_ptr: *const u8,
+    prefix_len: usize,
+) -> u8 {
+    let value = unsafe { read_str(ptr, len) };
+    let prefix = unsafe { read_str(prefix_ptr, prefix_len) };
+    match (value, prefix) {
+        (Some(value), Some(prefix)) => u8::from(value.starts_with(&prefix)),
+        _ => 0,
+    }
 }
 
 #[no_mangle]

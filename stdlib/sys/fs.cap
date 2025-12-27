@@ -28,6 +28,11 @@ impl Dir {
   pub fn open_read(self, name: string) -> FileRead {
     return ()
   }
+
+  pub fn read_to_string(self, name: string) -> Result[string, FsErr] {
+    let file = self.open_read(name)
+    return file.read_to_string()
+  }
 }
 
 impl FileRead {

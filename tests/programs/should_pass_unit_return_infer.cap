@@ -1,0 +1,11 @@
+package safe
+module should_pass_unit_return_infer
+
+fn helper() {
+  let x = 1
+}
+
+pub fn main() -> i32 {
+  helper()
+  return 0
+}

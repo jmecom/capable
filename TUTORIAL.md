@@ -42,6 +42,7 @@ pub fn main() -> i32 {
 - Statements: `let`, assignment, `if`, `while`, `return`, `match`.
 - Expressions: literals, calls, binary ops, unary ops, method calls.
 - Modules + imports: `module ...` and `use ...` (aliases by last path segment).
+- If a function returns `unit`, you can omit the `-> unit` annotation.
 
 ## 3) Structs and enums
 
@@ -73,7 +74,7 @@ impl Pair {
 
 Method receivers can be `self` (move) or `self: &T` (borrow‑lite, read‑only).
 
-## 5) Results and match
+## 5) Results, match, and `?`
 
 ```cap
 module results
@@ -88,6 +89,21 @@ pub fn main() -> i32 {
 ```
 
 `Result[T, E]` is the only generic type today and is special-cased by the compiler.
+
+Inside a function that returns `Result`, you can use `?` to unwrap or return early:
+
+```cap
+module results_try
+
+fn read_value() -> Result[i32, i32] {
+  return Ok(7)
+}
+
+fn use_value() -> Result[i32, i32] {
+  let v = read_value()?
+  return Ok(v + 1)
+}
+```
 
 ## 6) Capabilities and attenuation
 

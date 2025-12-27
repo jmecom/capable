@@ -58,6 +58,22 @@ fn typecheck_match_expr_ok() {
 }
 
 #[test]
+fn typecheck_try_question_ok() {
+    let source = load_program("should_pass_try_question.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_unit_return_infer_ok() {
+    let source = load_program("should_pass_unit_return_infer.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_fs_traversal_kind_ok() {
     let source = load_program("fs_traversal_kind.cap");
     let module = parse_module(&source).expect("parse module");
@@ -153,6 +169,28 @@ fn typecheck_move_opaque_fails() {
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     assert!(err.to_string().contains("use of moved value `t`"));
+}
+
+#[test]
+fn typecheck_try_question_non_result_fails() {
+    let source = load_program("should_fail_try_non_result.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("`?` operator can only be used in functions returning Result"));
+}
+
+#[test]
+fn typecheck_try_question_err_mismatch_fails() {
+    let source = load_program("should_fail_try_err_mismatch.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("mismatched error type for `?`"));
 }
 
 #[test]
