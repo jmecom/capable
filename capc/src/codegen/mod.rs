@@ -454,6 +454,18 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Unit,
     };
+    let math_i32 = FnSig {
+        params: vec![AbiType::I32, AbiType::I32],
+        ret: AbiType::I32,
+    };
+    let math_u32 = FnSig {
+        params: vec![AbiType::U32, AbiType::U32],
+        ret: AbiType::U32,
+    };
+    let math_u8 = FnSig {
+        params: vec![AbiType::U8, AbiType::U8],
+        ret: AbiType::U8,
+    };
     let mem_malloc = FnSig {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Ptr,
@@ -867,6 +879,96 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: console_assert,
             abi_sig: None,
             symbol: "capable_rt_assert".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_u8".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

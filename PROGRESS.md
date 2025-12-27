@@ -34,3 +34,4 @@ This file summarizes major milestones added recently.
 - Integer arithmetic now traps on overflow.
 - Division by zero traps.
 - Added a runtime test that overflows an addition.
+- Added explicit modular helpers in `sys.math` with a wrap test.

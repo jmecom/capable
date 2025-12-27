@@ -251,6 +251,51 @@ pub extern "C" fn capable_rt_console_println_i32(_console: Handle, value: i32) {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_math_add_wrap_i32(a: i32, b: i32) -> i32 {
+    a.wrapping_add(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_sub_wrap_i32(a: i32, b: i32) -> i32 {
+    a.wrapping_sub(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_mul_wrap_i32(a: i32, b: i32) -> i32 {
+    a.wrapping_mul(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_add_wrap_u32(a: u32, b: u32) -> u32 {
+    a.wrapping_add(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_sub_wrap_u32(a: u32, b: u32) -> u32 {
+    a.wrapping_sub(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_mul_wrap_u32(a: u32, b: u32) -> u32 {
+    a.wrapping_mul(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_add_wrap_u8(a: u8, b: u8) -> u8 {
+    a.wrapping_add(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_sub_wrap_u8(a: u8, b: u8) -> u8 {
+    a.wrapping_sub(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_mul_wrap_u8(a: u8, b: u8) -> u8 {
+    a.wrapping_mul(b)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_fs_read_to_string(
     fs: Handle,
     path_ptr: *const u8,

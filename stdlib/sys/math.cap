@@ -1,0 +1,14 @@
+package safe
+module sys::math
+
+pub fn add_wrap_i32(a: i32, b: i32) -> i32 { return 0 }
+pub fn sub_wrap_i32(a: i32, b: i32) -> i32 { return 0 }
+pub fn mul_wrap_i32(a: i32, b: i32) -> i32 { return 0 }
+
+pub fn add_wrap_u32(a: u32, b: u32) -> u32 { return 0 }
+pub fn sub_wrap_u32(a: u32, b: u32) -> u32 { return 0 }
+pub fn mul_wrap_u32(a: u32, b: u32) -> u32 { return 0 }
+
+pub fn add_wrap_u8(a: u8, b: u8) -> u8 { return 0 }
+pub fn sub_wrap_u8(a: u8, b: u8) -> u8 { return 0 }
+pub fn mul_wrap_u8(a: u8, b: u8) -> u8 { return 0 }

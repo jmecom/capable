@@ -40,4 +40,4 @@ Keep these as invariants:
 
 - Integer arithmetic traps on overflow.
 - Division by zero traps.
-- Modular arithmetic will be explicit (separate helpers).
+- Modular arithmetic is explicit via `sys.math` helpers.
