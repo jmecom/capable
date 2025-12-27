@@ -285,6 +285,28 @@ fn typecheck_linear_branch_merge_fails() {
 }
 
 #[test]
+fn typecheck_linear_match_merge_fails() {
+    let source = load_program("should_fail_linear_match_merge.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("linear value `t` must be consumed on all paths"));
+}
+
+#[test]
+fn typecheck_linear_loop_move_fails() {
+    let source = load_program("should_fail_linear_loop_move.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("move-only value `t` moved inside loop"));
+}
+
+#[test]
 fn typecheck_copy_struct_move_field_fails() {
     let source = load_program("should_fail_copy_struct_move_field.cap");
     let module = parse_module(&source).expect("parse module");
