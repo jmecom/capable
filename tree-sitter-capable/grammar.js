@@ -132,6 +132,7 @@ module.exports = grammar({
     type: ($) =>
       choice(
         seq("*", $.type),
+        seq("&", $.type),
         seq($.type_path, optional($.type_args))
       ),
 
