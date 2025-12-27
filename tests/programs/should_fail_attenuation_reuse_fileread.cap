@@ -1,0 +1,12 @@
+package safe
+module should_fail_attenuation_reuse_fileread
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let fs = rc.mint_filesystem("./config")
+  let d = fs.root_dir()
+  let f = d.open_read("app.txt")
+  let s = f.read_to_string()
+  let t = f.read_to_string()
+  return 0
+}

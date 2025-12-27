@@ -258,6 +258,33 @@ fn typecheck_copy_struct_move_field_fails() {
 }
 
 #[test]
+fn typecheck_attenuation_keep_fs_fails() {
+    let source = load_program("should_fail_attenuation_keep_fs.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `fs`"));
+}
+
+#[test]
+fn typecheck_attenuation_keep_dir_fails() {
+    let source = load_program("should_fail_attenuation_keep_dir.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `d`"));
+}
+
+#[test]
+fn typecheck_attenuation_reuse_fileread_fails() {
+    let source = load_program("should_fail_attenuation_reuse_fileread.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `f`"));
+}
+
+#[test]
 fn typecheck_linear_return_ok() {
     let source = load_program("should_pass_linear_return.cap");
     let module = parse_module(&source).expect("parse module");
