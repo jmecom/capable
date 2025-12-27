@@ -18,6 +18,17 @@ fn typecheck_ok() {
 }
 
 #[test]
+fn typecheck_shadowing_fails() {
+    let source = load_program("should_fail_shadowing.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("variable shadowing is not allowed"));
+}
+
+#[test]
 fn typecheck_fs_read_ok() {
     let source = load_program("fs_read.cap");
     let module = parse_module(&source).expect("parse module");

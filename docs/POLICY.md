@@ -35,6 +35,7 @@ Keep these as invariants:
 - No implicit conversions.
 - No implicit function calls.
 - No macros or reflection.
+- No variable shadowing.
 
 ## Arithmetic Semantics
 

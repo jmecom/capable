@@ -6,9 +6,9 @@ pub fn main(rc: RootCap) -> i32 {
   let x = 1
 
   if (true) {
-    let x = 2
-    c.assert(x == 2)
-    c.println("inner x should be 2")
+    let y = 2
+    c.assert(y == 2)
+    c.println("inner y should be 2")
   }
 
   c.assert(x == 1)

@@ -44,6 +44,7 @@ pub fn main() -> i32 {
 - Modules + imports: `module ...` and `use ...` (aliases by last path segment).
 - If a function returns `unit`, you can omit the `-> unit` annotation.
 - Integer arithmetic traps on overflow.
+- Variable shadowing is not allowed.
 
 ## 3) Structs and enums
 

@@ -284,6 +284,12 @@ fn check_stmt(
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
+            if scopes.contains(&let_stmt.name.item) {
+                return Err(TypeError::new(
+                    format!("variable shadowing is not allowed: `{}`", let_stmt.name.item),
+                    let_stmt.name.span,
+                ));
+            }
             let annot_ref = let_stmt
                 .ty
                 .as_ref()
@@ -1765,8 +1771,15 @@ fn check_match_exhaustive(
             if seen_true && seen_false {
                 return Ok(());
             }
+            let mut missing = Vec::new();
+            if !seen_true {
+                missing.push("true");
+            }
+            if !seen_false {
+                missing.push("false");
+            }
             return Err(TypeError::new(
-                "non-exhaustive match on bool".to_string(),
+                format!("non-exhaustive match on bool, missing: {}", missing.join(", ")),
                 span,
             ));
         }
@@ -1788,8 +1801,15 @@ fn check_match_exhaustive(
             if seen_ok && seen_err {
                 return Ok(());
             }
+            let mut missing = Vec::new();
+            if !seen_ok {
+                missing.push("Ok");
+            }
+            if !seen_err {
+                missing.push("Err");
+            }
             return Err(TypeError::new(
-                "non-exhaustive match on Result".to_string(),
+                format!("non-exhaustive match on Result, missing: {}", missing.join(", ")),
                 span,
             ));
         }

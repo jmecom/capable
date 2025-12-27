@@ -39,3 +39,7 @@ This file summarizes major milestones added recently.
 ## Result Helpers (Phase 3)
 - Added `unwrap_or` / `unwrap_err_or` on `Result`.
 - Added typecheck coverage for helpers and mismatch cases.
+
+## Explicitness Policy (Phase 2)
+- Match exhaustiveness enforced with missing-variant diagnostics.
+- Variable shadowing now rejected by the typechecker.
