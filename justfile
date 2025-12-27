@@ -12,6 +12,18 @@ check:
 test:
   cargo test
 
+typecheck:
+  cargo test -p capc --test typecheck
+
+run-tests:
+  cargo test -p capc --test run
+
+run-config:
+  cargo test -p capc --test run run_config_loader -- --nocapture
+
+tree-sitter:
+  tree-sitter generate -C tree-sitter-capable
+
 snap:
   cargo insta test
 

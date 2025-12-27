@@ -1,0 +1,37 @@
+# Capable Policy (Contributor Guide)
+
+This is a compact policy reference for language invariants and safety boundaries.
+
+## Safety Boundary
+
+- `package safe` is the default.
+- `package unsafe` is required for:
+  - raw pointers (`*T`)
+  - `extern` functions
+
+## Borrow‑Lite Rules
+
+- `&T` is allowed in parameters and locals.
+- Reference locals must be initialized from another local value.
+- References cannot be stored in structs/enums or returned.
+- References are read‑only: they are only valid for `&T` parameters.
+
+## Move / Linear Rules
+
+- **Unrestricted**: freely copyable.
+- **Affine**: move‑only; use‑after‑move is a type error.
+- **Linear**: move‑only and must be consumed on all paths.
+- Extracting an affine/linear field consumes the whole root local.
+
+## Capabilities
+
+- Capabilities are opaque (`opaque struct`) and cannot be forged.
+- Attenuation APIs consume the stronger capability.
+- Runtime enforces root/relative path checks.
+
+## No‑Implicitness
+
+Keep these as invariants:
+- No implicit conversions.
+- No implicit function calls.
+- No macros or reflection.

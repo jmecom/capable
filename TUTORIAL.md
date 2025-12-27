@@ -202,6 +202,7 @@ Rules:
 - `&T` is allowed on parameters and locals.
 - Reference locals must be initialized from another local value.
 - References cannot be stored in structs, enums, or returned.
+- References are read-only: they can only satisfy `&T` parameters.
 - Passing a value to `&T` implicitly borrows it.
 
 This avoids a full borrow checker while making non-consuming observers ergonomic.
