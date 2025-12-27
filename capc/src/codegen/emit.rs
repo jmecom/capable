@@ -482,25 +482,27 @@ fn emit_hir_expr(
 
             if abi_sig.ret == TyKind::ResultString {
                 let ptr_ty = module.isa().pointer_type();
-                // ResultString ABI uses u64 for length even on 32-bit.
-                let len_bytes: u32 = 8;
+                let ptr_align = ptr_ty.bytes() as u32;
+                let len_bytes = result_string_len_bytes();
+                let len_align = len_bytes;
+                let err_align = 4u32;
 
                 let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
-                    ptr_ty.bytes() as u32,
+                    aligned_slot_size(ptr_ty.bytes() as u32, ptr_align),
                 ));
                 let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
-                    len_bytes,
+                    aligned_slot_size(len_bytes, len_align),
                 ));
                 let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
-                    4,
+                    aligned_slot_size(4, err_align),
                 ));
 
-                let ptr_ptr = builder.ins().stack_addr(ptr_ty, slot_ptr, 0);
-                let len_ptr = builder.ins().stack_addr(ptr_ty, slot_len, 0);
-                let err_ptr = builder.ins().stack_addr(ptr_ty, slot_err, 0);
+                let ptr_ptr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
+                let len_ptr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
+                let err_ptr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
 
                 args.push(ptr_ptr);
                 args.push(len_ptr);
@@ -515,27 +517,29 @@ fn emit_hir_expr(
                     None
                 } else {
                     let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
-                    debug_assert!(ty.bytes().is_power_of_two());
+                    let align = ty.bytes().max(1) as u32;
+                    debug_assert!(align.is_power_of_two());
                     let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                         ir::StackSlotKind::ExplicitSlot,
-                        ty.bytes().max(1) as u32,
+                        aligned_slot_size(ty.bytes().max(1) as u32, align),
                     ));
-                    let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+                    let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
                     args.push(addr);
-                    Some((slot, ty))
+                    Some((slot, ty, align))
                 };
                 let err_slot = if **err_ty == TyKind::Unit {
                     None
                 } else {
                     let ty = value_type_for_result_out(err_ty, ptr_ty)?;
-                    debug_assert!(ty.bytes().is_power_of_two());
+                    let align = ty.bytes().max(1) as u32;
+                    debug_assert!(align.is_power_of_two());
                     let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                         ir::StackSlotKind::ExplicitSlot,
-                        ty.bytes().max(1) as u32,
+                        aligned_slot_size(ty.bytes().max(1) as u32, align),
                     ));
-                    let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+                    let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
                     args.push(addr);
-                    Some((slot, ty))
+                    Some((slot, ty, align))
                 };
                 result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
             }
@@ -565,15 +569,13 @@ fn emit_hir_expr(
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
                 let (slot_ptr, slot_len, slot_err) =
                     out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
-                let ptr_addr = builder
-                    .ins()
-                    .stack_addr(module.isa().pointer_type(), slot_ptr, 0);
-                let len_addr = builder
-                    .ins()
-                    .stack_addr(module.isa().pointer_type(), slot_len, 0);
-                let err_addr = builder
-                    .ins()
-                    .stack_addr(module.isa().pointer_type(), slot_err, 0);
+                let ptr_ty = module.isa().pointer_type();
+                let ptr_align = ptr_ty.bytes() as u32;
+                let len_align = result_string_len_bytes();
+                let err_align = 4u32;
+                let ptr_addr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
+                let len_addr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
+                let err_addr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
                 let ptr =
                     builder
                         .ins()
@@ -603,19 +605,25 @@ fn emit_hir_expr(
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
                 let (ok_slot, err_slot, ok_ty, err_ty) = result_out
                     .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
-                let ok_val = if let Some((slot, ty)) = ok_slot {
-                    let addr = builder
-                        .ins()
-                        .stack_addr(module.isa().pointer_type(), slot, 0);
+                let ok_val = if let Some((slot, ty, align)) = ok_slot {
+                    let addr = aligned_stack_addr(
+                        builder,
+                        slot,
+                        align,
+                        module.isa().pointer_type(),
+                    );
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
                     ValueRepr::Unit
                 };
-                let err_val = if let Some((slot, ty)) = err_slot {
-                    let addr = builder
-                        .ins()
-                        .stack_addr(module.isa().pointer_type(), slot, 0);
+                let err_val = if let Some((slot, ty, align)) = err_slot {
+                    let addr = aligned_stack_addr(
+                        builder,
+                        slot,
+                        align,
+                        module.isa().pointer_type(),
+                    );
                     let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
                     ValueRepr::Single(val)
                 } else {
@@ -1190,6 +1198,17 @@ fn aligned_stack_addr(
     let align_mask = !((align as i64) - 1);
     let bumped = builder.ins().iadd_imm(base, i64::from(align - 1));
     builder.ins().band_imm(bumped, align_mask)
+}
+
+/// Size for an explicitly-aligned stack slot (size + align padding).
+fn aligned_slot_size(size: u32, align: u32) -> u32 {
+    let align = align.max(1);
+    size.max(1).saturating_add(align.saturating_sub(1))
+}
+
+/// ResultString ABI uses a u64 length slot across targets.
+fn result_string_len_bytes() -> u32 {
+    8
 }
 
 /// Compute pointer/len offsets for the string layout.
@@ -1969,24 +1988,26 @@ pub(super) fn emit_runtime_wrapper_call(
 
     if abi_sig.ret == TyKind::ResultString {
         let ptr_ty = module.isa().pointer_type();
-        // ResultString ABI uses u64 for length even on 32-bit.
-        let len_bytes: u32 = 8;
+        let ptr_align = ptr_ty.bytes() as u32;
+        let len_bytes = result_string_len_bytes();
+        let len_align = len_bytes;
+        let err_align = 4u32;
         let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
             ir::StackSlotKind::ExplicitSlot,
-            ptr_ty.bytes(),
+            aligned_slot_size(ptr_ty.bytes(), ptr_align),
         ));
         let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
             ir::StackSlotKind::ExplicitSlot,
-            len_bytes,
+            aligned_slot_size(len_bytes, len_align),
         ));
         let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
             ir::StackSlotKind::ExplicitSlot,
-            4,
+            aligned_slot_size(4, err_align),
         ));
 
-        let ptr_ptr = builder.ins().stack_addr(ptr_ty, slot_ptr, 0);
-        let len_ptr = builder.ins().stack_addr(ptr_ty, slot_len, 0);
-        let err_ptr = builder.ins().stack_addr(ptr_ty, slot_err, 0);
+        let ptr_ptr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
+        let len_ptr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
+        let err_ptr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
 
         args.push(ptr_ptr);
         args.push(len_ptr);
@@ -2001,26 +2022,29 @@ pub(super) fn emit_runtime_wrapper_call(
             None
         } else {
             let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+            let align = ty.bytes().max(1) as u32;
+            debug_assert!(align.is_power_of_two());
             let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                 ir::StackSlotKind::ExplicitSlot,
-                ty.bytes().max(1) as u32,
+                aligned_slot_size(ty.bytes().max(1) as u32, align),
             ));
-            let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
             args.push(addr);
-            Some((slot, ty))
+            Some((slot, ty, align))
         };
         let err_slot = if **err_ty == TyKind::Unit {
             None
         } else {
             let ty = value_type_for_result_out(err_ty, ptr_ty)?;
-            debug_assert!(ty.bytes().is_power_of_two());
+            let align = ty.bytes().max(1) as u32;
+            debug_assert!(align.is_power_of_two());
             let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                 ir::StackSlotKind::ExplicitSlot,
-                ty.bytes().max(1) as u32,
+                aligned_slot_size(ty.bytes().max(1) as u32, align),
             ));
-            let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
             args.push(addr);
-            Some((slot, ty))
+            Some((slot, ty, align))
         };
         result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
     }
@@ -2043,15 +2067,13 @@ pub(super) fn emit_runtime_wrapper_call(
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
         let (slot_ptr, slot_len, slot_err) =
             out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
-        let ptr_addr = builder
-            .ins()
-            .stack_addr(module.isa().pointer_type(), slot_ptr, 0);
-        let len_addr = builder
-            .ins()
-            .stack_addr(module.isa().pointer_type(), slot_len, 0);
-        let err_addr = builder
-            .ins()
-            .stack_addr(module.isa().pointer_type(), slot_err, 0);
+        let ptr_ty = module.isa().pointer_type();
+        let ptr_align = ptr_ty.bytes() as u32;
+        let len_align = result_string_len_bytes();
+        let err_align = 4u32;
+        let ptr_addr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
+        let len_addr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
+        let err_addr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
         let ptr = builder
             .ins()
             .load(module.isa().pointer_type(), MemFlags::new(), ptr_addr, 0);
@@ -2082,19 +2104,15 @@ pub(super) fn emit_runtime_wrapper_call(
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
         let (ok_slot, err_slot, ok_ty, err_ty) = result_out
             .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
-        let ok_val = if let Some((slot, ty)) = ok_slot {
-            let addr = builder
-                .ins()
-                .stack_addr(module.isa().pointer_type(), slot, 0);
+        let ok_val = if let Some((slot, ty, align)) = ok_slot {
+            let addr = aligned_stack_addr(builder, slot, align, module.isa().pointer_type());
             let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
             ValueRepr::Single(val)
         } else {
             ValueRepr::Unit
         };
-        let err_val = if let Some((slot, ty)) = err_slot {
-            let addr = builder
-                .ins()
-                .stack_addr(module.isa().pointer_type(), slot, 0);
+        let err_val = if let Some((slot, ty, align)) = err_slot {
+            let addr = aligned_stack_addr(builder, slot, align, module.isa().pointer_type());
             let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
             ValueRepr::Single(val)
         } else {
@@ -2133,5 +2151,62 @@ fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
             "abi signature mismatch for {} without ResultString/ResultOut lowering",
             info.symbol
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::{FnInfo, FnSig};
+
+    #[test]
+    fn aligned_slot_size_adds_padding_for_alignment() {
+        assert_eq!(aligned_slot_size(1, 4), 4);
+        assert_eq!(aligned_slot_size(8, 8), 15);
+    }
+
+    #[test]
+    fn result_string_len_is_u64() {
+        assert_eq!(result_string_len_bytes(), 8);
+    }
+
+    #[test]
+    fn ensure_abi_sig_allows_result_string_lowering() {
+        let sig = FnSig {
+            params: Vec::new(),
+            ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+        };
+        let abi_sig = FnSig {
+            params: Vec::new(),
+            ret: TyKind::ResultString,
+        };
+        let info = FnInfo {
+            sig,
+            abi_sig: Some(abi_sig),
+            symbol: "test".to_string(),
+            runtime_symbol: None,
+            is_runtime: false,
+        };
+        assert!(ensure_abi_sig_handled(&info).is_ok());
+    }
+
+    #[test]
+    fn ensure_abi_sig_rejects_unhandled_mismatch() {
+        let sig = FnSig {
+            params: vec![TyKind::I32],
+            ret: TyKind::I32,
+        };
+        let abi_sig = FnSig {
+            params: vec![TyKind::I32],
+            ret: TyKind::U32,
+        };
+        let info = FnInfo {
+            sig,
+            abi_sig: Some(abi_sig),
+            symbol: "test".to_string(),
+            runtime_symbol: None,
+            is_runtime: false,
+        };
+        assert!(ensure_abi_sig_handled(&info).is_err());
     }
 }
