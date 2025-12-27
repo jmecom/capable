@@ -596,6 +596,115 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
             let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            if let Ty::Path(name, args) = &receiver_ty {
+                if name == "Result" && args.len() == 2 {
+                    match method_call.method.item.as_str() {
+                        "unwrap_or" => {
+                            let default_expr = lower_expr(&method_call.args[0], ctx, ret_ty)?;
+                            let ok_name = format!("__unwrap_ok_{}", ctx.local_counter);
+                            let ok_local_id = ctx.fresh_local(ok_name.clone(), args[0].clone());
+                            let ok_pattern = HirPattern::Variant {
+                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
+                                variant_name: "Ok".to_string(),
+                                binding: Some((ok_local_id, ok_name.clone())),
+                            };
+                            let err_pattern = HirPattern::Variant {
+                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
+                                variant_name: "Err".to_string(),
+                                binding: None,
+                            };
+                            let ok_expr = HirExpr::Local(HirLocal {
+                                local_id: ok_local_id,
+                                name: ok_name,
+                                ty: hir_type_for(args[0].clone(), ctx, method_call.span)?,
+                                span: method_call.span,
+                            });
+                            let ok_block = HirBlock {
+                                stmts: vec![HirStmt::Expr(HirExprStmt {
+                                    expr: ok_expr,
+                                    span: method_call.span,
+                                })],
+                                span: method_call.span,
+                            };
+                            let err_block = HirBlock {
+                                stmts: vec![HirStmt::Expr(HirExprStmt {
+                                    expr: default_expr,
+                                    span: method_call.span,
+                                })],
+                                span: method_call.span,
+                            };
+                            return Ok(HirExpr::Match(HirMatch {
+                                expr: Box::new(receiver),
+                                expr_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
+                                arms: vec![
+                                    HirMatchArm {
+                                        pattern: ok_pattern,
+                                        body: ok_block,
+                                    },
+                                    HirMatchArm {
+                                        pattern: err_pattern,
+                                        body: err_block,
+                                    },
+                                ],
+                                result_ty: hir_ty,
+                                span: method_call.span,
+                            }));
+                        }
+                        "unwrap_err_or" => {
+                            let default_expr = lower_expr(&method_call.args[0], ctx, ret_ty)?;
+                            let err_name = format!("__unwrap_err_{}", ctx.local_counter);
+                            let err_local_id = ctx.fresh_local(err_name.clone(), args[1].clone());
+                            let ok_pattern = HirPattern::Variant {
+                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
+                                variant_name: "Ok".to_string(),
+                                binding: None,
+                            };
+                            let err_pattern = HirPattern::Variant {
+                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
+                                variant_name: "Err".to_string(),
+                                binding: Some((err_local_id, err_name.clone())),
+                            };
+                            let err_expr = HirExpr::Local(HirLocal {
+                                local_id: err_local_id,
+                                name: err_name,
+                                ty: hir_type_for(args[1].clone(), ctx, method_call.span)?,
+                                span: method_call.span,
+                            });
+                            let ok_block = HirBlock {
+                                stmts: vec![HirStmt::Expr(HirExprStmt {
+                                    expr: default_expr,
+                                    span: method_call.span,
+                                })],
+                                span: method_call.span,
+                            };
+                            let err_block = HirBlock {
+                                stmts: vec![HirStmt::Expr(HirExprStmt {
+                                    expr: err_expr,
+                                    span: method_call.span,
+                                })],
+                                span: method_call.span,
+                            };
+                            return Ok(HirExpr::Match(HirMatch {
+                                expr: Box::new(receiver),
+                                expr_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
+                                arms: vec![
+                                    HirMatchArm {
+                                        pattern: ok_pattern,
+                                        body: ok_block,
+                                    },
+                                    HirMatchArm {
+                                        pattern: err_pattern,
+                                        body: err_block,
+                                    },
+                                ],
+                                result_ty: hir_ty,
+                                span: method_call.span,
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+            }
             let (method_module, type_name, _) = resolve_method_target(
                 &receiver_ty,
                 ctx.module_name,

@@ -106,6 +106,13 @@ fn use_value() -> Result[i32, i32] {
 }
 ```
 
+You can also unwrap with defaults:
+
+```cap
+let v = make().unwrap_or(0)
+let e = make().unwrap_err_or(0)
+```
+
 Matches must be exhaustive; use `_` to cover the rest:
 
 ```cap

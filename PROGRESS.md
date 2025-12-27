@@ -35,3 +35,7 @@ This file summarizes major milestones added recently.
 - Division by zero traps.
 - Added runtime tests that overflow and divide by zero.
 - Added explicit modular helpers in `sys.math` with a wrap test.
+
+## Result Helpers (Phase 3)
+- Added `unwrap_or` / `unwrap_err_or` on `Result`.
+- Added typecheck coverage for helpers and mismatch cases.

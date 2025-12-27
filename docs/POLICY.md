@@ -41,3 +41,8 @@ Keep these as invariants:
 - Integer arithmetic traps on overflow.
 - Division by zero traps.
 - Modular arithmetic is explicit via `sys.math` helpers.
+
+## Result Helpers
+
+- `Result.unwrap_or(default)` returns `Ok` or the default.
+- `Result.unwrap_err_or(default)` returns `Err` or the default.
