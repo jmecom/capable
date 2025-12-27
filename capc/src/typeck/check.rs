@@ -284,11 +284,20 @@ fn check_stmt(
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
+            let annot_ref = let_stmt
+                .ty
+                .as_ref()
+                .is_some_and(|ty| matches!(ty, Type::Ref { .. }));
+            let expr_use_mode = if annot_ref {
+                UseMode::Read
+            } else {
+                UseMode::Move
+            };
             let expr_ty = check_expr(
                 &let_stmt.expr,
                 functions,
                 scopes,
-                UseMode::Move,
+                expr_use_mode,
                 use_map,
                 struct_map,
                 enum_map,
@@ -298,20 +307,66 @@ fn check_stmt(
             )?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
                 if let Some(span) = type_contains_ref(annot) {
-                    return Err(TypeError::new(
-                        "reference types cannot be stored in locals".to_string(),
-                        span,
-                    ));
+                    match annot {
+                        Type::Ref { target, .. } => {
+                            if type_contains_ref(target).is_some() {
+                                return Err(TypeError::new(
+                                    "nested reference types are not allowed".to_string(),
+                                    span,
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(TypeError::new(
+                                "reference types are only allowed as direct local types"
+                                    .to_string(),
+                                span,
+                            ));
+                        }
+                    }
                 }
                 let annot_ty = lower_type(annot, use_map, stdlib)?;
-                if annot_ty != expr_ty {
+                let matches_ref = if let Ty::Ref(inner) = &annot_ty {
+                    &expr_ty == inner.as_ref() || &expr_ty == &annot_ty
+                } else {
+                    false
+                };
+                if annot_ty != expr_ty && !matches_ref {
                     return Err(TypeError::new(
                         format!("type mismatch: expected {annot_ty:?}, found {expr_ty:?}"),
                         let_stmt.span,
                     ));
                 }
+                if matches!(annot_ty, Ty::Ref(_)) {
+                    let Some((name, _span)) = leftmost_local_in_chain(&let_stmt.expr) else {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    };
+                    if !scopes.contains(name) {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    }
+                }
                 annot_ty
             } else {
+                if matches!(expr_ty, Ty::Ref(_)) {
+                    let Some((name, _span)) = leftmost_local_in_chain(&let_stmt.expr) else {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    };
+                    if !scopes.contains(name) {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    }
+                }
                 expr_ty
             };
             scopes.insert_local(let_stmt.name.item.clone(), final_ty);
@@ -324,6 +379,12 @@ fn check_stmt(
                 ));
             };
             let existing = existing.ty.clone();
+            if matches!(existing, Ty::Ref(_)) {
+                return Err(TypeError::new(
+                    "cannot assign to a reference local".to_string(),
+                    assign.span,
+                ));
+            }
             let expr_ty = check_expr(
                 &assign.expr,
                 functions,
@@ -875,7 +936,7 @@ pub(super) fn check_expr(
                     module_name,
                 )?;
                 let matches_ref = if let Ty::Ref(inner) = expected {
-                    &arg_ty == inner.as_ref()
+                    &arg_ty == inner.as_ref() || &arg_ty == expected
                 } else {
                     false
                 };
@@ -961,7 +1022,7 @@ pub(super) fn check_expr(
                         module_name,
                     )?;
                     let matches_ref = if let Ty::Ref(inner) = expected {
-                        &arg_ty == inner.as_ref()
+                        &arg_ty == inner.as_ref() || &arg_ty == expected
                     } else {
                         false
                     };
@@ -1079,7 +1140,7 @@ pub(super) fn check_expr(
                     module_name,
                 )?;
                 let matches_ref = if let Ty::Ref(inner) = expected {
-                    &arg_ty == inner.as_ref()
+                    &arg_ty == inner.as_ref() || &arg_ty == expected
                 } else {
                     false
                 };

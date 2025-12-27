@@ -1,5 +1,5 @@
 package safe
-module should_fail_borrow_local
+module should_pass_borrow_local
 
 opaque struct Cap
 

@@ -37,6 +37,15 @@ pub(super) fn emit_hir_stmt(
 
     match stmt {
         HirStmt::Let(let_stmt) => {
+            if matches!(let_stmt.ty.ty, crate::typeck::Ty::Ref(_)) {
+                if let crate::hir::HirExpr::Local(local) = &let_stmt.expr {
+                    let Some(value) = locals.get(&local.name).cloned() else {
+                        return Err(CodegenError::UnknownVariable(local.name.clone()));
+                    };
+                    locals.insert(let_stmt.name.clone(), value);
+                    return Ok(Flow::Continues);
+                }
+            }
             let value = emit_hir_expr(
                 builder,
                 &let_stmt.expr,

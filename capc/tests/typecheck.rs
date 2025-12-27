@@ -331,14 +331,11 @@ fn typecheck_borrow_self_ok() {
 }
 
 #[test]
-fn typecheck_borrow_local_fails() {
-    let source = load_program("should_fail_borrow_local.cap");
+fn typecheck_borrow_local_ok() {
+    let source = load_program("should_pass_borrow_local.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
-    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err
-        .to_string()
-        .contains("reference types cannot be stored in locals"));
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
 }
 
 #[test]
@@ -350,6 +347,17 @@ fn typecheck_borrow_return_fails() {
     assert!(err
         .to_string()
         .contains("reference types cannot be returned"));
+}
+
+#[test]
+fn typecheck_borrow_local_temp_fails() {
+    let source = load_program("should_fail_borrow_local_temp.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("reference locals must be initialized from a local value"));
 }
 
 #[test]

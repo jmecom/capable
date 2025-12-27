@@ -179,7 +179,7 @@ Linear values must be consumed along every path. `drop(x)` is a built-in sink th
 
 ## 10) Borrow-lite: &T parameters
 
-There is a small borrow feature for read-only access in function parameters.
+There is a small borrow feature for read-only access in function parameters and locals.
 
 ```cap
 module borrow
@@ -199,8 +199,9 @@ pub fn twice(c: &Cap) -> i32 {
 
 Rules:
 
-- `&T` is only allowed on parameters.
-- References cannot be stored in locals, structs, enums, or returned.
+- `&T` is allowed on parameters and locals.
+- Reference locals must be initialized from another local value.
+- References cannot be stored in structs, enums, or returned.
 - Passing a value to `&T` implicitly borrows it.
 
 This avoids a full borrow checker while making non-consuming observers ergonomic.
