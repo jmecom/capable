@@ -1,3 +1,8 @@
+//! HIR emission into Cranelift IR.
+//!
+//! This module is intentionally focused on expression/statement lowering and
+//! ABI-adjacent helper routines used by the main codegen entry point.
+
 use std::collections::HashMap;
 
 use cranelift_codegen::ir::condcodes::IntCC;
@@ -16,6 +21,7 @@ use super::layout::{align_to, resolve_struct_layout, type_layout_for_tykind};
 use super::{sig_to_clif, typeck_ty_to_tykind};
 
 
+/// Emit a single HIR statement.
 pub(super) fn emit_hir_stmt(
     builder: &mut FunctionBuilder,
     stmt: &crate::hir::HirStmt,
@@ -303,6 +309,7 @@ pub(super) fn emit_hir_stmt(
     Ok(Flow::Continues)
 }
 
+/// Emit a single HIR expression and return its lowered value representation.
 fn emit_hir_expr(
     builder: &mut FunctionBuilder,
     expr: &crate::hir::HirExpr,
@@ -791,6 +798,7 @@ fn emit_hir_expr(
     }
 }
 
+/// Emit a struct literal into a stack slot and return its address value.
 fn emit_hir_struct_literal(
     builder: &mut FunctionBuilder,
     literal: &crate::hir::HirStructLiteral,
@@ -848,6 +856,7 @@ fn emit_hir_struct_literal(
     Ok(ValueRepr::Single(base_ptr))
 }
 
+/// Emit field access by computing the field address/offset.
 fn emit_hir_field_access(
     builder: &mut FunctionBuilder,
     field_access: &crate::hir::HirFieldAccess,
@@ -901,6 +910,7 @@ fn emit_hir_field_access(
     )
 }
 
+/// Store a lowered value into memory using a typeck::Ty layout.
 fn store_value_by_ty(
     builder: &mut FunctionBuilder,
     base_ptr: ir::Value,
@@ -1025,6 +1035,7 @@ fn store_value_by_ty(
     }
 }
 
+/// Store a lowered value into memory using a codegen TyKind layout.
 fn store_value_by_tykind(
     builder: &mut FunctionBuilder,
     addr: ir::Value,
@@ -1046,6 +1057,7 @@ fn store_value_by_tykind(
     }
 }
 
+/// Load a value from memory using a typeck::Ty layout.
 fn load_value_by_ty(
     builder: &mut FunctionBuilder,
     base_ptr: ir::Value,
@@ -1132,6 +1144,7 @@ fn load_value_by_ty(
     }
 }
 
+/// Load a value from memory using a codegen TyKind layout.
 fn load_value_by_tykind(
     builder: &mut FunctionBuilder,
     addr: ir::Value,
@@ -1154,6 +1167,7 @@ fn load_value_by_tykind(
     ))
 }
 
+/// Pointer addition helper (byte offset).
 fn ptr_add(builder: &mut FunctionBuilder, base: ir::Value, offset: u32) -> ir::Value {
     if offset == 0 {
         base
@@ -1162,6 +1176,7 @@ fn ptr_add(builder: &mut FunctionBuilder, base: ir::Value, offset: u32) -> ir::V
     }
 }
 
+/// Compute an aligned stack address for a struct slot.
 fn aligned_stack_addr(
     builder: &mut FunctionBuilder,
     slot: ir::StackSlot,
@@ -1177,12 +1192,14 @@ fn aligned_stack_addr(
     builder.ins().band_imm(bumped, align_mask)
 }
 
+/// Compute pointer/len offsets for the string layout.
 fn string_offsets(ptr_ty: Type) -> (u32, u32) {
     let ptr_size = ptr_ty.bytes() as u32;
     let len_offset = align_to(ptr_size, 8);
     (0, len_offset)
 }
 
+/// Compute offsets for Result layout (tag, ok, err).
 fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
     let tag_offset = 0u32;
     let ok_offset = align_to(1, ok.align);
@@ -1190,6 +1207,7 @@ fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
     (tag_offset, ok_offset, err_offset)
 }
 
+/// Lookup a layout for a typeck::Ty from the struct layout index.
 fn type_layout_from_index(
     ty: &crate::typeck::Ty,
     struct_layouts: &StructLayoutIndex,
@@ -1205,6 +1223,7 @@ fn type_layout_from_index(
     type_layout_for_tykind(&ty_kind, ptr_ty)
 }
 
+/// Emit short-circuit logic for `&&` and `||`.
 fn emit_hir_short_circuit_expr(
     builder: &mut FunctionBuilder,
     lhs_val: ir::Value,
@@ -1257,6 +1276,7 @@ fn emit_hir_short_circuit_expr(
 }
 
 /// Emit HIR match as statement (arms can contain returns, don't produce values)
+/// Emit HIR match as statement (arms can contain returns, don't produce values).
 fn emit_hir_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
@@ -1371,6 +1391,7 @@ fn emit_hir_match_stmt(
 }
 
 /// Emit HIR match expression
+/// Emit HIR match expression (arms produce a value).
 fn emit_hir_match_expr(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
@@ -1565,6 +1586,7 @@ fn emit_hir_match_expr(
 }
 
 /// Compute the condition for an HIR pattern match
+/// Compute the condition for an HIR pattern match.
 fn hir_match_pattern_cond(
     builder: &mut FunctionBuilder,
     pattern: &crate::hir::HirPattern,
@@ -1642,6 +1664,7 @@ fn hir_match_pattern_cond(
 }
 
 /// Bind pattern variables for HIR patterns
+/// Bind pattern variables for HIR patterns.
 fn hir_bind_match_pattern_value(
     builder: &mut FunctionBuilder,
     pattern: &crate::hir::HirPattern,
@@ -1678,6 +1701,7 @@ fn hir_bind_match_pattern_value(
     }
 }
 
+/// Convert a ValueRepr into a boolean condition value.
 fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, CodegenError> {
     match value {
         ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
@@ -1688,6 +1712,7 @@ fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, C
     }
 }
 
+/// Normalize boolean values to i8 for ABI uses.
 fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
     let ty = builder.func.dfg.value_type(value);
     if ty == ir::types::I8 {
@@ -1697,6 +1722,7 @@ fn bool_to_i8(builder: &mut FunctionBuilder, value: ir::Value) -> ir::Value {
     }
 }
 
+/// Emit a string literal into the data section and return (ptr, len).
 fn emit_string(
     builder: &mut FunctionBuilder,
     value: &str,
@@ -1721,6 +1747,7 @@ fn emit_string(
     Ok(ValueRepr::Pair(ptr, len))
 }
 
+/// Flatten a ValueRepr into ABI-ready Cranelift values.
 pub(super) fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
     match value {
         ValueRepr::Unit => vec![],
@@ -1735,6 +1762,7 @@ pub(super) fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
     }
 }
 
+/// Store a value into a local slot where needed.
 pub(super) fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> LocalValue {
     match value {
         ValueRepr::Unit => LocalValue::Value(ValueRepr::Unit),
@@ -1751,6 +1779,7 @@ pub(super) fn store_local(builder: &mut FunctionBuilder, value: ValueRepr) -> Lo
     }
 }
 
+/// Load a local value from its storage representation.
 fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -> ValueRepr {
     match local {
         LocalValue::Slot(slot, ty) => ValueRepr::Single(builder.ins().stack_load(*ty, *slot, 0)),
@@ -1762,6 +1791,7 @@ fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -
     }
 }
 
+/// Compute the ABI type used for ResultOut payloads.
 fn value_type_for_result_out(ty: &TyKind, ptr_ty: Type) -> Result<ir::Type, CodegenError> {
     match ty {
         TyKind::I32 | TyKind::U32 => Ok(ir::types::I32),
@@ -1773,6 +1803,7 @@ fn value_type_for_result_out(ty: &TyKind, ptr_ty: Type) -> Result<ir::Type, Code
     }
 }
 
+/// Construct a zero/empty value for a codegen TyKind.
 fn zero_value_for_tykind(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
@@ -1804,6 +1835,7 @@ fn zero_value_for_tykind(
     }
 }
 
+/// Construct a zero/empty value for a typeck::Ty.
 fn zero_value_for_ty(
     builder: &mut FunctionBuilder,
     ty: &crate::typeck::Ty,
@@ -1834,6 +1866,7 @@ fn zero_value_for_ty(
     }
 }
 
+/// Reconstruct a ValueRepr from ABI parameters.
 pub(super) fn value_from_params(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
@@ -1879,6 +1912,7 @@ pub(super) fn value_from_params(
     }
 }
 
+/// Reconstruct a ValueRepr from ABI return values.
 fn value_from_results(
     builder: &mut FunctionBuilder,
     ty: &TyKind,
@@ -1921,6 +1955,7 @@ fn value_from_results(
     }
 }
 
+/// Emit a call to a runtime intrinsic with ABI adaptation when needed.
 pub(super) fn emit_runtime_wrapper_call(
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,

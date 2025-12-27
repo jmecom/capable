@@ -1,3 +1,7 @@
+//! Layout and indexing helpers for codegen.
+//!
+//! These routines compute struct layouts, enum discriminants, and ABI sizes.
+
 use std::collections::{HashMap, HashSet};
 
 use cranelift_codegen::ir::Type;
@@ -7,6 +11,7 @@ use super::{
 };
 use super::typeck_ty_to_tykind;
 
+/// Build an enum discriminant table for codegen.
 pub(super) fn build_enum_index(
     entry: &crate::hir::HirModule,
     user_modules: &[crate::hir::HirModule],
@@ -35,6 +40,7 @@ pub(super) fn build_enum_index(
     EnumIndex { variants }
 }
 
+/// Compute struct layouts for all non-opaque structs.
 pub(super) fn build_struct_layout_index(
     entry: &crate::hir::HirModule,
     user_modules: &[crate::hir::HirModule],
@@ -92,6 +98,7 @@ pub(super) fn build_struct_layout_index(
     Ok(StructLayoutIndex { layouts })
 }
 
+/// Compute and memoize a single struct's layout (size/align/field offsets).
 fn compute_struct_layout(
     qualified: &str,
     module_name: &str,
@@ -144,6 +151,7 @@ fn compute_struct_layout(
     Ok(())
 }
 
+/// Compute a layout for a typeck::Ty.
 fn type_layout_for_ty(
     ty: &crate::typeck::Ty,
     module_name: &str,
@@ -209,6 +217,7 @@ fn type_layout_for_ty(
     }
 }
 
+/// Compute a layout for a codegen TyKind.
 pub(super) fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLayout, CodegenError> {
     match ty {
         TyKind::Unit => Ok(TypeLayout { size: 0, align: 1 }),
@@ -249,6 +258,7 @@ pub(super) fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLa
     }
 }
 
+/// Resolve a struct layout by name (qualified or unqualified).
 pub(super) fn resolve_struct_layout<'a>(
     ty: &crate::typeck::Ty,
     module_name: &str,
@@ -267,6 +277,7 @@ pub(super) fn resolve_struct_layout<'a>(
     }
 }
 
+/// Resolve a struct definition by name (qualified or unqualified).
 fn resolve_struct_def<'a>(
     name: &str,
     module_name: &str,
@@ -282,6 +293,7 @@ fn resolve_struct_def<'a>(
     }
 }
 
+/// Align a byte offset up to the next alignment boundary.
 pub(super) fn align_to(value: u32, align: u32) -> u32 {
     if align == 0 {
         return value;

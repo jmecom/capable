@@ -1,3 +1,10 @@
+//! Code generation overview.
+//!
+//! This module lowers HIR into Cranelift IR and emits an object file.
+//! The work is split into:
+//! - `emit`: HIR -> Cranelift emission and ABI lowering helpers.
+//! - `layout`: type/struct layout computation and enum indexing.
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -41,6 +48,7 @@ enum Flow {
     Terminated,
 }
 
+/// Codegen-visible type shapes used for ABI lowering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TyKind {
     I32,
@@ -56,12 +64,14 @@ enum TyKind {
     ResultString,
 }
 
+/// Lowered function signature in codegen form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FnSig {
     params: Vec<TyKind>,
     ret: TyKind,
 }
 
+/// Metadata for a resolved function symbol.
 #[derive(Clone, Debug)]
 struct FnInfo {
     sig: FnSig,
@@ -71,16 +81,19 @@ struct FnInfo {
     is_runtime: bool,
 }
 
+/// Enum discriminant table used by codegen for matches and variants.
 #[derive(Clone, Debug)]
 struct EnumIndex {
     variants: HashMap<String, HashMap<String, i32>>,
 }
 
+/// Struct layout index used for field offsets and sizes.
 #[derive(Clone, Debug)]
 struct StructLayoutIndex {
     layouts: HashMap<String, StructLayout>,
 }
 
+/// Concrete layout for a struct value.
 #[derive(Clone, Debug)]
 struct StructLayout {
     size: u32,
@@ -89,18 +102,21 @@ struct StructLayout {
     field_order: Vec<String>,
 }
 
+/// Field layout metadata (offset + type).
 #[derive(Clone, Debug)]
 struct StructFieldLayout {
     offset: u32,
     ty: crate::typeck::Ty,
 }
 
+/// Size/alignment pair used in layout computations.
 #[derive(Clone, Copy, Debug)]
 struct TypeLayout {
     size: u32,
     align: u32,
 }
 
+/// Lowered value representation for codegen emission.
 #[derive(Clone, Debug)]
 enum ValueRepr {
     Unit,
@@ -113,6 +129,7 @@ enum ValueRepr {
     },
 }
 
+/// Local storage representation used during emission.
 #[derive(Clone, Debug)]
 enum LocalValue {
     Value(ValueRepr),
@@ -120,6 +137,7 @@ enum LocalValue {
     StructSlot(ir::StackSlot, crate::typeck::Ty, u32),
 }
 
+/// Shape metadata for match-expression lowering.
 #[derive(Clone, Debug)]
 struct ResultShape {
     kind: ResultKind,
@@ -127,6 +145,7 @@ struct ResultShape {
     types: Vec<Type>,
 }
 
+/// Result shape kinds for match-expression lowering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ResultKind {
     Unit,
@@ -134,6 +153,7 @@ enum ResultKind {
     Pair,
 }
 
+/// Build and write the object file for a fully-checked HIR program.
 pub fn build_object(
     program: &crate::hir::HirProgram,
     out_path: &Path,
@@ -1486,4 +1506,3 @@ fn mangle_symbol(module_name: &str, func_name: &str) -> String {
     out.push_str(func_name);
     out
 }
-
