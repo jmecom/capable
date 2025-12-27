@@ -52,6 +52,7 @@ enum MoveState {
 enum UseMode {
     Move,
     Read,
+    Project,
 }
 
 #[derive(Debug, Clone)]
@@ -1586,6 +1587,7 @@ fn check_expr(
                         arg,
                         functions,
                         scopes,
+                        UseMode::Move,
                         use_map,
                         struct_map,
                         enum_map,
@@ -1879,7 +1881,7 @@ fn check_expr(
                 &field_access.object,
                 functions,
                 scopes,
-                UseMode::Read,
+                UseMode::Project,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1917,7 +1919,36 @@ fn check_expr(
                     field_access.field.span,
                 )
             })?;
-            Ok(field_ty.clone())
+            let field_ty = field_ty.clone();
+            if is_affine_type(&field_ty, struct_map, enum_map) {
+                match use_mode {
+                    UseMode::Read => {
+                        return Err(TypeError::new(
+                            "cannot read affine field; moving it consumes the whole struct"
+                                .to_string(),
+                            field_access.span,
+                        ));
+                    }
+                    UseMode::Project => {}
+                    UseMode::Move => {
+                        let (root, root_span) =
+                            leftmost_local_in_chain(&field_access.object).ok_or_else(|| {
+                                TypeError::new(
+                                    "cannot move affine field from non-local expression; bind to a local first".to_string(),
+                                    field_access.object.span(),
+                                )
+                            })?;
+                        if !scopes.contains(root) {
+                            return Err(TypeError::new(
+                                "cannot move affine field from non-local expression; bind to a local first".to_string(),
+                                field_access.object.span(),
+                            ));
+                        }
+                        scopes.mark_moved(root, root_span)?;
+                    }
+                }
+            }
+            Ok(field_ty)
         }
     }
 }
@@ -2297,6 +2328,17 @@ fn is_orderable_type(ty: &Ty) -> bool {
             | Ty::Builtin(BuiltinType::U32)
             | Ty::Builtin(BuiltinType::U8)
     )
+}
+
+fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {
+    match expr {
+        Expr::Path(path) if path.segments.len() == 1 => {
+            let seg = &path.segments[0];
+            Some((seg.item.as_str(), seg.span))
+        }
+        Expr::FieldAccess(field_access) => leftmost_local_in_chain(&field_access.object),
+        _ => None,
+    }
 }
 
 // Add fully-qualified type names here when stdlib APIs are linear-ready.
@@ -2680,6 +2722,7 @@ fn type_of_ast_expr(
         expr,
         ctx.functions,
         &mut scopes,
+        UseMode::Read,
         ctx.use_map,
         ctx.structs,
         ctx.enums,
