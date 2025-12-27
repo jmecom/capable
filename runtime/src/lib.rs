@@ -54,12 +54,12 @@ fn new_handle() -> Handle {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_system_console(_sys: Handle) -> Handle {
+pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     new_handle()
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_system_fs_read(
+pub extern "C" fn capable_rt_mint_readfs(
     _sys: Handle,
     root_ptr: *const u8,
     root_len: usize,

@@ -3,10 +3,10 @@ module extern_call
 use sys::system
 use sys::console
 
-extern fn capable_rt_system_console(sys: RootCap) -> Console
+extern fn capable_rt_mint_console(sys: RootCap) -> Console
 
 pub fn main(sys: RootCap) -> i32 {
-  let c = capable_rt_system_console(sys)
+  let c = capable_rt_mint_console(sys)
   console::println(c, "hi")
   return 0
 }

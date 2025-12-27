@@ -192,12 +192,7 @@ pub fn build_object(
 
     let mut fn_map = HashMap::new();
     register_runtime_intrinsics(&mut fn_map, module.isa().pointer_type());
-    let all_modules = program.user_modules
-        .iter()
-        .chain(program.stdlib.iter())
-        .chain(std::iter::once(&program.entry))
-        .collect::<Vec<_>>();
-    for module_ref in &all_modules {
+    for module_ref in &program.stdlib {
         register_user_functions(
             module_ref,
             &program.entry,
@@ -206,8 +201,37 @@ pub fn build_object(
             &struct_layouts,
             &mut fn_map,
             module.isa().pointer_type(),
+            true,
         )?;
     }
+    for module_ref in &program.user_modules {
+        register_user_functions(
+            module_ref,
+            &program.entry,
+            &stdlib_index,
+            &enum_index,
+            &struct_layouts,
+            &mut fn_map,
+            module.isa().pointer_type(),
+            false,
+        )?;
+    }
+    register_user_functions(
+        &program.entry,
+        &program.entry,
+        &stdlib_index,
+        &enum_index,
+        &struct_layouts,
+        &mut fn_map,
+        module.isa().pointer_type(),
+        false,
+    )?;
+
+    let all_modules = program.user_modules
+        .iter()
+        .chain(program.stdlib.iter())
+        .chain(std::iter::once(&program.entry))
+        .collect::<Vec<_>>();
 
     // Register extern functions from AST modules (not in HIR yet)
     let all_ast_modules = user_modules_ast
@@ -228,6 +252,10 @@ pub fn build_object(
                 .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
                 .clone();
             if info.is_runtime {
+                debug_assert!(
+                    module_ref.name.starts_with("sys"),
+                    "runtime intrinsics should only shadow stdlib modules"
+                );
                 continue;
             }
             let func_id = module
@@ -671,8 +699,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         FnInfo {
             sig: system_console.clone(),
             abi_sig: None,
-            // Legacy runtime symbol name kept for compatibility.
-            symbol: "capable_rt_system_console".to_string(),
+            symbol: "capable_rt_mint_console".to_string(),
             is_runtime: true,
         },
     );
@@ -681,8 +708,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         FnInfo {
             sig: system_fs_read.clone(),
             abi_sig: None,
-            // Legacy runtime symbol name kept for compatibility.
-            symbol: "capable_rt_system_fs_read".to_string(),
+            symbol: "capable_rt_mint_readfs".to_string(),
             is_runtime: true,
         },
     );
@@ -1323,6 +1349,7 @@ fn register_user_functions(
     struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
     _ptr_ty: Type,
+    is_stdlib: bool,
 ) -> Result<(), CodegenError> {
     let module_name = &module.name;
     // HIR functions already have resolved types
@@ -1336,9 +1363,14 @@ fn register_user_functions(
             ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
         };
         let key = format!("{}.{}", module_name, func.name);
-        if map.contains_key(&key) {
-            // Keep runtime intrinsics (or previously-registered) entries.
-            continue;
+        if let Some(existing) = map.get(&key) {
+            if is_stdlib && existing.is_runtime {
+                // Allow stdlib wrappers to be overridden by runtime intrinsics.
+                continue;
+            }
+            return Err(CodegenError::Codegen(format!(
+                "duplicate function `{key}`"
+            )));
         }
         let symbol = if module_name == &entry.name && func.name == "main" {
             "capable_main".to_string()
