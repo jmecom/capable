@@ -86,6 +86,26 @@ fn typecheck_missing_console_cap() {
 }
 
 #[test]
+fn typecheck_console_as_alloc_fails() {
+    let source = load_program("should_fail_console_as_alloc.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("unknown method `sys.console.Console__buffer_new`"));
+}
+
+#[test]
+fn typecheck_alloc_as_console_fails() {
+    let source = load_program("should_fail_alloc_as_console.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("unknown method `sys.buffer.Alloc__println`"));
+}
+
+#[test]
 fn typecheck_opaque_console_constructor_fails() {
     let source = load_program("should_fail_forge_console.cap");
     let module = parse_module(&source).expect("parse module");
@@ -104,9 +124,7 @@ fn typecheck_console_wrong_type() {
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let text = err.to_string();
-    assert!(text.contains("argument type mismatch"));
-    assert!(text.contains("Path(\"sys.console.Console\""));
-    assert!(text.contains("Builtin(I32)"));
+    assert!(text.contains("method receiver must be a struct value"));
 }
 
 #[test]
@@ -116,9 +134,16 @@ fn typecheck_mint_without_system() {
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let text = err.to_string();
-    assert!(text.contains("argument type mismatch"));
-    assert!(text.contains("Path(\"sys.system.System\""));
-    assert!(text.contains("Builtin(I32)"));
+    assert!(text.contains("method receiver must be a struct value"));
+}
+
+#[test]
+fn typecheck_reserved_type_name_fails() {
+    let source = load_program("should_fail_reserved_type_name.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("type name `string` is reserved"));
 }
 
 #[test]
@@ -267,5 +292,106 @@ fn add(a: i32, b: i32) -> i32 {
     assert!(
         msg.contains("expected return") || msg.contains("missing return"),
         "expected error about missing/expected return, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_impl_requires_self_param() {
+    let source = r#"
+module app
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn sum(x: Pair) -> i32 {
+    return x.left + x.right
+  }
+}
+"#;
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("first parameter must be self: Pair"),
+        "expected error about missing self, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_impl_self_type_mismatch() {
+    let source = r#"
+module app
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn sum(self: i32) -> i32 {
+    return self
+  }
+}
+"#;
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("first parameter must be self: Pair"),
+        "expected error about self type, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_private_method_across_modules() {
+    let source = load_program("method_private_use.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/method_private_use.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    let err = type_check_program(&module, &stdlib, &user_modules).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("private"),
+        "expected error about private method, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_impl_method_name_should_be_unqualified() {
+    let source = r#"
+module app
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn Pair__sum(self: Pair) -> i32 {
+    return self.left + self.right
+  }
+}
+"#;
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("method name in impl should be unqualified"),
+        "expected error about impl method name, got: {msg}"
+    );
+}
+
+#[test]
+fn typecheck_impl_wrong_module() {
+    let source = load_program("impl_wrong_module.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/impl_wrong_module.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    let err = type_check_program(&module, &stdlib, &user_modules).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("impl blocks must be declared in the defining module"),
+        "expected error about impl module, got: {msg}"
     );
 }

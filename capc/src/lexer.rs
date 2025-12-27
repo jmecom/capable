@@ -45,6 +45,8 @@ pub enum TokenKind {
     Struct,
     #[token("enum")]
     Enum,
+    #[token("impl")]
+    Impl,
     #[token("opaque")]
     Opaque,
     #[token("match")]
@@ -100,6 +102,8 @@ pub enum TokenKind {
     LBracket,
     #[token("]")]
     RBracket,
+    #[token("::", priority = 3)]
+    ColonColon,
     #[token(":")]
     Colon,
     #[token(",")]

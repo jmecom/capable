@@ -1,0 +1,13 @@
+module struct_field_access
+use sys::system
+
+struct Pair { left: i32, right: i32 }
+
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let p = Pair { left: 3, right: 4 }
+  let sum = p.left + p.right
+  c.print_i32(sum)
+  c.println("")
+  return 0
+}

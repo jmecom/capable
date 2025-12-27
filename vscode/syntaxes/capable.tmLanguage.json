@@ -45,7 +45,7 @@
       "patterns": [
         {
           "name": "keyword.control.cap",
-          "match": "\\b(module|package|safe|unsafe|use|pub|extern|fn|let|if|else|while|return|struct|enum|opaque|match|true|false)\\b"
+          "match": "\\b(module|package|safe|unsafe|use|pub|extern|fn|let|if|else|while|return|struct|enum|impl|opaque|match|true|false)\\b"
         },
         {
           "name": "constant.language.cap",

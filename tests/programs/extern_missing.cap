@@ -1,10 +1,10 @@
 package unsafe
 module extern_missing
-use sys.system
+use sys::system
 
 extern fn missing_symbol() -> unit
 
-pub fn main(sys: System) -> i32 {
+pub fn main(sys: RootCap) -> i32 {
   missing_symbol()
   return 0
 }

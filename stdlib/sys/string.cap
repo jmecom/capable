@@ -1,30 +1,32 @@
 package safe
-module sys.string
+module sys::string
 
-use sys.buffer
-use sys.bytes
-use sys.vec
+use sys::buffer
+use sys::bytes
+use sys::vec
 
-pub fn len(s: string) -> i32 {
-  return 0
-}
+impl string {
+  pub fn len(self) -> i32 {
+    return 0
+  }
 
-pub fn byte_at(s: string, index: i32) -> u8 {
-  return 0u8
-}
+  pub fn byte_at(self, index: i32) -> u8 {
+    return 0u8
+  }
 
-pub fn as_slice(s: string) -> Slice[u8] {
-  return ()
-}
+  pub fn as_slice(self) -> Slice[u8] {
+    return ()
+  }
 
-pub fn bytes(s: string) -> Slice[u8] {
-  return as_slice(s)
-}
+  pub fn bytes(self) -> Slice[u8] {
+    return self.as_slice()
+  }
 
-pub fn split_whitespace(s: string) -> VecString {
-  return ()
-}
+  pub fn split_whitespace(self) -> VecString {
+    return ()
+  }
 
-pub fn split(s: string, delim: u8) -> VecString {
-  return ()
+  pub fn split(self, delim: u8) -> VecString {
+    return ()
+  }
 }

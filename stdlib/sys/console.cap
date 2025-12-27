@@ -1,20 +1,22 @@
 package unsafe
-module sys.console
+module sys::console
 
 pub opaque struct Console
 
-pub fn print(c: Console, s: string) -> unit {
-  return ()
-}
+impl Console {
+  pub fn print(self, s: string) -> unit {
+    return ()
+  }
 
-pub fn println(c: Console, s: string) -> unit {
-  return ()
-}
+  pub fn println(self, s: string) -> unit {
+    return ()
+  }
 
-pub fn print_i32(c: Console, v: i32) -> unit {
-  return ()
-}
+  pub fn print_i32(self, v: i32) -> unit {
+    return ()
+  }
 
-pub fn println_i32(c: Console, v: i32) -> unit {
-  return ()
+  pub fn println_i32(self, v: i32) -> unit {
+    return ()
+  }
 }

@@ -94,10 +94,10 @@ fn parse_u16_be(buf: Slice[u8], off: usize) -> Result[u16, Err] {
 
 ### 4.2 Reading a file into a buffer
 
-`sys.fs` provides functions that return a `Buffer` (owned) and/or `string`:
+`sys.fs` provides methods that return a `Buffer` (owned) and/or `string`:
 
 ```cap
-fn read_all(a: Alloc, fs: ReadFS, path: string) -> Result[Buffer, FsErr]
+fn ReadFS.read_all(self, path: string) -> Result[Buffer, FsErr]
 ```
 
 Usage:
@@ -120,8 +120,8 @@ In Capable:
 Example shapes:
 
 ```cap
-sys.net.send(sock: Socket, data: Slice[u8]) -> Result[usize, Err]
-sys.fs.write(file: File, data: Slice[u8]) -> Result[usize, Err]
+Socket.send(data: Slice[u8]) -> Result[usize, Err]
+File.write(data: Slice[u8]) -> Result[usize, Err]
 ```
 
 Safe code never manipulates the raw pointers.

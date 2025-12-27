@@ -1,17 +1,16 @@
 module scoping_let_block
-use sys.system
-use sys.console
+use sys::system
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
   let x = 1
 
   if (true) {
     let x = 2
-    console.println(c, "inner x should be 2")
+    c.println("inner x should be 2")
   }
 
-  console.println(c, "outer x should still be 1")
-  console.println(c, "scoping let block test ok")
+  c.println("outer x should still be 1")
+  c.println("scoping let block test ok")
   return 0
 }

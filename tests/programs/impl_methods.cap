@@ -1,0 +1,26 @@
+module impl_methods
+use sys::system
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn sum(self) -> i32 {
+    return self.left + self.right
+  }
+
+  fn add(self, value: i32) -> i32 {
+    return self.left + value
+  }
+}
+
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let p = Pair { left: 2, right: 5 }
+  let a = p.sum()
+  let b = Pair { left: 7, right: 3 }.add(10)
+  c.print_i32(a)
+  c.print(" ")
+  c.print_i32(b)
+  c.println("")
+  return 0
+}

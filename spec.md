@@ -64,10 +64,9 @@ This is meant to prevent “library surprises” and make authority explicit. It
 
 ### Broad goals (next features)
 
-1. **Methods** (ergonomics for capability APIs)
+1. **Methods** (current; ergonomics for capability APIs)
 
-   * `rc.mint_console()` instead of `sys.system.console(rc)`
-   * `console.println("hi")` instead of `sys.console.println(console, "hi")`
+   * `rc.mint_console()` and `console.println("hi")` are the standard forms.
 2. **Postfix operator pipeline** (parser foundation)
 
    * `.` methods/member access
@@ -103,16 +102,7 @@ fn main(rc: RootCap) {
 }
 ```
 
-Current implementation also supports the “sys function” style:
-
-```capable
-fn main(sys: sys.system.System) {
-  let c = sys.system.console(sys);
-  sys.console.println(c, "hello");
-}
-```
-
-(Methods are a goal; `sys.*` functions exist today.)
+Current implementation uses method calls for the stdlib surface.
 
 ### 4.2 Types (current)
 
@@ -156,7 +146,7 @@ let console = rc.mint_console();
 let fs = rc.mint_readfs("./here");
 ```
 
-And the current implementation model is equivalent but spelled as `sys.*` functions.
+And the current implementation model is method-based on `sys.*` capability types.
 
 ### 5.3 Minimal sys APIs (current shape)
 
@@ -164,11 +154,11 @@ The runtime currently exposes a bunch of functions; these are the “core” one
 
 * Console:
 
-  * `println(console, string) -> unit`
-  * `print(console, string) -> unit`
+  * `Console.println(string) -> unit`
+  * `Console.print(string) -> unit`
 * Read-only filesystem (scoped):
 
-  * `read_to_string(readfs, path) -> Result[string, i32]` (error details are still evolving)
+  * `ReadFS.read_to_string(path) -> Result[string, i32]` (error details are still evolving)
 
 Dynamic enforcement rule:
 
@@ -246,7 +236,7 @@ This is the bridge that makes methods straightforward.
 
 ---
 
-## 9. Methods (next major feature) — how we’ll make them not painful
+## 9. Methods (current) — resolution + desugaring
 
 ### 9.1 Parser requirement: postfix loop
 
@@ -266,7 +256,7 @@ A method call must be resolved using the receiver type, then rewritten into a no
 Example rewrite:
 
 * `console.println("hi")`
-* becomes `sys.console.println(console, "hi")` (or whatever canonical symbol)
+* becomes `sys.console.Console__println(console, "hi")`
 
 Resolution happens in typechecking (or immediately after), not in codegen.
 
@@ -289,7 +279,8 @@ This should not compile (no cap):
 
 ```capable
 fn f() {
-  sys.console.println(?, "nope");
+  let c = Console{};
+  c.println("nope");
 }
 ```
 

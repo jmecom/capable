@@ -1,19 +1,18 @@
 package unsafe
 module slice_unsafe
-use sys.system
-use sys.console
-use sys.mem
+use sys::system
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let p = mem.malloc(4)
-  let slice = mem.slice_from_ptr(p, 4)
-  let len = mem.slice_len(slice)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let alloc = sys.mint_alloc_default()
+  let p = alloc.malloc(4)
+  let slice = alloc.slice_from_ptr(p, 4)
+  let len = slice.len()
   if (len == 4) {
-    console.println(c, "slice ok")
+    c.println("slice ok")
   } else {
-    console.println(c, "slice bad")
+    c.println("slice bad")
   }
-  mem.free(p)
+  alloc.free(p)
   return 0
 }

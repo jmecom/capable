@@ -1,27 +1,24 @@
 package safe
 module args_safe
-use sys.system
-use sys.console
-use sys.args
-use sys.string
+use sys::system
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let n = args.len(sys)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let n = sys.args_len()
   if (n < 1) {
-    console.println(c, "args bad")
+    c.println("args bad")
     return 1
   }
-  let code = match args.at(sys, 0) {
+  let code = match sys.args_at(0) {
     Ok(s) => {
-      let m = string.len(s)
+      let m = s.len()
       if (m >= 0) {
-        console.println(c, "args ok")
+        c.println("args ok")
       }
       0
     }
     Err(e) => {
-      console.println(c, "args err")
+      c.println("args err")
       1
     }
   }

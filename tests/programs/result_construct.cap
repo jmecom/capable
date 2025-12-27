@@ -1,0 +1,32 @@
+package safe
+module result_construct
+use sys::system
+
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let a = make(true)
+  let b = make(false)
+
+  match (a) {
+    Ok(s) => { c.println(s) }
+    Err(e) => { c.println("bad a"); return 1 }
+  }
+
+  match (b) {
+    Ok(s) => { c.println("bad b"); return 1 }
+    Err(e) => {
+      c.print_i32(e)
+      c.println("")
+    }
+  }
+
+  return 0
+}
+
+fn make(ok: bool) -> Result[string, i32] {
+  if (ok) {
+    return Ok("hello")
+  } else {
+    return Err(7)
+  }
+}

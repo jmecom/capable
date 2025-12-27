@@ -1,17 +1,16 @@
 module fs_traversal_kind
-use sys.system
-use sys.fs
-use sys.console
+use sys::system
+use sys::fs
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let rfs = system.fs_read(sys, "./config")
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let rfs = sys.mint_readfs("./config")
 
-  match fs.read_to_string(rfs, "../secrets.txt") {
-    Ok(s) => { console.println(c, "BUG: escaped"); return 2 }
+  match rfs.read_to_string("../secrets.txt") {
+    Ok(s) => { c.println("BUG: escaped"); return 2 }
     Err(e) => {
-      if (e == fs.FsErr.InvalidPath) { console.println(c, "invalid"); return 0 }
-      console.println(c, "wrong"); return 1
+      if (e == fs::FsErr::InvalidPath) { c.println("invalid"); return 0 }
+      c.println("wrong"); return 1
     }
   }
 }

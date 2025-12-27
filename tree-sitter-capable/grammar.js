@@ -16,6 +16,8 @@ module.exports = grammar({
 
   word: ($) => $.identifier,
 
+  conflicts: ($) => [[ $.return_stmt ], [ $.type_path, $.path_expr ]],
+
   rules: {
     source_file: ($) =>
       seq(
@@ -31,10 +33,16 @@ module.exports = grammar({
 
     use_decl: ($) => seq("use", $.module_path),
 
-    module_path: ($) => seq($.identifier, repeat(seq(".", $.identifier))),
+    module_path: ($) => seq($.identifier, repeat(seq("::", $.identifier))),
 
     _item: ($) =>
-      choice($.function_decl, $.extern_function_decl, $.struct_decl, $.enum_decl),
+      choice(
+        $.function_decl,
+        $.extern_function_decl,
+        $.struct_decl,
+        $.enum_decl,
+        $.impl_block
+      ),
 
     function_decl: ($) =>
       seq(
@@ -80,6 +88,26 @@ module.exports = grammar({
         "}"
       ),
 
+    impl_block: ($) =>
+      seq(
+        "impl",
+        field("target", $.type),
+        "{",
+        repeat($.method_decl),
+        "}"
+      ),
+
+    method_decl: ($) =>
+      seq(
+        optional("pub"),
+        "fn",
+        field("name", $.identifier),
+        $.param_list,
+        "->",
+        field("return_type", $.type),
+        field("body", $.block)
+      ),
+
     field_list: ($) =>
       seq($.field, repeat(seq(",", $.field)), optional(",")),
 
@@ -94,7 +122,13 @@ module.exports = grammar({
     param_list: ($) =>
       seq("(", optional(seq($.param, repeat(seq(",", $.param)), optional(","))), ")"),
 
-    param: ($) => seq($.identifier, ":", $.type),
+    param: ($) =>
+      choice(
+        seq(field("name", $.identifier), ":", field("type", $.type)),
+        field("name", $.self_param)
+      ),
+
+    self_param: ($) => "self",
 
     type: ($) =>
       choice(
@@ -102,7 +136,7 @@ module.exports = grammar({
         seq($.type_path, optional($.type_args))
       ),
 
-    type_path: ($) => seq($.identifier, repeat(seq(".", $.identifier))),
+    type_path: ($) => seq($.identifier, repeat(seq("::", $.identifier))),
 
     type_args: ($) => seq("[", $.type, repeat(seq(",", $.type)), optional(","), "]"),
 
@@ -197,7 +231,8 @@ module.exports = grammar({
 
     struct_field: ($) => seq($.identifier, ":", $.expression),
 
-    path_expr: ($) => seq($.identifier, repeat(seq(".", $.identifier))),
+    path_expr: ($) =>
+      seq($.identifier, repeat(choice(seq("::", $.identifier), seq(".", $.identifier)))),
 
     unary_expr: ($) =>
       prec(PREC.unary, seq(choice("!", "-"), $.expression)),

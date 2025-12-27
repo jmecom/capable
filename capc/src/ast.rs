@@ -53,6 +53,7 @@ pub enum Item {
     ExternFunction(ExternFunction),
     Struct(StructDecl),
     Enum(EnumDecl),
+    Impl(ImplBlock),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,9 +78,17 @@ pub struct ExternFunction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplBlock {
+    pub target: Type,
+    pub methods: Vec<Function>,
+    pub doc: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Param {
     pub name: Ident,
-    pub ty: Type,
+    pub ty: Option<Type>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +199,7 @@ pub enum Expr {
     Literal(LiteralExpr),
     Path(Path),
     Call(CallExpr),
+    MethodCall(MethodCallExpr),
     FieldAccess(FieldAccessExpr),
     StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
@@ -264,6 +274,14 @@ pub struct CallExpr {
 pub struct FieldAccessExpr {
     pub object: Box<Expr>,
     pub field: Ident,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodCallExpr {
+    pub receiver: Box<Expr>,
+    pub method: Ident,
+    pub args: Vec<Expr>,
     pub span: Span,
 }
 

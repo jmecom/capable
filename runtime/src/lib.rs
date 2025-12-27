@@ -54,12 +54,12 @@ fn new_handle() -> Handle {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_system_console(_sys: Handle) -> Handle {
+pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     new_handle()
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_system_fs_read(
+pub extern "C" fn capable_rt_mint_readfs(
     _sys: Handle,
     root_ptr: *const u8,
     root_len: usize,
@@ -146,7 +146,7 @@ pub extern "C" fn capable_rt_start() -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_malloc(size: i32) -> *mut u8 {
+pub extern "C" fn capable_rt_malloc(_sys: Handle, size: i32) -> *mut u8 {
     if size <= 0 {
         return std::ptr::null_mut();
     }
@@ -154,7 +154,7 @@ pub extern "C" fn capable_rt_malloc(size: i32) -> *mut u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_free(ptr: *mut u8) {
+pub extern "C" fn capable_rt_free(_sys: Handle, ptr: *mut u8) {
     if ptr.is_null() {
         return;
     }
@@ -164,22 +164,22 @@ pub extern "C" fn capable_rt_free(ptr: *mut u8) {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_cast_u8_to_u32(ptr: *mut u8) -> *mut u32 {
+pub extern "C" fn capable_rt_cast_u8_to_u32(_sys: Handle, ptr: *mut u8) -> *mut u32 {
     ptr as *mut u32
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_cast_u32_to_u8(ptr: *mut u32) -> *mut u8 {
+pub extern "C" fn capable_rt_cast_u32_to_u8(_sys: Handle, ptr: *mut u32) -> *mut u8 {
     ptr as *mut u8
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_alloc_default() -> Handle {
+pub extern "C" fn capable_rt_alloc_default(_sys: Handle) -> Handle {
     new_handle()
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_slice_from_ptr(ptr: *mut u8, len: i32) -> Handle {
+pub extern "C" fn capable_rt_slice_from_ptr(_sys: Handle, ptr: *mut u8, len: i32) -> Handle {
     let len = len.max(0) as usize;
     let handle = new_handle();
     let mut table = SLICES.lock().expect("slice table");
@@ -194,7 +194,7 @@ pub extern "C" fn capable_rt_slice_from_ptr(ptr: *mut u8, len: i32) -> Handle {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_mut_slice_from_ptr(ptr: *mut u8, len: i32) -> Handle {
+pub extern "C" fn capable_rt_mut_slice_from_ptr(_sys: Handle, ptr: *mut u8, len: i32) -> Handle {
     let len = len.max(0) as usize;
     let handle = new_handle();
     let mut table = SLICES.lock().expect("slice table");
@@ -920,6 +920,7 @@ pub extern "C" fn capable_rt_args_at(
 
 #[no_mangle]
 pub extern "C" fn capable_rt_read_stdin_to_string(
+    _sys: Handle,
     out_ptr: *mut *const u8,
     out_len: *mut u64,
     out_err: *mut i32,

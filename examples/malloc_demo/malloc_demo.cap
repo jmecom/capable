@@ -1,20 +1,19 @@
 package unsafe
 module malloc_demo
 
-use sys.system
-use sys.console
-use sys.mem
+use sys::system
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let p = mem.malloc(8)
-  let p32 = mem.cast_u8_to_u32(p)
-  let p2 = mem.cast_u32_to_u8(p32)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let alloc = sys.mint_alloc_default()
+  let p = alloc.malloc(8)
+  let p32 = alloc.cast_u8_to_u32(p)
+  let p2 = alloc.cast_u32_to_u8(p32)
   if (p == p2) {
-    console.println(c, "malloc ok")
+    c.println("malloc ok")
   } else {
-    console.println(c, "malloc mismatch")
+    c.println("malloc mismatch")
   }
-  mem.free(p)
+  alloc.free(p)
   return 0
 }

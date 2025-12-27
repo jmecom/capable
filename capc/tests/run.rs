@@ -76,6 +76,77 @@ fn run_match_expr() {
 }
 
 #[test]
+fn run_struct_field_access() {
+    let out_dir = make_out_dir("struct_field_access");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/struct_field_access.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("7"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_method_calls() {
+    let out_dir = make_out_dir("method_calls");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/method_calls.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("7 11 13"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_method_calls_import() {
+    let out_dir = make_out_dir("method_calls_import");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/method_calls_import.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("7"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_impl_methods() {
+    let out_dir = make_out_dir("impl_methods");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/impl_methods.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("7 17"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_result_construct() {
+    let out_dir = make_out_dir("result_construct");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/result_construct.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("hello"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("7"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_malloc_demo() {
     let out_dir = make_out_dir("malloc_demo");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
@@ -229,7 +300,8 @@ fn run_wc_file() {
         "tests/programs/hello.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("9 22 152"), "stdout was: {stdout:?}");
+    // Stdlib method-only refactor shortened hello.cap.
+    assert!(stdout.contains("8 19 128"), "stdout was: {stdout:?}");
 }
 
 #[test]
@@ -401,4 +473,3 @@ fn run_scoping_assign() {
     assert_eq!(code, 0);
     assert!(stdout.contains("scoping assign test ok"), "stdout was: {stdout:?}");
 }
-

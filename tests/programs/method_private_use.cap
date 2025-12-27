@@ -1,0 +1,8 @@
+module method_private_use
+use method_private_helper
+
+pub fn main() -> i32 {
+  let p = method_private_helper::Pair { left: 1, right: 2 }
+  let s = p.sum()
+  return 0
+}

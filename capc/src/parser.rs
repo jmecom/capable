@@ -62,10 +62,10 @@ impl Parser {
             let safety = match self.bump_kind()? {
                 TokenKind::Safe => PackageSafety::Safe,
                 TokenKind::Unsafe => PackageSafety::Unsafe,
-                _other => {
+                other => {
                     return Err(self.error_at(
                         pkg_span,
-                        format!("expected `safe` or `unsafe`, found {{other:?}}"),
+                        format!("expected `safe` or `unsafe`, found {other:?}"),
                     ));
                 }
             };
@@ -141,11 +141,48 @@ impl Parser {
                 }
                 Ok(Item::Enum(self.parse_enum(is_pub, doc)?))
             }
+            Some(TokenKind::Impl) => {
+                if is_pub {
+                    return Err(self.error_current(
+                        "impl blocks cannot be marked pub".to_string(),
+                    ));
+                }
+                if is_opaque {
+                    return Err(self.error_current(
+                        "opaque applies only to struct declarations".to_string(),
+                    ));
+                }
+                Ok(Item::Impl(self.parse_impl_block(doc)?))
+            }
             Some(_other) => Err(self.error_current(format!(
                 "expected item, found {{other:?}}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
+    }
+
+    fn parse_impl_block(&mut self, impl_doc: Option<String>) -> Result<ImplBlock, ParseError> {
+        let start = self.expect(TokenKind::Impl)?.span.start;
+        let target = self.parse_type()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut methods = Vec::new();
+        while self.peek_kind() != Some(TokenKind::RBrace) {
+            let doc = self.take_doc_comments();
+            let is_pub = self.maybe_consume(TokenKind::Pub).is_some();
+            if self.peek_kind() != Some(TokenKind::Fn) {
+                return Err(self.error_current(
+                    "expected method declaration in impl block".to_string(),
+                ));
+            }
+            methods.push(self.parse_function(is_pub, doc)?);
+        }
+        let end = self.expect(TokenKind::RBrace)?.span.end;
+        Ok(ImplBlock {
+            target,
+            methods,
+            doc: impl_doc,
+            span: Span::new(start, end),
+        })
     }
 
     fn parse_extern_function(&mut self, is_pub: bool, doc: Option<String>) -> Result<ExternFunction, ParseError> {
@@ -161,7 +198,7 @@ impl Parser {
                 let ty = self.parse_type()?;
                 params.push(Param {
                     name: param_name,
-                    ty,
+                    ty: Some(ty),
                 });
                 if self.maybe_consume(TokenKind::Comma).is_some() {
                     continue;
@@ -193,8 +230,15 @@ impl Parser {
         if self.peek_kind() != Some(TokenKind::RParen) {
             loop {
                 let param_name = self.expect_ident()?;
-                self.expect(TokenKind::Colon)?;
-                let ty = self.parse_type()?;
+                let ty = if self.maybe_consume(TokenKind::Colon).is_some() {
+                    Some(self.parse_type()?)
+                } else if param_name.item == "self" {
+                    None
+                } else {
+                    return Err(self.error_current(
+                        "expected ':' after parameter name".to_string(),
+                    ));
+                };
                 params.push(Param {
                     name: param_name,
                     ty,
@@ -455,7 +499,6 @@ impl Parser {
                             let start = lhs.span().start;
                             self.bump(); // consume '.'
                             let field = self.expect_ident()?;
-                            let span = Span::new(start, field.span.end);
 
                             // Check if this is a struct literal (followed by '{')
                             if self.peek_kind() == Some(TokenKind::LBrace) {
@@ -474,6 +517,30 @@ impl Parser {
                                 continue;
                             }
 
+                            // Check if this is a method call (followed by '(')
+                            if self.peek_kind() == Some(TokenKind::LParen) {
+                                self.bump(); // consume '('
+                                let mut args = Vec::new();
+                                if self.peek_kind() != Some(TokenKind::RParen) {
+                                    loop {
+                                        args.push(self.parse_expr()?);
+                                        if self.maybe_consume(TokenKind::Comma).is_none() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                let end = self.expect(TokenKind::RParen)?.span.end;
+                                lhs = Expr::MethodCall(MethodCallExpr {
+                                    receiver: Box::new(lhs),
+                                    method: field,
+                                    args,
+                                    span: Span::new(start, end),
+                                });
+                                continue;
+                            }
+
+                            // Otherwise, it's a field access
+                            let span = Span::new(start, field.span.end);
                             lhs = Expr::FieldAccess(FieldAccessExpr {
                                 object: Box::new(lhs),
                                 field,
@@ -583,8 +650,8 @@ impl Parser {
             }
             Some(TokenKind::Str) => {
                 let token = self.bump().unwrap();
-                let value = unescape_string(&token.text).map_err(|_message| {
-                    self.error_at(token.span, format!("invalid string literal: {{message}}"))
+                let value = unescape_string(&token.text).map_err(|message| {
+                    self.error_at(token.span, format!("invalid string literal: {message}"))
                 })?;
                 Ok(Expr::Literal(LiteralExpr {
                     value: Literal::String(value),
@@ -623,11 +690,24 @@ impl Parser {
                 }
             }
             Some(TokenKind::Ident) => {
-                let ident = self.expect_ident()?;
+                // Parse path segments separated by ::
+                let first_ident = self.expect_ident()?;
+                let start = first_ident.span.start;
+                let mut segments = vec![first_ident];
+
+                // Parse additional segments with ::
+                while self.peek_kind() == Some(TokenKind::ColonColon) {
+                    self.bump(); // consume ::
+                    let segment = self.expect_ident()?;
+                    segments.push(segment);
+                }
+
+                let end = segments.last().unwrap().span.end;
                 let path = Path {
-                    segments: vec![ident.clone()],
-                    span: ident.span,
+                    segments,
+                    span: Span::new(start, end),
                 };
+
                 if self.peek_kind() == Some(TokenKind::LBrace) {
                     self.parse_struct_literal(path)
                 } else {
@@ -704,6 +784,15 @@ impl Parser {
                         binding,
                         span: Span::new(start, end),
                     })
+                } else if path.segments.len() == 1 {
+                    // Single segment - could be binding or enum variant
+                    // If lowercase, it's a binding; if uppercase, it's an enum variant
+                    let name = &path.segments[0].item;
+                    if name.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) {
+                        Ok(Pattern::Binding(path.segments.into_iter().next().unwrap()))
+                    } else {
+                        Ok(Pattern::Path(path))
+                    }
                 } else {
                     Ok(Pattern::Path(path))
                 }
@@ -720,7 +809,8 @@ impl Parser {
         let first = self.expect_ident()?;
         let start = first.span.start;
         let mut segments = vec![first];
-        while self.peek_kind() == Some(TokenKind::Dot) {
+        // Parse path segments separated by ::
+        while self.peek_kind() == Some(TokenKind::ColonColon) {
             self.bump();
             segments.push(self.expect_ident()?);
         }
@@ -945,8 +1035,8 @@ fn unescape_string(text: &str) -> Result<String, String> {
                 't' => '\t',
                 '\\' => '\\',
                 '"' => '"',
-                _other => {
-                    return Err(format!("unsupported escape \\{{other}}"));
+                other => {
+                    return Err(format!("unsupported escape \\{other}"));
                 }
             };
             out.push(escaped);
@@ -972,6 +1062,7 @@ impl SpanExt for Expr {
             Expr::Literal(lit) => lit.span,
             Expr::Path(path) => path.span,
             Expr::Call(call) => call.span,
+            Expr::MethodCall(method_call) => method_call.span,
             Expr::FieldAccess(field) => field.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,

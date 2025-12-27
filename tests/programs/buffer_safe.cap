@@ -1,26 +1,24 @@
 package safe
 module buffer_safe
-use sys.system
-use sys.console
-use sys.buffer
+use sys::system
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let alloc = buffer.alloc_default()
-  match buffer.buffer_new(alloc, 3) {
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let alloc = sys.mint_alloc_default()
+  match alloc.buffer_new(3) {
     Ok(b) => {
-      let slice = buffer.buffer_as_slice(b)
-      let len = buffer.slice_len(slice)
+      let slice = b.as_slice()
+      let len = slice.len()
       if (len == 3) {
-        console.println(c, "buffer ok")
+        c.println("buffer ok")
       } else {
-        console.println(c, "buffer bad")
+        c.println("buffer bad")
       }
-      buffer.buffer_free(alloc, b)
+      alloc.buffer_free(b)
       return 0
     }
     Err(e) => {
-      console.println(c, "buffer err")
+      c.println("buffer err")
       return 1
     }
   }

@@ -1,32 +1,30 @@
 package unsafe
 module buffer_unsafe
-use sys.system
-use sys.console
-use sys.mem
+use sys::system
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
-  let alloc = mem.alloc_default()
-  match mem.buffer_new(alloc, 3) {
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let alloc = sys.mint_alloc_default()
+  match alloc.buffer_new(3) {
     Ok(b) => {
-      let len = mem.buffer_len(b)
+      let len = b.len()
       if (len == 3) {
-        console.println(c, "buffer ok")
+        c.println("buffer ok")
       } else {
-        console.println(c, "buffer bad")
+        c.println("buffer bad")
       }
-      let slice = mem.buffer_as_slice(b)
-      let s_len = mem.slice_len(slice)
+      let slice = b.as_slice()
+      let s_len = slice.len()
       if (s_len == 3) {
-        console.println(c, "slice ok")
+        c.println("slice ok")
       } else {
-        console.println(c, "slice bad")
+        c.println("slice bad")
       }
-      mem.buffer_free(alloc, b)
+      alloc.buffer_free(b)
       return 0
     }
     Err(e) => {
-      console.println(c, "buffer err")
+      c.println("buffer err")
       return 1
     }
   }

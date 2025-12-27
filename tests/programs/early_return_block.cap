@@ -1,17 +1,16 @@
 module early_return_block
-use sys.system
-use sys.console
+use sys::system
 
-pub fn main(sys: System) -> i32 {
-  let c = system.console(sys)
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
 
   if (true) {
-    console.println(c, "before return")
-    console.println(c, "early return test ok")
+    c.println("before return")
+    c.println("early return test ok")
     return 0
-    console.println(c, "after return - SHOULD NOT PRINT")
+    c.println("after return - SHOULD NOT PRINT")
   }
 
-  console.println(c, "after if - SHOULD NOT PRINT")
+  c.println("after if - SHOULD NOT PRINT")
   return 1
 }
