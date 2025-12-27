@@ -516,12 +516,21 @@ fn collect_structs(
     entry_name: &str,
     stdlib: &StdlibIndex,
 ) -> Result<HashMap<String, StructInfo>, TypeError> {
+    let reserved = [
+        "i32", "i64", "u32", "u8", "bool", "string", "unit", "Result",
+    ];
     let mut structs = HashMap::new();
     for module in modules {
         let module_name = module.name.to_string();
         let local_use = UseMap::new(module);
         for item in &module.items {
             if let Item::Struct(decl) = item {
+                if reserved.contains(&decl.name.item.as_str()) {
+                    return Err(TypeError::new(
+                        format!("type name `{}` is reserved", decl.name.item),
+                        decl.name.span,
+                    ));
+                }
                 let mut fields = HashMap::new();
                 for field in &decl.fields {
                     let ty = lower_type(&field.ty, &local_use, stdlib)?;
@@ -565,11 +574,20 @@ fn collect_enums(
     modules: &[&Module],
     entry_name: &str,
 ) -> Result<HashMap<String, EnumInfo>, TypeError> {
+    let reserved = [
+        "i32", "i64", "u32", "u8", "bool", "string", "unit", "Result",
+    ];
     let mut enums = HashMap::new();
     for module in modules {
         let module_name = module.name.to_string();
         for item in &module.items {
             if let Item::Enum(decl) = item {
+                if reserved.contains(&decl.name.item.as_str()) {
+                    return Err(TypeError::new(
+                        format!("type name `{}` is reserved", decl.name.item),
+                        decl.name.span,
+                    ));
+                }
                 let mut variants = Vec::new();
                 for variant in &decl.variants {
                     if variants.contains(&variant.name.item) {
