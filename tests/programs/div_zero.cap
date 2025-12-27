@@ -1,0 +1,7 @@
+module div_zero
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let _ = 1 / 0
+  return 0
+}

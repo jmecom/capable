@@ -33,5 +33,5 @@ This file summarizes major milestones added recently.
 ## Safe Arithmetic (Phase 2)
 - Integer arithmetic now traps on overflow.
 - Division by zero traps.
-- Added a runtime test that overflows an addition.
+- Added runtime tests that overflow and divide by zero.
 - Added explicit modular helpers in `sys.math` with a wrap test.
