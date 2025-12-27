@@ -48,6 +48,20 @@ fn run_fs_traversal_denied() {
 }
 
 #[test]
+fn run_fs_symlink_escape() {
+    let out_dir = make_out_dir("fs_symlink_escape");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/fs_symlink_escape.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("denied"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_fs_traversal_kind() {
     let out_dir = make_out_dir("fs_traversal_kind");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
