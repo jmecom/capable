@@ -206,6 +206,17 @@ pub fn build_object(
             true,
         )?;
     }
+    let missing_intrinsics = runtime_intrinsics
+        .keys()
+        .filter(|key| !fn_map.contains_key(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_intrinsics.is_empty() {
+        return Err(CodegenError::Codegen(format!(
+            "runtime intrinsics missing stdlib wrappers: {}",
+            missing_intrinsics.join(", ")
+        )));
+    }
     for module_ref in &program.user_modules {
         register_user_functions(
             module_ref,
