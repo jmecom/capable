@@ -43,6 +43,7 @@ pub fn main() -> i32 {
 - Expressions: literals, calls, binary ops, unary ops, method calls.
 - Modules + imports: `module ...` and `use ...` (aliases by last path segment).
 - If a function returns `unit`, you can omit the `-> unit` annotation.
+- Integer arithmetic traps on overflow.
 
 ## 3) Structs and enums
 

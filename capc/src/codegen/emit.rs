@@ -772,16 +772,16 @@ fn emit_hir_expr(
 
             match (&binary.op, lhs, rhs) {
                 (BinaryOp::Add, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().iadd(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_add(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Sub, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().isub(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_sub(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Mul, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().imul(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_mul(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Div, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().sdiv(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_div(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Eq, ValueRepr::Single(a), ValueRepr::Single(b)) => {
                     let cmp = builder.ins().icmp(IntCC::Equal, a, b);
@@ -884,6 +884,95 @@ fn emit_hir_expr(
             )
         }
     }
+}
+
+fn emit_checked_add(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let (sum, overflow) = if is_unsigned_int(ty) {
+        builder.ins().uadd_overflow(a, b)
+    } else {
+        builder.ins().sadd_overflow(a, b)
+    };
+    trap_on_overflow(builder, overflow);
+    Ok(sum)
+}
+
+fn emit_checked_sub(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let (diff, overflow) = if is_unsigned_int(ty) {
+        builder.ins().usub_overflow(a, b)
+    } else {
+        builder.ins().ssub_overflow(a, b)
+    };
+    trap_on_overflow(builder, overflow);
+    Ok(diff)
+}
+
+fn emit_checked_mul(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let (prod, overflow) = if is_unsigned_int(ty) {
+        builder.ins().umul_overflow(a, b)
+    } else {
+        builder.ins().smul_overflow(a, b)
+    };
+    trap_on_overflow(builder, overflow);
+    Ok(prod)
+}
+
+fn emit_checked_div(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let b_ty = builder.func.dfg.value_type(b);
+    let zero = builder.ins().iconst(b_ty, 0);
+    let is_zero = builder.ins().icmp(IntCC::Equal, b, zero);
+    let ok_block = builder.create_block();
+    let trap_block = builder.create_block();
+    builder.ins().brif(is_zero, trap_block, &[], ok_block, &[]);
+    builder.switch_to_block(trap_block);
+    builder.ins().trap(ir::TrapCode::IntegerDivisionByZero);
+    builder.switch_to_block(ok_block);
+    builder.seal_block(trap_block);
+    builder.seal_block(ok_block);
+    let value = if is_unsigned_int(ty) {
+        builder.ins().udiv(a, b)
+    } else {
+        builder.ins().sdiv(a, b)
+    };
+    Ok(value)
+}
+
+fn trap_on_overflow(builder: &mut FunctionBuilder, overflow: Value) {
+    let ok_block = builder.create_block();
+    let trap_block = builder.create_block();
+    builder.ins().brif(overflow, trap_block, &[], ok_block, &[]);
+    builder.switch_to_block(trap_block);
+    builder.ins().trap(ir::TrapCode::IntegerOverflow);
+    builder.switch_to_block(ok_block);
+    builder.seal_block(trap_block);
+    builder.seal_block(ok_block);
+}
+
+fn is_unsigned_int(ty: &crate::hir::HirType) -> bool {
+    matches!(
+        ty.ty,
+        crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::U32)
+            | crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::U8)
+    )
 }
 
 /// Emit a struct literal into a stack slot and return its address value.

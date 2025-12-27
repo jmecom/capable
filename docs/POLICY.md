@@ -35,3 +35,9 @@ Keep these as invariants:
 - No implicit conversions.
 - No implicit function calls.
 - No macros or reflection.
+
+## Arithmetic Semantics
+
+- Integer arithmetic traps on overflow.
+- Division by zero traps.
+- Modular arithmetic will be explicit (separate helpers).

@@ -234,6 +234,19 @@ fn run_config_loader() {
 }
 
 #[test]
+fn run_overflow_add_traps() {
+    let out_dir = make_out_dir("overflow_add");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, _stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/overflow_add.cap",
+    ]);
+    assert_ne!(code, 0);
+}
+
+#[test]
 fn run_slice_unsafe() {
     let out_dir = make_out_dir("slice_unsafe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
