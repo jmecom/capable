@@ -1,0 +1,15 @@
+package safe
+module should_pass_try_question
+
+fn make(x: i32) -> Result[i32, i32] {
+  return Ok(x)
+}
+
+fn use_try() -> Result[i32, i32] {
+  let v = make(7)?
+  return Ok(v)
+}
+
+pub fn main() -> i32 {
+  return 0
+}

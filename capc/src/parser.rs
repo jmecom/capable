@@ -260,9 +260,12 @@ impl Parser {
                 break;
             }
         }
-        self.expect(TokenKind::RParen)?;
-        self.expect(TokenKind::Arrow)?;
-        let ret = self.parse_type()?;
+        let rparen = self.expect(TokenKind::RParen)?;
+        let ret = if self.maybe_consume(TokenKind::Arrow).is_some() {
+            self.parse_type()?
+        } else {
+            unit_type_at(Span::new(rparen.span.end, rparen.span.end))
+        };
         let end = self
             .maybe_consume(TokenKind::Semi)
             .map_or(ret.span().end, |t| t.span.end);
@@ -302,9 +305,12 @@ impl Parser {
                 }
             }
         }
-        self.expect(TokenKind::RParen)?;
-        self.expect(TokenKind::Arrow)?;
-        let ret = self.parse_type()?;
+        let rparen = self.expect(TokenKind::RParen)?;
+        let ret = if self.maybe_consume(TokenKind::Arrow).is_some() {
+            self.parse_type()?
+        } else {
+            unit_type_at(Span::new(rparen.span.end, rparen.span.end))
+        };
         let body = self.parse_block()?;
         let span = Span::new(start, body.span.end);
         Ok(Function {
@@ -621,6 +627,15 @@ impl Parser {
                         }
                         TokenKind::LParen => {
                             lhs = self.finish_call(lhs)?;
+                            continue;
+                        }
+                        TokenKind::Question => {
+                            let start = lhs.span().start;
+                            let end = self.bump().unwrap().span.end;
+                            lhs = Expr::Try(TryExpr {
+                                expr: Box::new(lhs),
+                                span: Span::new(start, end),
+                            });
                             continue;
                         }
                         _ => unreachable!(),
@@ -1098,7 +1113,7 @@ fn infix_binding_power(op: &BinaryOp) -> (u8, u8) {
 
 fn postfix_binding_power(kind: &TokenKind) -> Option<u8> {
     match kind {
-        TokenKind::Dot | TokenKind::LParen => Some(13),
+        TokenKind::Dot | TokenKind::LParen | TokenKind::Question => Some(13),
         _ => None,
     }
 }
@@ -1151,7 +1166,21 @@ impl SpanExt for Expr {
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,
             Expr::Match(m) => m.span,
+            Expr::Try(try_expr) => try_expr.span,
             Expr::Grouping(g) => g.span,
         }
+    }
+}
+
+fn unit_type_at(span: Span) -> Type {
+    let ident = Spanned::new("unit".to_string(), span);
+    let path = Path {
+        segments: vec![ident],
+        span,
+    };
+    Type::Path {
+        path,
+        args: Vec::new(),
+        span,
     }
 }

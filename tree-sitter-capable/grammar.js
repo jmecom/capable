@@ -50,8 +50,7 @@ module.exports = grammar({
         "fn",
         field("name", $.identifier),
         $.param_list,
-        "->",
-        field("return_type", $.type),
+        optional(seq("->", field("return_type", $.type))),
         field("body", $.block)
       ),
 
@@ -62,8 +61,7 @@ module.exports = grammar({
         "fn",
         field("name", $.identifier),
         $.param_list,
-        "->",
-        field("return_type", $.type),
+        optional(seq("->", field("return_type", $.type))),
         optional(";")
       ),
 
@@ -102,8 +100,7 @@ module.exports = grammar({
         "fn",
         field("name", $.identifier),
         $.param_list,
-        "->",
-        field("return_type", $.type),
+        optional(seq("->", field("return_type", $.type))),
         field("body", $.block)
       ),
 
@@ -183,6 +180,7 @@ module.exports = grammar({
         $.match_expr,
         $.binary_expr,
         $.unary_expr,
+        $.try_expr,
         $.call_expr,
         $.struct_literal,
         $.path_expr,
@@ -216,6 +214,12 @@ module.exports = grammar({
       prec(
         PREC.call,
         seq(field("function", $.expression), $.arg_list)
+      ),
+
+    try_expr: ($) =>
+      prec(
+        PREC.call,
+        seq(field("value", $.expression), "?")
       ),
 
     arg_list: ($) =>

@@ -1228,6 +1228,52 @@ pub(super) fn check_expr(
             ret_ty,
             module_name,
         ),
+        Expr::Try(try_expr) => {
+            let inner_ty = check_expr(
+                &try_expr.expr,
+                functions,
+                scopes,
+                UseMode::Move,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+            )?;
+            let (ok_ty, err_ty) = match inner_ty {
+                Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+                    (args[0].clone(), args[1].clone())
+                }
+                _ => {
+                    return Err(TypeError::new(
+                        "the `?` operator expects a Result value".to_string(),
+                        try_expr.span,
+                    ))
+                }
+            };
+
+            let ret_err = match ret_ty {
+                Ty::Path(name, args) if name == "Result" && args.len() == 2 => &args[1],
+                _ => {
+                    return Err(TypeError::new(
+                        "the `?` operator can only be used in functions returning Result".to_string(),
+                        try_expr.span,
+                    ))
+                }
+            };
+
+            if &err_ty != ret_err {
+                return Err(TypeError::new(
+                    format!(
+                        "mismatched error type for `?`: expected {ret_err:?}, found {err_ty:?}"
+                    ),
+                    try_expr.span,
+                ));
+            }
+
+            Ok(ok_ty)
+        }
         Expr::Grouping(group) => check_expr(
             &group.expr,
             functions,
@@ -1652,6 +1698,7 @@ fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {
         }
         Expr::FieldAccess(field_access) => leftmost_local_in_chain(&field_access.object),
         Expr::Grouping(group) => leftmost_local_in_chain(&group.expr),
+        Expr::Try(try_expr) => leftmost_local_in_chain(&try_expr.expr),
         _ => None,
     }
 }

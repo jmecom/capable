@@ -95,6 +95,8 @@ pub enum TokenKind {
     Gt,
     #[token("!")]
     Bang,
+    #[token("?")]
+    Question,
 
     #[token("(")]
     LParen,

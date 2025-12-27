@@ -1,56 +1,72 @@
 package safe
 module config_loader
 use sys::system
+use sys::console
+use sys::fs
 use sys::string
 use sys::vec
 use sys::buffer
 
-pub fn main(rc: RootCap) -> i32 {
-  let c = rc.mint_console()
-  let fs = rc.mint_readfs("examples/config_loader")
-  let res = fs.read_to_string("app.conf")
-  match (res) {
-    Ok(contents) => {
-      let alloc = rc.mint_alloc_default()
-      let lines = contents.lines()
-      let i = 0
-      while i < lines.len() {
-        let line_res = lines.get(i)
-        match (line_res) {
-          Ok(line) => {
-            if line.len() == 0 {
-            } else if line.starts_with("#") {
-            } else {
-              let parts = line.split(61u8)
-              if parts.len() == 2 {
-                let key_res = parts.get(0)
-                let val_res = parts.get(1)
-                match (key_res) {
-                  Ok(key) => {
-                    match (val_res) {
-                      Ok(val) => {
-                        c.print("key: ")
-                        c.println(key)
-                        c.print("value: ")
-                        c.println(val)
-                      }
-                      Err(_) => {
-                      }
-                    }
-                  }
-                  Err(_) => {
-                  }
-                }
-              }
-              alloc.vec_string_free(parts)
-            }
+fn print_kv(c: Console, key: string, val: string) -> unit {
+  c.print("key: ")
+  c.println(key)
+  c.print("value: ")
+  c.println(val)
+}
+
+fn parse_line(c: Console, alloc: Alloc, line: string) -> Result[unit, VecErr] {
+  if line.len() == 0 {
+    return Ok(())
+  }
+  if line.starts_with("#") {
+    return Ok(())
+  }
+
+  let parts = line.split(61u8)
+  if parts.len() == 2 {
+    let key = parts.get(0)?
+    let val = parts.get(1)?
+    print_kv(c, key, val)
+  }
+  alloc.vec_string_free(parts)
+  return Ok(())
+}
+
+fn parse_config(c: Console, alloc: Alloc, contents: string) -> unit {
+  let lines = contents.lines()
+  let i = 0
+  while i < lines.len() {
+    let line_res = lines.get(i)
+    match (line_res) {
+      Ok(line) => {
+        match (parse_line(c, alloc, line)) {
+          Ok(_) => {
           }
           Err(_) => {
           }
         }
-        i = i + 1
       }
-      alloc.vec_string_free(lines)
+      Err(_) => {
+      }
+    }
+    i = i + 1
+  }
+  alloc.vec_string_free(lines)
+}
+
+fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result[unit, FsErr] {
+  let contents = fs.read_to_string("app.conf")?
+  parse_config(c, alloc, contents)
+  return Ok(())
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let fs = rc.mint_readfs("examples/config_loader")
+  let alloc = rc.mint_alloc_default()
+  let res = run(c, alloc, fs)
+  match (res) {
+    Ok(_) => {
       c.println("config ok")
       return 0
     }

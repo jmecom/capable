@@ -763,6 +763,26 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 span: match_expr.span,
             }))
         }
+        Expr::Try(try_expr) => {
+            let scrutinee = lower_expr(&try_expr.expr, ctx, ret_ty)?;
+            let scrutinee_ty = expr_type(&scrutinee);
+            let ok_ty = match &scrutinee_ty.ty {
+                Ty::Path(name, args) if name == "Result" && args.len() == 2 => args[0].clone(),
+                _ => {
+                    return Err(TypeError::new(
+                        "the `?` operator expects a Result value".to_string(),
+                        try_expr.span,
+                    ))
+                }
+            };
+
+            Ok(HirExpr::Try(crate::hir::HirTry {
+                expr: Box::new(scrutinee),
+                ok_ty: hir_type_for(ok_ty, ctx, try_expr.span)?,
+                ret_ty: hir_type_for(ret_ty.clone(), ctx, try_expr.span)?,
+                span: try_expr.span,
+            }))
+        }
     }
 }
 
@@ -908,6 +928,7 @@ fn expr_type(expr: &HirExpr) -> HirType {
         HirExpr::Binary(bin) => bin.ty.clone(),
         HirExpr::Unary(un) => un.ty.clone(),
         HirExpr::Match(m) => m.result_ty.clone(),
+        HirExpr::Try(t) => t.ok_ty.clone(),
     }
 }
 

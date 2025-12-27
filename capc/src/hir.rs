@@ -176,6 +176,7 @@ pub enum HirExpr {
     Unary(HirUnary),
     Binary(HirBinary),
     Match(HirMatch),
+    Try(HirTry),
 }
 
 impl HirExpr {
@@ -190,6 +191,7 @@ impl HirExpr {
             HirExpr::Unary(e) => e.span,
             HirExpr::Binary(e) => e.span,
             HirExpr::Match(e) => e.span,
+            HirExpr::Try(e) => e.span,
         }
     }
 }
@@ -295,6 +297,14 @@ pub struct HirMatch {
     pub expr_ty: HirType,
     pub arms: Vec<HirMatchArm>,
     pub result_ty: HirType,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirTry {
+    pub expr: Box<HirExpr>,
+    pub ok_ty: HirType,
+    pub ret_ty: HirType,
     pub span: Span,
 }
 
