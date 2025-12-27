@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::error::TypeError;
+use crate::abi::AbiType;
 use crate::hir::{
     HirAssignStmt, HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr,
     HirExpr, HirExprStmt, HirExternFunction, HirField, HirFieldAccess, HirFunction, HirIfStmt,
     HirLetStmt, HirLiteral, HirLocal, HirMatch, HirMatchArm, HirParam, HirPattern, HirReturnStmt,
-    HirStmt, HirStruct, HirStructLiteral, HirStructLiteralField, HirUnary, HirWhileStmt,
+    HirStmt, HirStruct, HirStructLiteral, HirStructLiteralField, HirType, HirUnary, HirWhileStmt,
     IntrinsicId, LocalId, ResolvedCallee,
 };
 
@@ -117,17 +118,21 @@ pub(super) fn lower_module(
                                 param.name.span,
                             ));
                         };
+                        let lowered = lower_type(ty, use_map, stdlib)?;
                         Ok(HirParam {
                             local_id: LocalId(0),
                             name: param.name.item.clone(),
-                            ty: lower_type(ty, use_map, stdlib)?,
+                            ty: hir_type_for(lowered, &ctx, ty.span())?,
                         })
                     })
                     .collect();
                 hir_extern_functions.push(HirExternFunction {
                     name: func.name.item.clone(),
                     params: params?,
-                    ret_ty: lower_type(&func.ret, use_map, stdlib)?,
+                    ret_ty: {
+                        let lowered = lower_type(&func.ret, use_map, stdlib)?;
+                        hir_type_for(lowered, &ctx, func.ret.span())?
+                    },
                     is_pub: func.is_pub,
                     span: func.span,
                 });
@@ -143,9 +148,10 @@ pub(super) fn lower_module(
                 .fields
                 .iter()
                 .map(|f| {
+                    let lowered = lower_type(&f.ty, use_map, stdlib)?;
                     Ok(HirField {
                         name: f.name.item.clone(),
-                        ty: lower_type(&f.ty, use_map, stdlib)?,
+                        ty: hir_type_for(lowered, &ctx, f.ty.span())?,
                     })
                 })
                 .collect();
@@ -168,8 +174,13 @@ pub(super) fn lower_module(
                 .variants
                 .iter()
                 .map(|v| {
-                    let payload = v.payload.as_ref()
-                        .map(|ty| lower_type(ty, use_map, stdlib))
+                    let payload = v
+                        .payload
+                        .as_ref()
+                        .map(|ty| {
+                            let lowered = lower_type(ty, use_map, stdlib)?;
+                            hir_type_for(lowered, &ctx, ty.span())
+                        })
                         .transpose()?;
                     Ok(HirEnumVariant {
                         name: v.name.item.clone(),
@@ -212,23 +223,25 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
                 ));
             };
             let ty = lower_type(ty, ctx.use_map, ctx.stdlib)?;
-            let local_id = ctx.fresh_local(p.name.item.clone(), ty.clone());
+            let hir_ty = hir_type_for(ty.clone(), ctx, p.ty.as_ref().unwrap().span())?;
+            let local_id = ctx.fresh_local(p.name.item.clone(), ty);
             Ok(HirParam {
                 local_id,
                 name: p.name.item.clone(),
-                ty,
+                ty: hir_ty,
             })
         })
         .collect();
     let params = params?;
 
     let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib)?;
+    let hir_ret_ty = hir_type_for(ret_ty.clone(), ctx, func.ret.span())?;
     let body = lower_block(&func.body, ctx, &ret_ty)?;
 
     Ok(HirFunction {
         name: func.name.item.clone(),
         params,
-        ret_ty,
+        ret_ty: hir_ret_ty,
         body,
         is_pub: func.is_pub,
         span: func.span,
@@ -257,7 +270,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
         Stmt::Let(let_stmt) => {
             let expr = lower_expr(&let_stmt.expr, ctx, ret_ty)?;
             let ty = expr_type(&expr);
-            let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.clone());
+            let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.ty.clone());
 
             Ok(HirStmt::Let(HirLetStmt {
                 local_id,
@@ -363,14 +376,76 @@ fn type_of_ast_expr(
     )
 }
 
+fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeError> {
+    use super::BuiltinType;
+    match ty {
+        Ty::Builtin(b) => match b {
+            BuiltinType::I32 => Ok(AbiType::I32),
+            BuiltinType::I64 => Err(TypeError::new(
+                "i64 is not supported by the current codegen backend".to_string(),
+                span,
+            )),
+            BuiltinType::U32 => Ok(AbiType::U32),
+            BuiltinType::U8 => Ok(AbiType::U8),
+            BuiltinType::Bool => Ok(AbiType::Bool),
+            BuiltinType::String => Ok(AbiType::String),
+            BuiltinType::Unit => Ok(AbiType::Unit),
+        },
+        Ty::Ptr(_) => Ok(AbiType::Ptr),
+        Ty::Ref(inner) => abi_type_for(inner, ctx, span),
+        Ty::Path(name, args) => {
+            if name == "Result" && args.len() == 2 {
+                let ok = abi_type_for(&args[0], ctx, span)?;
+                let err = abi_type_for(&args[1], ctx, span)?;
+                return Ok(AbiType::Result(Box::new(ok), Box::new(err)));
+            }
+            let qualified = if name.contains('.') {
+                None
+            } else {
+                Some(format!("{}.{}", ctx.module_name, name))
+            };
+            if let Some(info) = ctx
+                .structs
+                .get(name)
+                .or_else(|| qualified.as_ref().and_then(|q| ctx.structs.get(q)))
+            {
+                return Ok(if info.is_opaque {
+                    AbiType::Handle
+                } else {
+                    AbiType::Ptr
+                });
+            }
+            if ctx
+                .enums
+                .contains_key(name)
+                || qualified
+                    .as_ref()
+                    .is_some_and(|q| ctx.enums.contains_key(q))
+            {
+                return Ok(AbiType::I32);
+            }
+            Err(TypeError::new(
+                format!("unknown type `{name}` for ABI lowering"),
+                span,
+            ))
+        }
+    }
+}
+
+fn hir_type_for(ty: Ty, ctx: &LoweringCtx, span: Span) -> Result<HirType, TypeError> {
+    let abi = abi_type_for(&ty, ctx, span)?;
+    Ok(HirType { ty, abi })
+}
+
 /// Lower an expression into HIR with resolved callee information.
 fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr, TypeError> {
     let ty = type_of_ast_expr(expr, ctx, ret_ty)?;
+    let hir_ty = hir_type_for(ty.clone(), ctx, expr.span())?;
 
     match expr {
         Expr::Literal(lit) => Ok(HirExpr::Literal(HirLiteral {
             value: lit.value.clone(),
-            ty,
+            ty: hir_ty,
             span: lit.span,
         })),
         Expr::Grouping(grouping) => lower_expr(&grouping.expr, ctx, ret_ty),
@@ -382,7 +457,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     return Ok(HirExpr::Local(HirLocal {
                         local_id,
                         name: name.clone(),
-                        ty,
+                        ty: hir_ty,
                         span: path.span,
                     }));
                 }
@@ -393,7 +468,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 .unwrap_or_else(|| String::from("unknown"));
 
             Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
-                enum_ty: ty,
+                enum_ty: hir_ty,
                 variant_name,
                 payload: None,
                 span: path.span,
@@ -418,7 +493,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     return Ok(HirExpr::Call(HirCall {
                         callee: ResolvedCallee::Intrinsic(IntrinsicId::Drop),
                         args: args?,
-                        ret_ty: ty,
+                        ret_ty: hir_ty,
                         span: call.span,
                     }));
                 }
@@ -427,7 +502,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     let variant_name = name.clone();
 
                     return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
-                        enum_ty: ty.clone(),
+                        enum_ty: hir_ty.clone(),
                         variant_name,
                         payload: Some(Box::new(arg)),
                         span: call.span,
@@ -460,7 +535,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     symbol,
                 },
                 args: args?,
-                ret_ty: ty,
+                ret_ty: hir_ty,
                 span: call.span,
             }))
         }
@@ -514,7 +589,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                         symbol,
                     },
                     args: args?,
-                    ret_ty: ty,
+                    ret_ty: hir_ty,
                     span: method_call.span,
                 }));
             }
@@ -544,7 +619,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     symbol,
                 },
                 args,
-                ret_ty: ty,
+                ret_ty: hir_ty,
                 span: method_call.span,
             }))
         }
@@ -556,7 +631,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 left: Box::new(left),
                 op: bin.op.clone(),
                 right: Box::new(right),
-                ty,
+                ty: hir_ty,
                 span: bin.span,
             }))
         }
@@ -566,7 +641,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             Ok(HirExpr::Unary(HirUnary {
                 op: un.op.clone(),
                 expr: Box::new(operand),
-                ty,
+                ty: hir_ty,
                 span: un.span,
             }))
         }
@@ -595,7 +670,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             .unwrap_or_else(|| String::from("unknown"));
 
                         return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
-                            enum_ty,
+                            enum_ty: hir_type_for(enum_ty, ctx, path.span)?,
                             variant_name,
                             payload: None,
                             span: field_access.span,
@@ -606,12 +681,13 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             let object = lower_expr(&field_access.object, ctx, ret_ty)?;
             let object_ty = type_of_ast_expr(&field_access.object, ctx, ret_ty)?;
+            let object_hir_ty = hir_type_for(object_ty, ctx, field_access.object.span())?;
 
             Ok(HirExpr::FieldAccess(HirFieldAccess {
                 object: Box::new(object),
-                object_ty,
+                object_ty: object_hir_ty,
                 field_name: field_access.field.item.clone(),
-                field_ty: ty,
+                field_ty: hir_ty,
                 span: field_access.span,
             }))
         }
@@ -651,9 +727,10 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             }
 
             let struct_ty = Ty::Path(type_name, vec![]);
+            let hir_struct_ty = hir_type_for(struct_ty, ctx, lit.span)?;
 
             Ok(HirExpr::StructLiteral(HirStructLiteral {
-                struct_ty,
+                struct_ty: hir_struct_ty,
                 fields: hir_fields,
                 span: lit.span,
             }))
@@ -682,7 +759,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 expr: Box::new(scrutinee),
                 expr_ty: scrutinee_ty,
                 arms: hir_arms,
-                result_ty: ty,
+                result_ty: hir_ty,
                 span: match_expr.span,
             }))
         }
@@ -718,7 +795,11 @@ fn lower_match_stmt(
         expr: Box::new(scrutinee),
         expr_ty: scrutinee_ty,
         arms: hir_arms,
-        result_ty: Ty::Builtin(super::BuiltinType::Unit),
+        result_ty: hir_type_for(
+            Ty::Builtin(super::BuiltinType::Unit),
+            ctx,
+            match_expr.span,
+        )?,
         span: match_expr.span,
     }))
 }
@@ -726,7 +807,7 @@ fn lower_match_stmt(
 /// Lower an AST pattern to an HIR pattern, adding any bindings to the context.
 fn lower_pattern(
     pattern: &Pattern,
-    match_ty: &Ty,
+    match_ty: &HirType,
     ctx: &mut LoweringCtx,
 ) -> Result<HirPattern, TypeError> {
     match pattern {
@@ -735,7 +816,7 @@ fn lower_pattern(
         Pattern::Literal(lit) => Ok(HirPattern::Literal(lit.clone())),
 
         Pattern::Binding(ident) => {
-            let local_id = ctx.fresh_local(ident.item.clone(), match_ty.clone());
+            let local_id = ctx.fresh_local(ident.item.clone(), match_ty.ty.clone());
             Ok(HirPattern::Binding(local_id, ident.item.clone()))
         }
 
@@ -745,7 +826,7 @@ fn lower_pattern(
                     .map(|s| s.item.clone())
                     .unwrap_or_else(|| "unknown".to_string());
                 Ok(HirPattern::Variant {
-                    enum_ty,
+                    enum_ty: hir_type_for(enum_ty, ctx, path.span)?,
                     variant_name,
                     binding: None,
                 })
@@ -761,7 +842,7 @@ fn lower_pattern(
             if path.segments.len() == 1 {
                 let name = &path.segments[0].item;
                 if name == "Ok" || name == "Err" {
-                    if let Ty::Path(ty_name, args) = match_ty {
+                    if let Ty::Path(ty_name, args) = &match_ty.ty {
                         if ty_name == "Result" && args.len() == 2 {
                             let variant_name = name.clone();
 
@@ -793,7 +874,7 @@ fn lower_pattern(
                     .unwrap_or_else(|| "unknown".to_string());
 
                 let binding_info = if let Some(bind_ident) = binding {
-                    let bind_ty = match_ty.clone();
+                    let bind_ty = match_ty.ty.clone();
                     let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
                     Some((local_id, bind_ident.item.clone()))
                 } else {
@@ -801,7 +882,7 @@ fn lower_pattern(
                 };
 
                 Ok(HirPattern::Variant {
-                    enum_ty,
+                    enum_ty: hir_type_for(enum_ty, ctx, *span)?,
                     variant_name,
                     binding: binding_info,
                 })
@@ -816,7 +897,7 @@ fn lower_pattern(
 }
 
 /// Extract the type from an HIR expression.
-fn expr_type(expr: &HirExpr) -> Ty {
+fn expr_type(expr: &HirExpr) -> HirType {
     match expr {
         HirExpr::Literal(lit) => lit.ty.clone(),
         HirExpr::Local(local) => local.ty.clone(),

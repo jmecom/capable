@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod abi;
 pub mod codegen;
 pub mod error;
 pub mod hir;

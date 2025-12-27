@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::abi::AbiType;
 use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, Signature, Type};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{Configurable, Flags};
@@ -48,27 +49,11 @@ enum Flow {
     Terminated,
 }
 
-/// Codegen-visible type shapes used for ABI lowering.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum TyKind {
-    I32,
-    U32,
-    U8,
-    Bool,
-    Unit,
-    String,
-    Handle,
-    Ptr,
-    Result(Box<TyKind>, Box<TyKind>),
-    ResultOut(Box<TyKind>, Box<TyKind>),
-    ResultString,
-}
-
 /// Lowered function signature in codegen form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FnSig {
-    params: Vec<TyKind>,
-    ret: TyKind,
+    params: Vec<AbiType>,
+    ret: AbiType,
 }
 
 /// Metadata for a resolved function symbol.
@@ -106,7 +91,7 @@ struct StructLayout {
 #[derive(Clone, Debug)]
 struct StructFieldLayout {
     offset: u32,
-    ty: crate::typeck::Ty,
+    ty: crate::hir::HirType,
 }
 
 /// Size/alignment pair used in layout computations.
@@ -134,7 +119,7 @@ enum ValueRepr {
 enum LocalValue {
     Value(ValueRepr),
     Slot(ir::StackSlot, Type),
-    StructSlot(ir::StackSlot, crate::typeck::Ty, u32),
+    StructSlot(ir::StackSlot, crate::hir::HirType, u32),
 }
 
 /// Shape metadata for match-expression lowering.
@@ -187,7 +172,6 @@ pub fn build_object(
             module_ref,
             &program.entry,
             &enum_index,
-            &struct_layouts,
             &mut fn_map,
             &runtime_intrinsics,
             module.isa().pointer_type(),
@@ -210,7 +194,6 @@ pub fn build_object(
             module_ref,
             &program.entry,
             &enum_index,
-            &struct_layouts,
             &mut fn_map,
             &runtime_intrinsics,
             module.isa().pointer_type(),
@@ -221,7 +204,6 @@ pub fn build_object(
         &program.entry,
         &program.entry,
         &enum_index,
-        &struct_layouts,
         &mut fn_map,
         &runtime_intrinsics,
         module.isa().pointer_type(),
@@ -235,7 +217,7 @@ pub fn build_object(
         .collect::<Vec<_>>();
 
     for module_ref in &all_modules {
-        register_extern_functions_from_hir(module_ref, &struct_layouts, &mut fn_map)?;
+        register_extern_functions_from_hir(module_ref, &mut fn_map)?;
     }
 
     let mut data_counter = 0u32;
@@ -297,8 +279,8 @@ pub fn build_object(
             let params = builder.block_params(block).to_vec();
             let mut param_index = 0;
             for param in &func.params {
-                let ty_kind = typeck_ty_to_tykind(&param.ty, Some(&struct_layouts))?;
-                let value = value_from_params(&mut builder, &ty_kind, &params, &mut param_index)?;
+                let value =
+                    value_from_params(&mut builder, &param.ty.abi, &params, &mut param_index)?;
                 let local = store_local(&mut builder, value);
                 locals.insert(param.name.clone(), local);
             }
@@ -321,7 +303,7 @@ pub fn build_object(
                 }
             }
 
-            if info.sig.ret == TyKind::Unit && !terminated {
+            if info.sig.ret == AbiType::Unit && !terminated {
                 builder.ins().return_(&[]);
             }
 
@@ -357,33 +339,33 @@ fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
     signature
 }
 
-fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
+fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
-        TyKind::Unit => {}
-        TyKind::String => {
+        AbiType::Unit => {}
+        AbiType::String => {
             signature.params.push(AbiParam::new(ptr_ty));
             signature.params.push(AbiParam::new(ir::types::I64));
         }
-        TyKind::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
-        TyKind::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
-        TyKind::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
-        TyKind::U32 => signature.params.push(AbiParam::new(ir::types::I32)),
-        TyKind::U8 => signature.params.push(AbiParam::new(ir::types::I8)),
-        TyKind::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
-        TyKind::Result(ok, err) => {
+        AbiType::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
+        AbiType::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
+        AbiType::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        AbiType::U32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        AbiType::U8 => signature.params.push(AbiParam::new(ir::types::I8)),
+        AbiType::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
+        AbiType::Result(ok, err) => {
             signature.params.push(AbiParam::new(ir::types::I8));
             append_ty_params(signature, ok, ptr_ty);
             append_ty_params(signature, err, ptr_ty);
         }
-        TyKind::ResultOut(ok, err) => {
-            if **ok != TyKind::Unit {
+        AbiType::ResultOut(ok, err) => {
+            if **ok != AbiType::Unit {
                 signature.params.push(AbiParam::new(ptr_ty));
             }
-            if **err != TyKind::Unit {
+            if **err != AbiType::Unit {
                 signature.params.push(AbiParam::new(ptr_ty));
             }
         }
-        TyKind::ResultString => {
+        AbiType::ResultString => {
             signature.params.push(AbiParam::new(ptr_ty));
             signature.params.push(AbiParam::new(ptr_ty));
             signature.params.push(AbiParam::new(ptr_ty));
@@ -391,28 +373,28 @@ fn append_ty_params(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
     }
 }
 
-fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
+fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
-        TyKind::Unit => {}
-        TyKind::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
-        TyKind::U32 => signature.returns.push(AbiParam::new(ir::types::I32)),
-        TyKind::U8 => signature.returns.push(AbiParam::new(ir::types::I8)),
-        TyKind::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
-        TyKind::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
-        TyKind::Ptr => signature.returns.push(AbiParam::new(ptr_ty)),
-        TyKind::String => {
+        AbiType::Unit => {}
+        AbiType::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        AbiType::U32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        AbiType::U8 => signature.returns.push(AbiParam::new(ir::types::I8)),
+        AbiType::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
+        AbiType::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
+        AbiType::Ptr => signature.returns.push(AbiParam::new(ptr_ty)),
+        AbiType::String => {
             signature.returns.push(AbiParam::new(ptr_ty));
             signature.returns.push(AbiParam::new(ir::types::I64));
         }
-        TyKind::Result(ok, err) => {
+        AbiType::Result(ok, err) => {
             signature.returns.push(AbiParam::new(ir::types::I8));
             append_ty_returns(signature, ok, ptr_ty);
             append_ty_returns(signature, err, ptr_ty);
         }
-        TyKind::ResultOut(_, _) => {
+        AbiType::ResultOut(_, _) => {
             signature.returns.push(AbiParam::new(ir::types::I8));
         }
-        TyKind::ResultString => {
+        AbiType::ResultString => {
             signature.returns.push(AbiParam::new(ir::types::I8));
         }
     }
@@ -421,324 +403,324 @@ fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
 fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     let mut map = HashMap::new();
     let system_console = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let system_fs_read = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
     };
     let system_filesystem = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
     };
     let fs_root_dir = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let fs_subdir = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
     };
     let fs_open_read = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
     };
     let fs_read_to_string = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
     };
     let fs_read_to_string_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::String, TyKind::ResultString],
-        ret: TyKind::ResultString,
+        params: vec![AbiType::Handle, AbiType::String, AbiType::ResultString],
+        ret: AbiType::ResultString,
     };
     let fs_file_read_to_string = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
     };
     let fs_file_read_to_string_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::ResultString],
-        ret: TyKind::ResultString,
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
     };
     let console_println = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Unit,
     };
     let console_print = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Unit,
     };
     let console_print_i32 = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Unit,
     };
     let mem_malloc = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Ptr,
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Ptr,
     };
     let mem_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Ptr],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::Ptr],
+        ret: AbiType::Unit,
     };
     let mem_cast = FnSig {
-        params: vec![TyKind::Handle, TyKind::Ptr],
-        ret: TyKind::Ptr,
+        params: vec![AbiType::Handle, AbiType::Ptr],
+        ret: AbiType::Ptr,
     };
     let mem_alloc_default = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let system_mint_args = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let system_mint_stdin = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let mem_slice_from_ptr = FnSig {
-        params: vec![TyKind::Handle, TyKind::Ptr, TyKind::I32],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle, AbiType::Ptr, AbiType::I32],
+        ret: AbiType::Handle,
     };
     let mem_slice_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
     };
     let mem_slice_at = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::U8,
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::U8,
     };
     let mem_buffer_new = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
     let mem_buffer_new_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Handle), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
     let mem_buffer_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
     };
     let mem_buffer_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::U8],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let mem_buffer_push_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::U8,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::U8,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let mem_buffer_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
     };
     let mem_buffer_as_slice = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let args_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
     };
     let args_at = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
     };
     let args_at_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::ResultString],
-        ret: TyKind::ResultString,
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultString],
+        ret: AbiType::ResultString,
     };
     let io_read_stdin = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
     };
     let io_read_stdin_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::ResultString],
-        ret: TyKind::ResultString,
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
     };
     let console_assert = FnSig {
-        params: vec![TyKind::Handle, TyKind::Bool],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::Bool],
+        ret: AbiType::Unit,
     };
     let string_len = FnSig {
-        params: vec![TyKind::String],
-        ret: TyKind::I32,
+        params: vec![AbiType::String],
+        ret: AbiType::I32,
     };
     let string_byte_at = FnSig {
-        params: vec![TyKind::String, TyKind::I32],
-        ret: TyKind::U8,
+        params: vec![AbiType::String, AbiType::I32],
+        ret: AbiType::U8,
     };
     let string_as_slice = FnSig {
-        params: vec![TyKind::String],
-        ret: TyKind::Handle,
+        params: vec![AbiType::String],
+        ret: AbiType::Handle,
     };
     let string_split = FnSig {
-        params: vec![TyKind::String],
-        ret: TyKind::Handle,
+        params: vec![AbiType::String],
+        ret: AbiType::Handle,
     };
     let string_split_delim = FnSig {
-        params: vec![TyKind::String, TyKind::U8],
-        ret: TyKind::Handle,
+        params: vec![AbiType::String, AbiType::U8],
+        ret: AbiType::Handle,
     };
     let vec_new = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let vec_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
     };
     let vec_u8_get = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::U8), Box::new(AbiType::I32)),
     };
     let vec_u8_get_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
     };
     let vec_u8_set = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::U8],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::U8],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_u8_set_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::U8,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::U8,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_u8_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::U8],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_u8_push_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::U8,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::U8,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_u8_pop = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::U8), Box::new(AbiType::I32)),
     };
     let vec_u8_pop_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::U8), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
     };
     let vec_u8_as_slice = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Handle,
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
     };
     let vec_u8_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
     };
     let vec_i32_get = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
     };
     let vec_i32_get_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
     };
     let vec_i32_set = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_i32_set_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_i32_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_i32_push_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::I32,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_i32_pop = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
     };
     let vec_i32_pop_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::I32), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
     };
     let vec_i32_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
     };
     let vec_string_len = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::I32,
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
     };
     let vec_string_get = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
     };
     let vec_string_get_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::I32, TyKind::ResultString],
-        ret: TyKind::ResultString,
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultString],
+        ret: AbiType::ResultString,
     };
     let vec_string_push = FnSig {
-        params: vec![TyKind::Handle, TyKind::String],
-        ret: TyKind::Result(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_string_push_abi = FnSig {
         params: vec![
-            TyKind::Handle,
-            TyKind::String,
-            TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
-        ret: TyKind::ResultOut(Box::new(TyKind::Unit), Box::new(TyKind::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
     let vec_string_pop = FnSig {
-        params: vec![TyKind::Handle],
-        ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
     };
     let vec_string_pop_abi = FnSig {
-        params: vec![TyKind::Handle, TyKind::ResultString],
-        ret: TyKind::ResultString,
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
     };
     let vec_string_free = FnSig {
-        params: vec![TyKind::Handle, TyKind::Handle],
-        ret: TyKind::Unit,
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
     };
 
     map.insert(
@@ -1356,8 +1338,8 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         "sys.bytes.u8__is_whitespace".to_string(),
         FnInfo {
             sig: FnSig {
-                params: vec![TyKind::U8],
-                ret: TyKind::Bool,
+                params: vec![AbiType::U8],
+                ret: AbiType::Bool,
             },
             abi_sig: None,
             symbol: "capable_rt_bytes_is_whitespace".to_string(),
@@ -1370,57 +1352,10 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     map
 }
 
-/// Convert typeck::Ty to codegen::TyKind
-
-/// Convert typeck::Ty to codegen::TyKind
-fn typeck_ty_to_tykind(
-    ty: &crate::typeck::Ty,
-    struct_layouts: Option<&StructLayoutIndex>,
-) -> Result<TyKind, CodegenError> {
-    use crate::typeck::{BuiltinType, Ty};
-    match ty {
-        Ty::Builtin(b) => match b {
-            BuiltinType::I32 => Ok(TyKind::I32),
-            BuiltinType::I64 => Err(CodegenError::Unsupported("i64 not yet supported".to_string())),
-            BuiltinType::U32 => Ok(TyKind::U32),
-            BuiltinType::U8 => Ok(TyKind::U8),
-            BuiltinType::Bool => Ok(TyKind::Bool),
-            BuiltinType::String => Ok(TyKind::String),
-            BuiltinType::Unit => Ok(TyKind::Unit),
-        },
-        Ty::Path(path, args) => {
-            if path == "Result" && args.len() == 2 {
-                let ok = typeck_ty_to_tykind(&args[0], struct_layouts)?;
-                let err = typeck_ty_to_tykind(&args[1], struct_layouts)?;
-                return Ok(TyKind::Result(Box::new(ok), Box::new(err)));
-            }
-            if let Some(layouts) = struct_layouts {
-                if layout::resolve_struct_layout(ty, "", &layouts.layouts).is_some() {
-                    return Ok(TyKind::Ptr);
-                }
-            }
-            if path.ends_with(".Slice") {
-                Ok(TyKind::Handle)
-            } else if path.ends_with(".Buffer") {
-                Ok(TyKind::Handle)
-            } else if path.ends_with(".FsErr") || path.contains("Err") {
-                Ok(TyKind::I32)
-            } else if path.contains('.') {
-                Ok(TyKind::Handle)
-            } else {
-                Ok(TyKind::I32)
-            }
-        }
-        Ty::Ptr(_inner) => Ok(TyKind::Ptr),
-        Ty::Ref(inner) => typeck_ty_to_tykind(inner, struct_layouts),
-    }
-}
-
 fn register_user_functions(
     module: &crate::hir::HirModule,
     entry: &crate::hir::HirModule,
     _enum_index: &EnumIndex,
-    struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
     runtime_intrinsics: &HashMap<String, FnInfo>,
     _ptr_ty: Type,
@@ -1432,9 +1367,9 @@ fn register_user_functions(
             params: func
                 .params
                 .iter()
-                .map(|p| typeck_ty_to_tykind(&p.ty, Some(struct_layouts)))
-                .collect::<Result<Vec<TyKind>, CodegenError>>()?,
-            ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
+                .map(|p| p.ty.abi.clone())
+                .collect::<Vec<AbiType>>(),
+            ret: func.ret_ty.abi.clone(),
         };
         let key = format!("{}.{}", module_name, func.name);
         if map.contains_key(&key) {
@@ -1471,7 +1406,6 @@ fn register_user_functions(
 
 fn register_extern_functions_from_hir(
     module: &crate::hir::HirModule,
-    struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
 ) -> Result<(), CodegenError> {
     let module_name = &module.name;
@@ -1480,9 +1414,9 @@ fn register_extern_functions_from_hir(
             params: func
                 .params
                 .iter()
-                .map(|p| typeck_ty_to_tykind(&p.ty, Some(struct_layouts)))
-                .collect::<Result<Vec<TyKind>, CodegenError>>()?,
-            ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
+                .map(|p| p.ty.abi.clone())
+                .collect::<Vec<AbiType>>(),
+            ret: func.ret_ty.abi.clone(),
         };
         let key = format!("{}.{}", module_name, func.name);
         map.insert(

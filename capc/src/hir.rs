@@ -9,12 +9,20 @@
 // - Local variables use LocalId instead of strings
 // - All types are fully resolved
 
+use crate::abi::AbiType;
 use crate::ast::{BinaryOp, Literal, Span, UnaryOp};
 use crate::typeck::Ty;
 
 /// Unique identifier for a local variable within a function
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalId(pub usize);
+
+/// HIR type pairing the resolved type with its ABI shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HirType {
+    pub ty: Ty,
+    pub abi: AbiType,
+}
 
 /// A fully resolved and type-checked module
 #[derive(Debug, Clone)]
@@ -39,7 +47,7 @@ pub struct HirProgram {
 pub struct HirFunction {
     pub name: String,
     pub params: Vec<HirParam>,
-    pub ret_ty: Ty,
+    pub ret_ty: HirType,
     pub body: HirBlock,
     pub is_pub: bool,
     pub span: Span,
@@ -49,7 +57,7 @@ pub struct HirFunction {
 pub struct HirExternFunction {
     pub name: String,
     pub params: Vec<HirParam>,
-    pub ret_ty: Ty,
+    pub ret_ty: HirType,
     pub is_pub: bool,
     pub span: Span,
 }
@@ -58,7 +66,7 @@ pub struct HirExternFunction {
 pub struct HirParam {
     pub local_id: LocalId,
     pub name: String,
-    pub ty: Ty,
+    pub ty: HirType,
 }
 
 /// A struct declaration in HIR
@@ -76,7 +84,7 @@ pub struct HirStruct {
 #[derive(Debug, Clone)]
 pub struct HirField {
     pub name: String,
-    pub ty: Ty,
+    pub ty: HirType,
 }
 
 /// An enum declaration in HIR
@@ -91,7 +99,7 @@ pub struct HirEnum {
 #[derive(Debug, Clone)]
 pub struct HirEnumVariant {
     pub name: String,
-    pub payload: Option<Ty>,
+    pub payload: Option<HirType>,
 }
 
 /// A block of statements
@@ -116,7 +124,7 @@ pub enum HirStmt {
 pub struct HirLetStmt {
     pub local_id: LocalId,
     pub name: String,
-    pub ty: Ty,
+    pub ty: HirType,
     pub expr: HirExpr,
     pub span: Span,
 }
@@ -189,7 +197,7 @@ impl HirExpr {
 #[derive(Debug, Clone)]
 pub struct HirLiteral {
     pub value: Literal,
-    pub ty: Ty,
+    pub ty: HirType,
     pub span: Span,
 }
 
@@ -197,14 +205,14 @@ pub struct HirLiteral {
 pub struct HirLocal {
     pub local_id: LocalId,
     pub name: String,
-    pub ty: Ty,
+    pub ty: HirType,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct HirEnumVariantExpr {
     /// The enum type this variant belongs to (e.g., "sys.fs.TraversalKind")
-    pub enum_ty: Ty,
+    pub enum_ty: HirType,
     /// The variant name (e.g., "File")
     pub variant_name: String,
     /// Optional payload for variant constructors like Ok(value) or Err(err)
@@ -216,7 +224,7 @@ pub struct HirEnumVariantExpr {
 pub struct HirCall {
     pub callee: ResolvedCallee,
     pub args: Vec<HirExpr>,
-    pub ret_ty: Ty,
+    pub ret_ty: HirType,
     pub span: Span,
 }
 
@@ -245,15 +253,15 @@ pub enum IntrinsicId {
 #[derive(Debug, Clone)]
 pub struct HirFieldAccess {
     pub object: Box<HirExpr>,
-    pub object_ty: Ty,
+    pub object_ty: HirType,
     pub field_name: String,
-    pub field_ty: Ty,
+    pub field_ty: HirType,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct HirStructLiteral {
-    pub struct_ty: Ty,
+    pub struct_ty: HirType,
     pub fields: Vec<HirStructLiteralField>,
     pub span: Span,
 }
@@ -268,7 +276,7 @@ pub struct HirStructLiteralField {
 pub struct HirUnary {
     pub op: UnaryOp,
     pub expr: Box<HirExpr>,
-    pub ty: Ty,
+    pub ty: HirType,
     pub span: Span,
 }
 
@@ -277,16 +285,16 @@ pub struct HirBinary {
     pub op: BinaryOp,
     pub left: Box<HirExpr>,
     pub right: Box<HirExpr>,
-    pub ty: Ty,
+    pub ty: HirType,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct HirMatch {
     pub expr: Box<HirExpr>,
-    pub expr_ty: Ty,
+    pub expr_ty: HirType,
     pub arms: Vec<HirMatchArm>,
-    pub result_ty: Ty,
+    pub result_ty: HirType,
     pub span: Span,
 }
 
@@ -301,7 +309,7 @@ pub enum HirPattern {
     Wildcard,
     /// Path to an enum variant (fully resolved)
     Variant {
-        enum_ty: Ty,
+        enum_ty: HirType,
         variant_name: String,
         binding: Option<(LocalId, String)>,
     },

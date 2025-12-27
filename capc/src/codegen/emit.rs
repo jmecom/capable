@@ -11,14 +11,15 @@ use cranelift_frontend::FunctionBuilder;
 use cranelift_module::{DataDescription, Linkage, Module as ModuleTrait};
 use cranelift_object::ObjectModule;
 
+use crate::abi::AbiType;
 use crate::ast::{BinaryOp, Literal, UnaryOp};
 
 use super::{
     CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape, StructLayoutIndex,
-    TyKind, TypeLayout, ValueRepr,
+    TypeLayout, ValueRepr,
 };
-use super::layout::{align_to, resolve_struct_layout, type_layout_for_tykind};
-use super::{sig_to_clif, typeck_ty_to_tykind};
+use super::layout::{align_to, resolve_struct_layout, type_layout_for_abi};
+use super::sig_to_clif;
 
 
 /// Emit a single HIR statement.
@@ -47,7 +48,7 @@ pub(super) fn emit_hir_stmt(
                 data_counter,
             )?;
             if let Some(layout) =
-                resolve_struct_layout(&let_stmt.ty, "", &struct_layouts.layouts)
+                resolve_struct_layout(&let_stmt.ty.ty, "", &struct_layouts.layouts)
             {
                 let align = layout.align.max(1);
                 let slot_size = layout.size.max(1).saturating_add(align - 1);
@@ -345,10 +346,19 @@ fn emit_hir_expr(
         }
         HirExpr::EnumVariant(variant) => {
             // Check if this is a Result type with payload (Ok/Err)
-            if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty {
+            if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty.ty {
                 if ty_name == "Result" && args.len() == 2 {
-                    let ok_ty = &args[0];
-                    let err_ty = &args[1];
+                    let AbiType::Result(ok_abi, err_abi) = &variant.enum_ty.abi else {
+                        return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    };
+                    let ok_ty = crate::hir::HirType {
+                        ty: args[0].clone(),
+                        abi: (**ok_abi).clone(),
+                    };
+                    let err_ty = crate::hir::HirType {
+                        ty: args[1].clone(),
+                        abi: (**err_abi).clone(),
+                    };
                     let tag = if variant.variant_name == "Ok" { 0 } else { 1 };
                     let tag_val = builder.ins().iconst(ir::types::I8, tag);
                     let ptr_ty = module.isa().pointer_type();
@@ -367,15 +377,15 @@ fn emit_hir_expr(
                                     data_counter,
                                 )?
                             } else {
-                                zero_value_for_ty(builder, ok_ty, ptr_ty, Some(struct_layouts))?
+                                zero_value_for_ty(builder, &ok_ty, ptr_ty, Some(struct_layouts))?
                             };
                             let err_zero =
-                                zero_value_for_ty(builder, err_ty, ptr_ty, Some(struct_layouts))?;
+                                zero_value_for_ty(builder, &err_ty, ptr_ty, Some(struct_layouts))?;
                             (payload, err_zero)
                         }
                         "Err" => {
                             let ok_zero =
-                                zero_value_for_ty(builder, ok_ty, ptr_ty, Some(struct_layouts))?;
+                                zero_value_for_ty(builder, &ok_ty, ptr_ty, Some(struct_layouts))?;
                             let payload = if let Some(payload_expr) = &variant.payload {
                                 emit_hir_expr(
                                     builder,
@@ -388,7 +398,7 @@ fn emit_hir_expr(
                                     data_counter,
                                 )?
                             } else {
-                                zero_value_for_ty(builder, err_ty, ptr_ty, Some(struct_layouts))?
+                                zero_value_for_ty(builder, &err_ty, ptr_ty, Some(struct_layouts))?
                             };
                             (ok_zero, payload)
                         }
@@ -409,11 +419,11 @@ fn emit_hir_expr(
             }
 
             // For non-Result enums or variants without payload, emit just the discriminant
-            let qualified = match &variant.enum_ty {
+            let qualified = match &variant.enum_ty.ty {
                 crate::typeck::Ty::Path(path, _) => path.clone(),
                 _ => return Err(CodegenError::Codegen(format!(
                     "enum variant has non-path type: {:?}",
-                    variant.enum_ty
+                    variant.enum_ty.ty
                 ))),
             };
             if let Some(variants) = enum_index.variants.get(&qualified) {
@@ -480,7 +490,7 @@ fn emit_hir_expr(
             let mut result_out = None;
             let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
 
-            if abi_sig.ret == TyKind::ResultString {
+            if abi_sig.ret == AbiType::ResultString {
                 let ptr_ty = module.isa().pointer_type();
                 let ptr_align = ptr_ty.bytes() as u32;
                 let len_bytes = result_string_len_bytes();
@@ -511,9 +521,9 @@ fn emit_hir_expr(
                 out_slots = Some((slot_ptr, slot_len, slot_err));
             }
 
-            if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
+            if let AbiType::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
                 let ptr_ty = module.isa().pointer_type();
-                let ok_slot = if **ok_ty == TyKind::Unit {
+                let ok_slot = if **ok_ty == AbiType::Unit {
                     None
                 } else {
                     let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
@@ -527,7 +537,7 @@ fn emit_hir_expr(
                     args.push(addr);
                     Some((slot, ty, align))
                 };
-                let err_slot = if **err_ty == TyKind::Unit {
+                let err_slot = if **err_ty == AbiType::Unit {
                     None
                 } else {
                     let ty = value_type_for_result_out(err_ty, ptr_ty)?;
@@ -563,7 +573,7 @@ fn emit_hir_expr(
             let results = builder.inst_results(call_inst).to_vec();
 
             // Handle result unpacking (same logic as AST version)
-            if abi_sig.ret == TyKind::ResultString {
+            if abi_sig.ret == AbiType::ResultString {
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -587,8 +597,8 @@ fn emit_hir_expr(
                     .ins()
                     .load(ir::types::I32, MemFlags::new(), err_addr, 0);
                 match &info.sig.ret {
-                    TyKind::Result(ok_ty, err_ty) => {
-                        if **ok_ty != TyKind::String || **err_ty != TyKind::I32 {
+                    AbiType::Result(ok_ty, err_ty) => {
+                        if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
                             return Err(CodegenError::Unsupported("result out params".to_string()));
                         }
                         Ok(ValueRepr::Result {
@@ -599,7 +609,7 @@ fn emit_hir_expr(
                     }
                     _ => Err(CodegenError::Unsupported("result out params".to_string())),
                 }
-            } else if let TyKind::ResultOut(_, _) = &abi_sig.ret {
+            } else if let AbiType::ResultOut(_, _) = &abi_sig.ret {
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -630,7 +640,7 @@ fn emit_hir_expr(
                     ValueRepr::Unit
                 };
                 match &info.sig.ret {
-                    TyKind::Result(_, _) => Ok(ValueRepr::Result {
+                    AbiType::Result(_, _) => Ok(ValueRepr::Result {
                         tag: *tag,
                         ok: Box::new(ok_val),
                         err: Box::new(err_val),
@@ -757,7 +767,10 @@ fn emit_hir_expr(
         }
         HirExpr::Match(match_expr) => {
             // Check if this is a match-as-statement (result_ty is Unit)
-            if matches!(match_expr.result_ty, crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::Unit)) {
+            if matches!(
+                match_expr.result_ty.ty,
+                crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::Unit)
+            ) {
                 emit_hir_match_stmt(
                     builder,
                     match_expr,
@@ -817,11 +830,11 @@ fn emit_hir_struct_literal(
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
-    let layout = resolve_struct_layout(&literal.struct_ty, "", &struct_layouts.layouts)
+    let layout = resolve_struct_layout(&literal.struct_ty.ty, "", &struct_layouts.layouts)
         .ok_or_else(|| {
             CodegenError::Unsupported(format!(
                 "struct layout missing for {:?}",
-                literal.struct_ty
+                literal.struct_ty.ty
             ))
         })?;
     let ptr_ty = module.isa().pointer_type();
@@ -875,11 +888,12 @@ fn emit_hir_field_access(
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
-    let layout = resolve_struct_layout(&field_access.object_ty, "", &struct_layouts.layouts)
+    let layout =
+        resolve_struct_layout(&field_access.object_ty.ty, "", &struct_layouts.layouts)
         .ok_or_else(|| {
             CodegenError::Unsupported(format!(
                 "struct layout missing for {:?}",
-                field_access.object_ty
+                field_access.object_ty.ty
             ))
         })?;
     let Some(field_layout) = layout.fields.get(&field_access.field_name) else {
@@ -923,7 +937,7 @@ fn store_value_by_ty(
     builder: &mut FunctionBuilder,
     base_ptr: ir::Value,
     offset: u32,
-    ty: &crate::typeck::Ty,
+    ty: &crate::hir::HirType,
     value: ValueRepr,
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
@@ -932,7 +946,7 @@ fn store_value_by_ty(
 
     let addr = ptr_add(builder, base_ptr, offset);
     let ptr_ty = module.isa().pointer_type();
-    match ty {
+    match &ty.ty {
         Ty::Builtin(b) => match b {
             BuiltinType::Unit => Ok(()),
             BuiltinType::I32 | BuiltinType::U32 => {
@@ -969,29 +983,46 @@ fn store_value_by_ty(
             builder.ins().store(MemFlags::new(), val, addr, 0);
             Ok(())
         }
-        Ty::Ref(inner) => store_value_by_ty(
-            builder,
-            base_ptr,
-            offset,
-            inner,
-            value,
-            struct_layouts,
-            module,
-        ),
+        Ty::Ref(inner) => {
+            let inner_ty = crate::hir::HirType {
+                ty: *inner.clone(),
+                abi: ty.abi.clone(),
+            };
+            store_value_by_ty(
+                builder,
+                base_ptr,
+                offset,
+                &inner_ty,
+                value,
+                struct_layouts,
+                module,
+            )
+        }
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let ValueRepr::Result { tag, ok, err } = value else {
                     return Err(CodegenError::Unsupported("store result".to_string()));
                 };
-                let ok_layout = type_layout_from_index(&args[0], struct_layouts, ptr_ty)?;
-                let err_layout = type_layout_from_index(&args[1], struct_layouts, ptr_ty)?;
+                let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
+                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                };
+                let ok_ty = crate::hir::HirType {
+                    ty: args[0].clone(),
+                    abi: (**ok_abi).clone(),
+                };
+                let err_ty = crate::hir::HirType {
+                    ty: args[1].clone(),
+                    abi: (**err_abi).clone(),
+                };
+                let ok_layout = type_layout_from_index(&ok_ty, struct_layouts, ptr_ty)?;
+                let err_layout = type_layout_from_index(&err_ty, struct_layouts, ptr_ty)?;
                 let (_, ok_off, err_off) = result_offsets(ok_layout, err_layout);
                 builder.ins().store(MemFlags::new(), tag, addr, 0);
                 store_value_by_ty(
                     builder,
                     base_ptr,
                     offset + ok_off,
-                    &args[0],
+                    &ok_ty,
                     *ok,
                     struct_layouts,
                     module,
@@ -1000,7 +1031,7 @@ fn store_value_by_ty(
                     builder,
                     base_ptr,
                     offset + err_off,
-                    &args[1],
+                    &err_ty,
                     *err,
                     struct_layouts,
                     module,
@@ -1008,19 +1039,19 @@ fn store_value_by_ty(
                 return Ok(());
             }
 
-            if let Some(layout) = resolve_struct_layout(ty, "", &struct_layouts.layouts) {
-    let ValueRepr::Single(src_ptr) = value else {
-        return Err(CodegenError::Unsupported("store struct".to_string()));
-    };
-    for name in &layout.field_order {
-        let Some(field) = layout.fields.get(name) else {
-            continue;
-        };
-        let field_value = load_value_by_ty(
-            builder,
-            src_ptr,
-            field.offset,
-            &field.ty,
+            if let Some(layout) = resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts) {
+                let ValueRepr::Single(src_ptr) = value else {
+                    return Err(CodegenError::Unsupported("store struct".to_string()));
+                };
+                for name in &layout.field_order {
+                    let Some(field) = layout.fields.get(name) else {
+                        continue;
+                    };
+                    let field_value = load_value_by_ty(
+                        builder,
+                        src_ptr,
+                        field.offset,
+                        &field.ty,
                         struct_layouts,
                         module,
                     )?;
@@ -1037,17 +1068,16 @@ fn store_value_by_ty(
                 return Ok(());
             }
 
-            let ty_kind = typeck_ty_to_tykind(ty, Some(struct_layouts))?;
-            store_value_by_tykind(builder, addr, &ty_kind, value, ptr_ty)
+            store_value_by_tykind(builder, addr, &ty.abi, value, ptr_ty)
         }
     }
 }
 
-/// Store a lowered value into memory using a codegen TyKind layout.
+/// Store a lowered value into memory using an ABI layout.
 fn store_value_by_tykind(
     builder: &mut FunctionBuilder,
     addr: ir::Value,
-    ty: &TyKind,
+    ty: &AbiType,
     value: ValueRepr,
     _ptr_ty: Type,
 ) -> Result<(), CodegenError> {
@@ -1055,7 +1085,7 @@ fn store_value_by_tykind(
         return Err(CodegenError::Unsupported("store value".to_string()));
     };
     match ty {
-        TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
+        AbiType::I32 | AbiType::U32 | AbiType::U8 | AbiType::Bool | AbiType::Handle | AbiType::Ptr => {
             builder.ins().store(MemFlags::new(), val, addr, 0);
             Ok(())
         }
@@ -1065,12 +1095,12 @@ fn store_value_by_tykind(
     }
 }
 
-/// Load a value from memory using a typeck::Ty layout.
+/// Load a value from memory using a resolved HIR type layout.
 fn load_value_by_ty(
     builder: &mut FunctionBuilder,
     base_ptr: ir::Value,
     offset: u32,
-    ty: &crate::typeck::Ty,
+    ty: &crate::hir::HirType,
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1078,7 +1108,7 @@ fn load_value_by_ty(
 
     let addr = ptr_add(builder, base_ptr, offset);
     let ptr_ty = module.isa().pointer_type();
-    match ty {
+    match &ty.ty {
         Ty::Builtin(b) => match b {
             BuiltinType::Unit => Ok(ValueRepr::Unit),
             BuiltinType::I32 | BuiltinType::U32 => Ok(ValueRepr::Single(
@@ -1104,25 +1134,42 @@ fn load_value_by_ty(
         Ty::Ptr(_) => Ok(ValueRepr::Single(
             builder.ins().load(ptr_ty, MemFlags::new(), addr, 0),
         )),
-        Ty::Ref(inner) => load_value_by_ty(
-            builder,
-            base_ptr,
-            offset,
-            inner,
-            struct_layouts,
-            module,
-        ),
+        Ty::Ref(inner) => {
+            let inner_ty = crate::hir::HirType {
+                ty: *inner.clone(),
+                abi: ty.abi.clone(),
+            };
+            load_value_by_ty(
+                builder,
+                base_ptr,
+                offset,
+                &inner_ty,
+                struct_layouts,
+                module,
+            )
+        }
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
-                let ok_layout = type_layout_from_index(&args[0], struct_layouts, ptr_ty)?;
-                let err_layout = type_layout_from_index(&args[1], struct_layouts, ptr_ty)?;
+                let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
+                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                };
+                let ok_ty = crate::hir::HirType {
+                    ty: args[0].clone(),
+                    abi: (**ok_abi).clone(),
+                };
+                let err_ty = crate::hir::HirType {
+                    ty: args[1].clone(),
+                    abi: (**err_abi).clone(),
+                };
+                let ok_layout = type_layout_from_index(&ok_ty, struct_layouts, ptr_ty)?;
+                let err_layout = type_layout_from_index(&err_ty, struct_layouts, ptr_ty)?;
                 let (_, ok_off, err_off) = result_offsets(ok_layout, err_layout);
                 let tag = builder.ins().load(ir::types::I8, MemFlags::new(), addr, 0);
                 let ok = load_value_by_ty(
                     builder,
                     base_ptr,
                     offset + ok_off,
-                    &args[0],
+                    &ok_ty,
                     struct_layouts,
                     module,
                 )?;
@@ -1130,7 +1177,7 @@ fn load_value_by_ty(
                     builder,
                     base_ptr,
                     offset + err_off,
-                    &args[1],
+                    &err_ty,
                     struct_layouts,
                     module,
                 )?;
@@ -1141,29 +1188,28 @@ fn load_value_by_ty(
                 });
             }
 
-            if resolve_struct_layout(ty, "", &struct_layouts.layouts).is_some() {
+            if resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts).is_some() {
                 let ptr = ptr_add(builder, base_ptr, offset);
                 return Ok(ValueRepr::Single(ptr));
             }
 
-            let ty_kind = typeck_ty_to_tykind(ty, Some(struct_layouts))?;
-            load_value_by_tykind(builder, addr, &ty_kind, ptr_ty)
+            load_value_by_tykind(builder, addr, &ty.abi, ptr_ty)
         }
     }
 }
 
-/// Load a value from memory using a codegen TyKind layout.
+/// Load a value from memory using an ABI layout.
 fn load_value_by_tykind(
     builder: &mut FunctionBuilder,
     addr: ir::Value,
-    ty: &TyKind,
+    ty: &AbiType,
     ptr_ty: Type,
 ) -> Result<ValueRepr, CodegenError> {
     let load_ty = match ty {
-        TyKind::I32 | TyKind::U32 => ir::types::I32,
-        TyKind::U8 | TyKind::Bool => ir::types::I8,
-        TyKind::Handle => ir::types::I64,
-        TyKind::Ptr => ptr_ty,
+        AbiType::I32 | AbiType::U32 => ir::types::I32,
+        AbiType::U8 | AbiType::Bool => ir::types::I8,
+        AbiType::Handle => ir::types::I64,
+        AbiType::Ptr => ptr_ty,
         _ => {
             return Err(CodegenError::Unsupported(format!(
                 "load unsupported {ty:?}"
@@ -1226,20 +1272,19 @@ fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
     (tag_offset, ok_offset, err_offset)
 }
 
-/// Lookup a layout for a typeck::Ty from the struct layout index.
+/// Lookup a layout for a resolved HIR type from the struct layout index.
 fn type_layout_from_index(
-    ty: &crate::typeck::Ty,
+    ty: &crate::hir::HirType,
     struct_layouts: &StructLayoutIndex,
     ptr_ty: Type,
 ) -> Result<TypeLayout, CodegenError> {
-    if let Some(layout) = resolve_struct_layout(ty, "", &struct_layouts.layouts) {
+    if let Some(layout) = resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts) {
         return Ok(TypeLayout {
             size: layout.size,
             align: layout.align,
         });
     }
-    let ty_kind = typeck_ty_to_tykind(ty, Some(struct_layouts))?;
-    type_layout_for_tykind(&ty_kind, ptr_ty)
+    type_layout_for_abi(&ty.abi, ptr_ty)
 }
 
 /// Emit short-circuit logic for `&&` and `||`.
@@ -1644,11 +1689,11 @@ fn hir_match_pattern_cond(
         },
         HirPattern::Variant { enum_ty, variant_name, .. } => {
             // Get the discriminant value for this variant
-            let qualified = match enum_ty {
+            let qualified = match &enum_ty.ty {
                 crate::typeck::Ty::Path(path, _) => path.clone(),
                 _ => return Err(CodegenError::Codegen(format!(
                     "enum variant pattern has non-path type: {:?}",
-                    enum_ty
+                    enum_ty.ty
                 ))),
             };
 
@@ -1811,35 +1856,35 @@ fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -
 }
 
 /// Compute the ABI type used for ResultOut payloads.
-fn value_type_for_result_out(ty: &TyKind, ptr_ty: Type) -> Result<ir::Type, CodegenError> {
+fn value_type_for_result_out(ty: &AbiType, ptr_ty: Type) -> Result<ir::Type, CodegenError> {
     match ty {
-        TyKind::I32 | TyKind::U32 => Ok(ir::types::I32),
-        TyKind::U8 | TyKind::Bool => Ok(ir::types::I8),
-        TyKind::Handle => Ok(ir::types::I64),
-        TyKind::Ptr => Ok(ptr_ty),
-        TyKind::Unit => Err(CodegenError::Unsupported("result out unit".to_string())),
+        AbiType::I32 | AbiType::U32 => Ok(ir::types::I32),
+        AbiType::U8 | AbiType::Bool => Ok(ir::types::I8),
+        AbiType::Handle => Ok(ir::types::I64),
+        AbiType::Ptr => Ok(ptr_ty),
+        AbiType::Unit => Err(CodegenError::Unsupported("result out unit".to_string())),
         _ => Err(CodegenError::Unsupported("result out params".to_string())),
     }
 }
 
-/// Construct a zero/empty value for a codegen TyKind.
+/// Construct a zero/empty value for an ABI type.
 fn zero_value_for_tykind(
     builder: &mut FunctionBuilder,
-    ty: &TyKind,
+    ty: &AbiType,
     ptr_ty: Type,
 ) -> Result<ValueRepr, CodegenError> {
     match ty {
-        TyKind::Unit => Ok(ValueRepr::Unit),
-        TyKind::I32 | TyKind::U32 => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
-        TyKind::U8 | TyKind::Bool => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, 0))),
-        TyKind::Handle => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I64, 0))),
-        TyKind::Ptr => Ok(ValueRepr::Single(builder.ins().iconst(ptr_ty, 0))),
-        TyKind::String => {
+        AbiType::Unit => Ok(ValueRepr::Unit),
+        AbiType::I32 | AbiType::U32 => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0))),
+        AbiType::U8 | AbiType::Bool => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, 0))),
+        AbiType::Handle => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I64, 0))),
+        AbiType::Ptr => Ok(ValueRepr::Single(builder.ins().iconst(ptr_ty, 0))),
+        AbiType::String => {
             let ptr = builder.ins().iconst(ptr_ty, 0);
             let len = builder.ins().iconst(ir::types::I64, 0);
             Ok(ValueRepr::Pair(ptr, len))
         }
-        TyKind::Result(ok, err) => {
+        AbiType::Result(ok, err) => {
             let tag = builder.ins().iconst(ir::types::I8, 0);
             let ok_val = zero_value_for_tykind(builder, ok, ptr_ty)?;
             let err_val = zero_value_for_tykind(builder, err, ptr_ty)?;
@@ -1849,38 +1894,52 @@ fn zero_value_for_tykind(
                 err: Box::new(err_val),
             })
         }
-        TyKind::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
-        TyKind::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
+        AbiType::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
     }
 }
 
-/// Construct a zero/empty value for a typeck::Ty.
+/// Construct a zero/empty value for a resolved HIR type.
 fn zero_value_for_ty(
     builder: &mut FunctionBuilder,
-    ty: &crate::typeck::Ty,
+    ty: &crate::hir::HirType,
     ptr_ty: Type,
-    struct_layouts: Option<&StructLayoutIndex>,
+    _struct_layouts: Option<&StructLayoutIndex>,
 ) -> Result<ValueRepr, CodegenError> {
     use crate::typeck::Ty;
 
-    match ty {
-        Ty::Builtin(_) => {
-            zero_value_for_tykind(builder, &typeck_ty_to_tykind(ty, struct_layouts)?, ptr_ty)
+    match &ty.ty {
+        Ty::Builtin(_) | Ty::Ptr(_) => zero_value_for_tykind(builder, &ty.abi, ptr_ty),
+        Ty::Ref(inner) => {
+            let inner_ty = crate::hir::HirType {
+                ty: *inner.clone(),
+                abi: ty.abi.clone(),
+            };
+            zero_value_for_ty(builder, &inner_ty, ptr_ty, _struct_layouts)
         }
-        Ty::Ptr(_) => zero_value_for_tykind(builder, &TyKind::Ptr, ptr_ty),
-        Ty::Ref(inner) => zero_value_for_ty(builder, inner, ptr_ty, struct_layouts),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
+                let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
+                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                };
+                let ok_ty = crate::hir::HirType {
+                    ty: args[0].clone(),
+                    abi: (**ok_abi).clone(),
+                };
+                let err_ty = crate::hir::HirType {
+                    ty: args[1].clone(),
+                    abi: (**err_abi).clone(),
+                };
                 let tag = builder.ins().iconst(ir::types::I8, 0);
-                let ok_val = zero_value_for_ty(builder, &args[0], ptr_ty, struct_layouts)?;
-                let err_val = zero_value_for_ty(builder, &args[1], ptr_ty, struct_layouts)?;
+                let ok_val = zero_value_for_ty(builder, &ok_ty, ptr_ty, _struct_layouts)?;
+                let err_val = zero_value_for_ty(builder, &err_ty, ptr_ty, _struct_layouts)?;
                 return Ok(ValueRepr::Result {
                     tag,
                     ok: Box::new(ok_val),
                     err: Box::new(err_val),
                 });
             }
-            zero_value_for_tykind(builder, &typeck_ty_to_tykind(ty, struct_layouts)?, ptr_ty)
+            zero_value_for_tykind(builder, &ty.abi, ptr_ty)
         }
     }
 }
@@ -1888,24 +1947,24 @@ fn zero_value_for_ty(
 /// Reconstruct a ValueRepr from ABI parameters.
 pub(super) fn value_from_params(
     builder: &mut FunctionBuilder,
-    ty: &TyKind,
+    ty: &AbiType,
     params: &[ir::Value],
     idx: &mut usize,
 ) -> Result<ValueRepr, CodegenError> {
     match ty {
-        TyKind::Unit => Ok(ValueRepr::Unit),
-        TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
+        AbiType::Unit => Ok(ValueRepr::Unit),
+        AbiType::I32 | AbiType::U32 | AbiType::U8 | AbiType::Bool | AbiType::Handle | AbiType::Ptr => {
             let val = params[*idx];
             *idx += 1;
             Ok(ValueRepr::Single(val))
         }
-        TyKind::String => {
+        AbiType::String => {
             let ptr = params[*idx];
             let len = params[*idx + 1];
             *idx += 2;
             Ok(ValueRepr::Pair(ptr, len))
         }
-        TyKind::Result(ok, err) => {
+        AbiType::Result(ok, err) => {
             let tag = params[*idx];
             *idx += 1;
             let ok_val = value_from_params(builder, ok, params, idx)?;
@@ -1918,12 +1977,12 @@ pub(super) fn value_from_params(
         }
         // ResultOut and ResultString are ABI-level return types, not input types.
         // They should never appear as function parameters.
-        TyKind::ResultOut(ok, err) => {
+        AbiType::ResultOut(ok, err) => {
             Err(CodegenError::Codegen(format!(
                 "ResultOut<{ok:?}, {err:?}> cannot be a parameter type (ABI return type only)"
             )))
         }
-        TyKind::ResultString => {
+        AbiType::ResultString => {
             Err(CodegenError::Codegen(
                 "ResultString cannot be a parameter type (ABI return type only)".to_string()
             ))
@@ -1934,20 +1993,20 @@ pub(super) fn value_from_params(
 /// Reconstruct a ValueRepr from ABI return values.
 fn value_from_results(
     builder: &mut FunctionBuilder,
-    ty: &TyKind,
+    ty: &AbiType,
     results: &[ir::Value],
     idx: &mut usize,
 ) -> Result<ValueRepr, CodegenError> {
     match ty {
-        TyKind::Unit => Ok(ValueRepr::Unit),
-        TyKind::I32 | TyKind::U32 | TyKind::U8 | TyKind::Bool | TyKind::Handle | TyKind::Ptr => {
+        AbiType::Unit => Ok(ValueRepr::Unit),
+        AbiType::I32 | AbiType::U32 | AbiType::U8 | AbiType::Bool | AbiType::Handle | AbiType::Ptr => {
             let val = results
                 .get(*idx)
                 .ok_or_else(|| CodegenError::Codegen("missing return value".to_string()))?;
             *idx += 1;
             Ok(ValueRepr::Single(*val))
         }
-        TyKind::String => {
+        AbiType::String => {
             if results.len() < *idx + 2 {
                 return Err(CodegenError::Codegen("string return count".to_string()));
             }
@@ -1956,7 +2015,7 @@ fn value_from_results(
             *idx += 2;
             Ok(ValueRepr::Pair(ptr, len))
         }
-        TyKind::Result(ok, err) => {
+        AbiType::Result(ok, err) => {
             let tag = results
                 .get(*idx)
                 .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -1969,8 +2028,8 @@ fn value_from_results(
                 err: Box::new(err_val),
             })
         }
-        TyKind::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
-        TyKind::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
+        AbiType::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
     }
 }
 
@@ -1986,7 +2045,7 @@ pub(super) fn emit_runtime_wrapper_call(
     let mut out_slots = None;
     let mut result_out = None;
 
-    if abi_sig.ret == TyKind::ResultString {
+    if abi_sig.ret == AbiType::ResultString {
         let ptr_ty = module.isa().pointer_type();
         let ptr_align = ptr_ty.bytes() as u32;
         let len_bytes = result_string_len_bytes();
@@ -2016,9 +2075,9 @@ pub(super) fn emit_runtime_wrapper_call(
         out_slots = Some((slot_ptr, slot_len, slot_err));
     }
 
-    if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
+    if let AbiType::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
         let ptr_ty = module.isa().pointer_type();
-        let ok_slot = if **ok_ty == TyKind::Unit {
+        let ok_slot = if **ok_ty == AbiType::Unit {
             None
         } else {
             let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
@@ -2032,7 +2091,7 @@ pub(super) fn emit_runtime_wrapper_call(
             args.push(addr);
             Some((slot, ty, align))
         };
-        let err_slot = if **err_ty == TyKind::Unit {
+        let err_slot = if **err_ty == AbiType::Unit {
             None
         } else {
             let ty = value_type_for_result_out(err_ty, ptr_ty)?;
@@ -2061,7 +2120,7 @@ pub(super) fn emit_runtime_wrapper_call(
     let call_inst = builder.ins().call(local, &args);
     let results = builder.inst_results(call_inst).to_vec();
 
-    if abi_sig.ret == TyKind::ResultString {
+    if abi_sig.ret == AbiType::ResultString {
         let tag = results
             .get(0)
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -2084,8 +2143,8 @@ pub(super) fn emit_runtime_wrapper_call(
             .ins()
             .load(ir::types::I32, MemFlags::new(), err_addr, 0);
         match &info.sig.ret {
-            TyKind::Result(ok_ty, err_ty) => {
-                if **ok_ty != TyKind::String || **err_ty != TyKind::I32 {
+            AbiType::Result(ok_ty, err_ty) => {
+                if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
                     return Err(CodegenError::Unsupported("result out params".to_string()));
                 }
                 return Ok(ValueRepr::Result {
@@ -2098,7 +2157,7 @@ pub(super) fn emit_runtime_wrapper_call(
         }
     }
 
-    if let TyKind::ResultOut(_, _) = &abi_sig.ret {
+    if let AbiType::ResultOut(_, _) = &abi_sig.ret {
         let tag = results
             .get(0)
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -2119,7 +2178,7 @@ pub(super) fn emit_runtime_wrapper_call(
             ValueRepr::Unit
         };
         match &info.sig.ret {
-            TyKind::Result(_, _) => {
+            AbiType::Result(_, _) => {
                 return Ok(ValueRepr::Result {
                     tag: *tag,
                     ok: Box::new(ok_val),
@@ -2146,7 +2205,7 @@ fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
         return Ok(());
     }
     match abi_sig.ret {
-        TyKind::ResultString | TyKind::ResultOut(_, _) => Ok(()),
+        AbiType::ResultString | AbiType::ResultOut(_, _) => Ok(()),
         _ => Err(CodegenError::Codegen(format!(
             "abi signature mismatch for {} without ResultString/ResultOut lowering",
             info.symbol
@@ -2174,11 +2233,11 @@ mod tests {
     fn ensure_abi_sig_allows_result_string_lowering() {
         let sig = FnSig {
             params: Vec::new(),
-            ret: TyKind::Result(Box::new(TyKind::String), Box::new(TyKind::I32)),
+            ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
         };
         let abi_sig = FnSig {
             params: Vec::new(),
-            ret: TyKind::ResultString,
+            ret: AbiType::ResultString,
         };
         let info = FnInfo {
             sig,
@@ -2193,12 +2252,12 @@ mod tests {
     #[test]
     fn ensure_abi_sig_rejects_unhandled_mismatch() {
         let sig = FnSig {
-            params: vec![TyKind::I32],
-            ret: TyKind::I32,
+            params: vec![AbiType::I32],
+            ret: AbiType::I32,
         };
         let abi_sig = FnSig {
-            params: vec![TyKind::I32],
-            ret: TyKind::U32,
+            params: vec![AbiType::I32],
+            ret: AbiType::U32,
         };
         let info = FnInfo {
             sig,
