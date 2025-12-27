@@ -1,0 +1,64 @@
+package safe
+module config_loader
+use sys::system
+use sys::string
+use sys::vec
+use sys::buffer
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let fs = rc.mint_readfs("examples/config_loader")
+  let res = fs.read_to_string("app.conf")
+  match (res) {
+    Ok(contents) => {
+      let alloc = rc.mint_alloc_default()
+      let lines = contents.lines()
+      let i = 0
+      while i < lines.len() {
+        let line_res = lines.get(i)
+        match (line_res) {
+          Ok(line) => {
+            if line.len() == 0 {
+            } else {
+              if line.starts_with("#") {
+              } else {
+                let parts = line.split(61u8)
+                if parts.len() == 2 {
+                  let key_res = parts.get(0)
+                  let val_res = parts.get(1)
+                  match (key_res) {
+                    Ok(key) => {
+                      match (val_res) {
+                        Ok(val) => {
+                          c.print("key: ")
+                          c.println(key)
+                          c.print("value: ")
+                          c.println(val)
+                        }
+                        Err(err) => {
+                        }
+                      }
+                    }
+                    Err(err) => {
+                    }
+                  }
+                }
+                alloc.vec_string_free(parts)
+              }
+            }
+          }
+          Err(err) => {
+          }
+        }
+        i = i + 1
+      }
+      alloc.vec_string_free(lines)
+      c.println("config ok")
+      return 0
+    }
+    Err(err) => {
+      c.println("config read failed")
+      return 1
+    }
+  }
+}

@@ -27,7 +27,15 @@ impl string {
     return ()
   }
 
+  pub fn lines(self) -> VecString {
+    return ()
+  }
+
   pub fn split(self, delim: u8) -> VecString {
     return ()
+  }
+
+  pub fn starts_with(self, prefix: string) -> bool {
+    return false
   }
 }

@@ -566,9 +566,17 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::String],
         ret: AbiType::Handle,
     };
+    let string_lines = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::Handle,
+    };
     let string_split_delim = FnSig {
         params: vec![AbiType::String, AbiType::U8],
         ret: AbiType::Handle,
+    };
+    let string_starts_with = FnSig {
+        params: vec![AbiType::String, AbiType::String],
+        ret: AbiType::Bool,
     };
     let vec_new = FnSig {
         params: vec![AbiType::Handle],
@@ -1325,11 +1333,31 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.string.string__lines".to_string(),
+        FnInfo {
+            sig: string_lines,
+            abi_sig: None,
+            symbol: "capable_rt_string_split_lines".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.string.string__split".to_string(),
         FnInfo {
             sig: string_split_delim,
             abi_sig: None,
             symbol: "capable_rt_string_split".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__starts_with".to_string(),
+        FnInfo {
+            sig: string_starts_with,
+            abi_sig: None,
+            symbol: "capable_rt_string_starts_with".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
