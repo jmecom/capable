@@ -1,0 +1,15 @@
+package safe
+module should_fail_affine_branch_merge
+
+opaque struct Cap
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  if true {
+    let x = c
+  } else {
+    0
+  }
+  let y = c
+  return 0
+}
