@@ -147,6 +147,97 @@ fn typecheck_reserved_type_name_fails() {
 }
 
 #[test]
+fn typecheck_move_opaque_fails() {
+    let source = load_program("should_fail_move_opaque.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `t`"));
+}
+
+#[test]
+fn typecheck_dup_affine_field_fails() {
+    let source = load_program("should_fail_dup_affine_field.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `h`"));
+}
+
+#[test]
+fn typecheck_affine_nested_field_fails() {
+    let source = load_program("should_fail_affine_nested_field.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `o`"));
+}
+
+#[test]
+fn typecheck_affine_branch_merge_fails() {
+    let source = load_program("should_fail_affine_branch_merge.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `c`"));
+}
+
+#[test]
+fn typecheck_affine_use_after_move_fails() {
+    let source = load_program("should_fail_affine_use_after_move.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `c`"));
+}
+
+#[test]
+fn typecheck_affine_call_moves_fails() {
+    let source = load_program("should_fail_affine_call_moves.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `c`"));
+}
+
+#[test]
+fn typecheck_affine_match_merge_fails() {
+    let source = load_program("should_fail_affine_match_merge.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `c`"));
+}
+
+#[test]
+fn typecheck_affine_loop_move_fails() {
+    let source = load_program("should_fail_affine_loop_move.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("affine value `c` moved inside loop"));
+}
+
+#[test]
+fn typecheck_affine_temp_field_fails() {
+    let source = load_program("should_fail_affine_temp_field.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("cannot move affine field from non-local expression"));
+}
+
+#[test]
+fn typecheck_affine_non_affine_field_reads_ok() {
+    let source = load_program("should_pass_affine_non_affine_field_reads.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_extern_requires_unsafe_package() {
     let source = load_program("extern_safe.cap");
     let module = parse_module(&source).expect("parse module");

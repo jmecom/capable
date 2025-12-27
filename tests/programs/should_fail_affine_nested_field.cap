@@ -1,0 +1,19 @@
+package safe
+module should_fail_affine_nested_field
+
+opaque struct Cap
+
+struct Inner {
+  cap: Cap
+}
+
+struct Outer {
+  inner: Inner
+}
+
+pub fn main() -> i32 {
+  let o = Outer{ inner: Inner{ cap: Cap{} } }
+  let a = o.inner.cap
+  let b = o.inner.cap
+  return 0
+}

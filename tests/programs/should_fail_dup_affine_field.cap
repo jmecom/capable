@@ -1,0 +1,15 @@
+package safe
+module should_fail_dup_affine_field
+
+opaque struct Cap
+
+struct Holder {
+  cap: Cap
+}
+
+pub fn main() -> i32 {
+  let h = Holder{ cap: Cap{} }
+  let a = h.cap
+  let b = h.cap
+  return 0
+}

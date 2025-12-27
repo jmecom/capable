@@ -1,0 +1,17 @@
+package safe
+module should_fail_affine_temp_field
+
+opaque struct Cap
+
+struct Holder {
+  cap: Cap
+}
+
+fn mk() -> Holder {
+  return Holder{ cap: Cap{} }
+}
+
+pub fn main() -> i32 {
+  let c = mk().cap
+  return 0
+}

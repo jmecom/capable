@@ -62,10 +62,10 @@ Module {
                 params: [
                     Param {
                         name: Spanned {
-                            item: "sys",
+                            item: "rc",
                             span: Span {
                                 start: 42,
-                                end: 45,
+                                end: 44,
                             },
                         },
                         ty: Some(
@@ -75,20 +75,20 @@ Module {
                                         Spanned {
                                             item: "RootCap",
                                             span: Span {
-                                                start: 47,
-                                                end: 54,
+                                                start: 46,
+                                                end: 53,
                                             },
                                         },
                                     ],
                                     span: Span {
-                                        start: 47,
-                                        end: 54,
+                                        start: 46,
+                                        end: 53,
                                     },
                                 },
                                 args: [],
                                 span: Span {
-                                    start: 47,
-                                    end: 54,
+                                    start: 46,
+                                    end: 53,
                                 },
                             },
                         ),
@@ -100,20 +100,20 @@ Module {
                             Spanned {
                                 item: "i32",
                                 span: Span {
-                                    start: 59,
-                                    end: 62,
+                                    start: 58,
+                                    end: 61,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 59,
-                            end: 62,
+                            start: 58,
+                            end: 61,
                         },
                     },
                     args: [],
                     span: Span {
-                        start: 59,
-                        end: 62,
+                        start: 58,
+                        end: 61,
                     },
                 },
                 body: Block {
@@ -123,8 +123,8 @@ Module {
                                 name: Spanned {
                                     item: "c",
                                     span: Span {
-                                        start: 71,
-                                        end: 72,
+                                        start: 70,
+                                        end: 71,
                                     },
                                 },
                                 ty: None,
@@ -134,36 +134,36 @@ Module {
                                             Path {
                                                 segments: [
                                                     Spanned {
-                                                        item: "sys",
+                                                        item: "rc",
                                                         span: Span {
-                                                            start: 75,
-                                                            end: 78,
+                                                            start: 74,
+                                                            end: 76,
                                                         },
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 75,
-                                                    end: 78,
+                                                    start: 74,
+                                                    end: 76,
                                                 },
                                             },
                                         ),
                                         method: Spanned {
                                             item: "mint_console",
                                             span: Span {
-                                                start: 79,
-                                                end: 91,
+                                                start: 77,
+                                                end: 89,
                                             },
                                         },
                                         args: [],
                                         span: Span {
-                                            start: 75,
-                                            end: 93,
+                                            start: 74,
+                                            end: 91,
                                         },
                                     },
                                 ),
                                 span: Span {
-                                    start: 67,
-                                    end: 93,
+                                    start: 66,
+                                    end: 91,
                                 },
                             },
                         ),
@@ -177,22 +177,22 @@ Module {
                                                     Spanned {
                                                         item: "c",
                                                         span: Span {
-                                                            start: 96,
-                                                            end: 97,
+                                                            start: 94,
+                                                            end: 95,
                                                         },
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 96,
-                                                    end: 97,
+                                                    start: 94,
+                                                    end: 95,
                                                 },
                                             },
                                         ),
                                         method: Spanned {
                                             item: "println",
                                             span: Span {
-                                                start: 98,
-                                                end: 105,
+                                                start: 96,
+                                                end: 103,
                                             },
                                         },
                                         args: [
@@ -202,21 +202,21 @@ Module {
                                                         "hello",
                                                     ),
                                                     span: Span {
-                                                        start: 106,
-                                                        end: 113,
+                                                        start: 104,
+                                                        end: 111,
                                                     },
                                                 },
                                             ),
                                         ],
                                         span: Span {
-                                            start: 96,
-                                            end: 114,
+                                            start: 94,
+                                            end: 112,
                                         },
                                     },
                                 ),
                                 span: Span {
-                                    start: 96,
-                                    end: 114,
+                                    start: 94,
+                                    end: 112,
                                 },
                             },
                         ),
@@ -229,35 +229,35 @@ Module {
                                                 0,
                                             ),
                                             span: Span {
-                                                start: 124,
-                                                end: 125,
+                                                start: 122,
+                                                end: 123,
                                             },
                                         },
                                     ),
                                 ),
                                 span: Span {
-                                    start: 117,
-                                    end: 127,
+                                    start: 115,
+                                    end: 125,
                                 },
                             },
                         ),
                     ],
                     span: Span {
-                        start: 63,
-                        end: 127,
+                        start: 62,
+                        end: 125,
                     },
                 },
                 is_pub: true,
                 doc: None,
                 span: Span {
                     start: 34,
-                    end: 127,
+                    end: 125,
                 },
             },
         ),
     ],
     span: Span {
         start: 0,
-        end: 127,
+        end: 125,
     },
 }

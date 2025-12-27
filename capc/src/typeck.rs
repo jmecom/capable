@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::error::TypeError;
@@ -39,15 +39,36 @@ struct StructInfo {
 #[derive(Debug, Clone)]
 struct EnumInfo {
     variants: Vec<String>,
+    payloads: HashMap<String, Option<Ty>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MoveState {
+    Available,
+    Moved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UseMode {
+    Move,
+    Read,
+    Project,
+}
+
+#[derive(Debug, Clone)]
+struct LocalInfo {
+    ty: Ty,
+    state: MoveState,
 }
 
 /// Stack-based scope manager for proper lexical scoping.
 /// Allows block-scoped `let` declarations while enabling assignments
 /// to mutate variables in outer scopes.
+#[derive(Debug, Clone)]
 struct Scopes {
-    /// Stack of scopes, where each scope is a map from name to type.
+    /// Stack of scopes, where each scope is a map from name to local info.
     /// The last element is the innermost (current) scope.
-    stack: Vec<HashMap<String, Ty>>,
+    stack: Vec<HashMap<String, LocalInfo>>,
 }
 
 impl Scopes {
@@ -66,12 +87,18 @@ impl Scopes {
     /// Insert a new local variable in the current scope
     fn insert_local(&mut self, name: String, ty: Ty) {
         if let Some(scope) = self.stack.last_mut() {
-            scope.insert(name, ty);
+            scope.insert(
+                name,
+                LocalInfo {
+                    ty,
+                    state: MoveState::Available,
+                },
+            );
         }
     }
 
     /// Look up a variable, searching from innermost to outermost scope
-    fn lookup(&self, name: &str) -> Option<&Ty> {
+    fn lookup(&self, name: &str) -> Option<&LocalInfo> {
         for scope in self.stack.iter().rev() {
             if let Some(ty) = scope.get(name) {
                 return Some(ty);
@@ -85,26 +112,55 @@ impl Scopes {
     fn assign(&mut self, name: &str, ty: Ty) -> bool {
         for scope in self.stack.iter_mut().rev() {
             if scope.contains_key(name) {
-                scope.insert(name.to_string(), ty);
+                scope.insert(
+                    name.to_string(),
+                    LocalInfo {
+                        ty,
+                        state: MoveState::Available,
+                    },
+                );
                 return true;
             }
         }
         false
     }
 
-    /// Convert to a flat HashMap for compatibility with existing code.
-    /// This flattens all scopes, with inner scopes shadowing outer ones.
-    fn to_flat_map(&self) -> HashMap<String, Ty> {
-        let mut result = HashMap::new();
-        for scope in &self.stack {
-            result.extend(scope.clone());
-        }
-        result
-    }
-
     /// Create from a flat HashMap (for function parameters initialization)
     fn from_flat_map(map: HashMap<String, Ty>) -> Self {
-        Scopes { stack: vec![map] }
+        let mut scope = HashMap::new();
+        for (name, ty) in map {
+            scope.insert(
+                name,
+                LocalInfo {
+                    ty,
+                    state: MoveState::Available,
+                },
+            );
+        }
+        Scopes { stack: vec![scope] }
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.lookup(name).is_some()
+    }
+
+    fn mark_moved(&mut self, name: &str, span: Span) -> Result<(), TypeError> {
+        for scope in self.stack.iter_mut().rev() {
+            if let Some(info) = scope.get_mut(name) {
+                if info.state == MoveState::Moved {
+                    return Err(TypeError::new(
+                        format!("use of moved value `{name}`"),
+                        span,
+                    ));
+                }
+                info.state = MoveState::Moved;
+                return Ok(());
+            }
+        }
+        Err(TypeError::new(
+            format!("unknown identifier `{name}`"),
+            span,
+        ))
     }
 }
 
@@ -567,6 +623,7 @@ fn collect_structs(
 fn collect_enums(
     modules: &[&Module],
     entry_name: &str,
+    stdlib: &StdlibIndex,
 ) -> Result<HashMap<String, EnumInfo>, TypeError> {
     let reserved = [
         "i32", "i64", "u32", "u8", "bool", "string", "unit", "Result",
@@ -574,6 +631,7 @@ fn collect_enums(
     let mut enums = HashMap::new();
     for module in modules {
         let module_name = module.name.to_string();
+        let local_use = UseMap::new(module);
         for item in &module.items {
             if let Item::Enum(decl) = item {
                 if reserved.contains(&decl.name.item.as_str()) {
@@ -583,6 +641,7 @@ fn collect_enums(
                     ));
                 }
                 let mut variants = Vec::new();
+                let mut payloads = HashMap::new();
                 for variant in &decl.variants {
                     if variants.contains(&variant.name.item) {
                         return Err(TypeError::new(
@@ -594,6 +653,12 @@ fn collect_enums(
                         ));
                     }
                     variants.push(variant.name.item.clone());
+                    let payload_ty = if let Some(payload) = &variant.payload {
+                        Some(lower_type(payload, &local_use, stdlib)?)
+                    } else {
+                        None
+                    };
+                    payloads.insert(variant.name.item.clone(), payload_ty);
                 }
                 let qualified = format!("{module_name}.{}", decl.name.item);
                 if enums.contains_key(&qualified) {
@@ -604,6 +669,7 @@ fn collect_enums(
                 }
                 let info = EnumInfo {
                     variants: variants.clone(),
+                    payloads: payloads.clone(),
                 };
                 enums.insert(qualified, info.clone());
                 if module_name == entry_name {
@@ -646,7 +712,7 @@ pub fn type_check_program(
         validate_package_safety(user_module)?;
     }
     let struct_map = collect_structs(&modules, &module_name, &stdlib_index)?;
-    let enum_map = collect_enums(&modules, &module_name)?;
+    let enum_map = collect_enums(&modules, &module_name, &stdlib_index)?;
     let functions = collect_functions(&modules, &module_name, &stdlib_index, &struct_map)?;
 
     for item in &module.items {
@@ -968,11 +1034,11 @@ fn check_stmt(
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
-            let locals_flat = scopes.to_flat_map();
             let expr_ty = check_expr(
                 &let_stmt.expr,
                 functions,
-                &locals_flat,
+                scopes,
+                UseMode::Move,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1001,12 +1067,12 @@ fn check_stmt(
                     assign.name.span,
                 ));
             };
-            let existing = existing.clone();
-            let locals_flat = scopes.to_flat_map();
+            let existing = existing.ty.clone();
             let expr_ty = check_expr(
                 &assign.expr,
                 functions,
-                &locals_flat,
+                scopes,
+                UseMode::Move,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1025,12 +1091,12 @@ fn check_stmt(
             scopes.assign(&assign.name.item, expr_ty);
         }
         Stmt::Return(ret_stmt) => {
-            let locals_flat = scopes.to_flat_map();
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
                 check_expr(
                     expr,
                     functions,
-                    &locals_flat,
+                    scopes,
+                    UseMode::Move,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1049,11 +1115,11 @@ fn check_stmt(
             }
         }
         Stmt::If(if_stmt) => {
-            let locals_flat = scopes.to_flat_map();
             let cond_ty = check_expr(
                 &if_stmt.cond,
                 functions,
-                &locals_flat,
+                scopes,
+                UseMode::Read,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1067,23 +1133,25 @@ fn check_stmt(
                     if_stmt.cond.span(),
                 ));
             }
+            let mut then_scopes = scopes.clone();
             check_block(
                 &if_stmt.then_block,
                 ret_ty,
                 functions,
-                scopes,
+                &mut then_scopes,
                 use_map,
                 struct_map,
                 enum_map,
                 stdlib,
                 module_name,
             )?;
+            let mut else_scopes = scopes.clone();
             if let Some(block) = &if_stmt.else_block {
                 check_block(
                     block,
                     ret_ty,
                     functions,
-                    scopes,
+                    &mut else_scopes,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1091,13 +1159,21 @@ fn check_stmt(
                     module_name,
                 )?;
             }
+            merge_branch_states(
+                scopes,
+                &then_scopes,
+                &else_scopes,
+                struct_map,
+                enum_map,
+                if_stmt.span,
+            )?;
         }
         Stmt::While(while_stmt) => {
-            let locals_flat = scopes.to_flat_map();
             let cond_ty = check_expr(
                 &while_stmt.cond,
                 functions,
-                &locals_flat,
+                scopes,
+                UseMode::Read,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1111,25 +1187,33 @@ fn check_stmt(
                     while_stmt.cond.span(),
                 ));
             }
+            let mut body_scopes = scopes.clone();
             check_block(
                 &while_stmt.body,
                 ret_ty,
                 functions,
-                scopes,
+                &mut body_scopes,
                 use_map,
                 struct_map,
                 enum_map,
                 stdlib,
                 module_name,
             )?;
+            ensure_affine_states_match(
+                scopes,
+                &body_scopes,
+                struct_map,
+                enum_map,
+                while_stmt.span,
+            )?;
         }
         Stmt::Expr(expr_stmt) => {
-            let locals_flat = scopes.to_flat_map();
             if let Expr::Match(match_expr) = &expr_stmt.expr {
                 let _ = check_match_stmt(
                     match_expr,
                     functions,
-                    &locals_flat,
+                    scopes,
+                    UseMode::Move,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1141,7 +1225,8 @@ fn check_stmt(
                 check_expr(
                     &expr_stmt.expr,
                     functions,
-                    &locals_flat,
+                    scopes,
+                    UseMode::Move,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1185,10 +1270,110 @@ fn check_block(
     Ok(())
 }
 
+fn merge_branch_states(
+    base: &mut Scopes,
+    left: &Scopes,
+    right: &Scopes,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    for (base_scope, (left_scope, right_scope)) in base
+        .stack
+        .iter_mut()
+        .zip(left.stack.iter().zip(&right.stack))
+    {
+        for (name, info) in base_scope.iter_mut() {
+            let left_info = left_scope.get(name).ok_or_else(|| {
+                TypeError::new(format!("unknown identifier `{name}`"), span)
+            })?;
+            let right_info = right_scope.get(name).ok_or_else(|| {
+                TypeError::new(format!("unknown identifier `{name}`"), span)
+            })?;
+            if is_affine_type(&info.ty, struct_map, enum_map) {
+                info.state = if left_info.state == MoveState::Moved
+                    || right_info.state == MoveState::Moved
+                {
+                    MoveState::Moved
+                } else {
+                    MoveState::Available
+                };
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_affine_states_match(
+    base: &Scopes,
+    other: &Scopes,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    for (base_scope, other_scope) in base.stack.iter().zip(&other.stack) {
+        for (name, info) in base_scope {
+            let other_info = other_scope.get(name).ok_or_else(|| {
+                TypeError::new(format!("unknown identifier `{name}`"), span)
+            })?;
+            if is_affine_type(&info.ty, struct_map, enum_map)
+                && info.state != other_info.state
+            {
+                return Err(TypeError::new(
+                    format!("affine value `{name}` moved inside loop"),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn merge_match_states(
+    base: &mut Scopes,
+    arms: &[Scopes],
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    let Some((first, rest)) = arms.split_first() else {
+        return Ok(());
+    };
+    for (depth, (base_scope, first_scope)) in base.stack.iter_mut().zip(&first.stack).enumerate()
+    {
+        for (name, info) in base_scope.iter_mut() {
+            let first_info = first_scope.get(name).ok_or_else(|| {
+                TypeError::new(format!("unknown identifier `{name}`"), span)
+            })?;
+            if is_affine_type(&info.ty, struct_map, enum_map) {
+                let mut moved = first_info.state == MoveState::Moved;
+                for arm in rest {
+                    let arm_scope = arm.stack.get(depth).ok_or_else(|| {
+                        TypeError::new(format!("unknown identifier `{name}`"), span)
+                    })?;
+                    let arm_info = arm_scope.get(name).ok_or_else(|| {
+                        TypeError::new(format!("unknown identifier `{name}`"), span)
+                    })?;
+                    if arm_info.state == MoveState::Moved {
+                        moved = true;
+                    }
+                }
+                info.state = if moved {
+                    MoveState::Moved
+                } else {
+                    MoveState::Available
+                };
+            }
+        }
+    }
+    Ok(())
+}
+
 fn check_expr(
     expr: &Expr,
     functions: &HashMap<String, FunctionSig>,
-    locals: &HashMap<String, Ty>,
+    scopes: &mut Scopes,
+    use_mode: UseMode,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1207,8 +1392,18 @@ fn check_expr(
         Expr::Path(path) => {
             if path.segments.len() == 1 {
                 let name = &path.segments[0].item;
-                if let Some(ty) = locals.get(name) {
-                    return Ok(ty.clone());
+                if let Some(info) = scopes.lookup(name) {
+                    let ty = info.ty.clone();
+                    if info.state == MoveState::Moved {
+                        return Err(TypeError::new(
+                            format!("use of moved value `{name}`"),
+                            path.segments[0].span,
+                        ));
+                    }
+                    if use_mode == UseMode::Move && is_affine_type(&ty, struct_map, enum_map) {
+                        scopes.mark_moved(name, path.segments[0].span)?;
+                    }
+                    return Ok(ty);
                 }
             }
             if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
@@ -1243,7 +1438,8 @@ fn check_expr(
                     let arg_ty = check_expr(
                         &call.args[0],
                         functions,
-                        locals,
+                        scopes,
+                        UseMode::Move,
                         use_map,
                         struct_map,
                         enum_map,
@@ -1312,7 +1508,8 @@ fn check_expr(
                 let arg_ty = check_expr(
                     arg,
                     functions,
-                    locals,
+                    scopes,
+                    UseMode::Move,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1342,7 +1539,7 @@ fn check_expr(
             }
 
             let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
-                locals.get(base_name).is_some()
+                scopes.contains(base_name)
             } else {
                 // Not a pure a.b.c chain (e.g., call result) - treat as method on value
                 true
@@ -1389,7 +1586,8 @@ fn check_expr(
                     let arg_ty = check_expr(
                         arg,
                         functions,
-                        locals,
+                        scopes,
+                        UseMode::Move,
                         use_map,
                         struct_map,
                         enum_map,
@@ -1413,7 +1611,8 @@ fn check_expr(
             let receiver_ty = check_expr(
                 &method_call.receiver,
                 functions,
-                locals,
+                scopes,
+                UseMode::Move,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1478,7 +1677,8 @@ fn check_expr(
                 let arg_ty = check_expr(
                     arg,
                     functions,
-                    locals,
+                    scopes,
+                    UseMode::Move,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1498,7 +1698,7 @@ fn check_expr(
         Expr::StructLiteral(lit) => check_struct_literal(
             lit,
             functions,
-            locals,
+            scopes,
             use_map,
             struct_map,
             enum_map,
@@ -1510,7 +1710,8 @@ fn check_expr(
             let expr_ty = check_expr(
                 &unary.expr,
                 functions,
-                locals,
+                scopes,
+                UseMode::Read,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1547,7 +1748,8 @@ fn check_expr(
             let left = check_expr(
                 &binary.left,
                 functions,
-                locals,
+                scopes,
+                UseMode::Read,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1558,7 +1760,8 @@ fn check_expr(
             let right = check_expr(
                 &binary.right,
                 functions,
-                locals,
+                scopes,
+                UseMode::Read,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1619,7 +1822,8 @@ fn check_expr(
         Expr::Match(match_expr) => check_match_expr_value(
             match_expr,
             functions,
-            locals,
+            scopes,
+            use_mode,
             use_map,
             struct_map,
             enum_map,
@@ -1630,7 +1834,8 @@ fn check_expr(
         Expr::Grouping(group) => check_expr(
             &group.expr,
             functions,
-            locals,
+            scopes,
+            use_mode,
             use_map,
             struct_map,
             enum_map,
@@ -1655,7 +1860,7 @@ fn check_expr(
             }
 
             let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
-                locals.contains_key(base_name)
+                scopes.contains(base_name)
             } else {
                 // Language rule: if it's not a pure a.b.c chain (e.g., f().x or 123.x),
                 // treat as value field access, not a module/enum path
@@ -1675,7 +1880,8 @@ fn check_expr(
             let object_ty = check_expr(
                 &field_access.object,
                 functions,
-                locals,
+                scopes,
+                UseMode::Project,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1713,7 +1919,36 @@ fn check_expr(
                     field_access.field.span,
                 )
             })?;
-            Ok(field_ty.clone())
+            let field_ty = field_ty.clone();
+            if is_affine_type(&field_ty, struct_map, enum_map) {
+                match use_mode {
+                    UseMode::Read => {
+                        return Err(TypeError::new(
+                            "cannot read affine field; moving it consumes the whole struct"
+                                .to_string(),
+                            field_access.span,
+                        ));
+                    }
+                    UseMode::Project => {}
+                    UseMode::Move => {
+                        let (root, root_span) =
+                            leftmost_local_in_chain(&field_access.object).ok_or_else(|| {
+                                TypeError::new(
+                                    "cannot move affine field from non-local expression; bind to a local first".to_string(),
+                                    field_access.object.span(),
+                                )
+                            })?;
+                        if !scopes.contains(root) {
+                            return Err(TypeError::new(
+                                "cannot move affine field from non-local expression; bind to a local first".to_string(),
+                                field_access.object.span(),
+                            ));
+                        }
+                        scopes.mark_moved(root, root_span)?;
+                    }
+                }
+            }
+            Ok(field_ty)
         }
     }
 }
@@ -1721,7 +1956,8 @@ fn check_expr(
 fn check_match_stmt(
     match_expr: &MatchExpr,
     functions: &HashMap<String, FunctionSig>,
-    locals: &HashMap<String, Ty>,
+    scopes: &mut Scopes,
+    scrutinee_mode: UseMode,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1732,7 +1968,8 @@ fn check_match_stmt(
     let match_ty = check_expr(
         &match_expr.expr,
         functions,
-        locals,
+        scopes,
+        scrutinee_mode,
         use_map,
         struct_map,
         enum_map,
@@ -1740,30 +1977,34 @@ fn check_match_stmt(
         ret_ty,
         module_name,
     )?;
-    let mut parent_scopes = Scopes::from_flat_map(locals.clone());
+    let mut arm_scopes = Vec::with_capacity(match_expr.arms.len());
     for arm in &match_expr.arms {
-        parent_scopes.push_scope();
-        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map, module_name)?;
+        let mut arm_scope = scopes.clone();
+        arm_scope.push_scope();
+        bind_pattern(&arm.pattern, &match_ty, &mut arm_scope, use_map, enum_map, module_name)?;
         check_block(
             &arm.body,
             ret_ty,
             functions,
-            &mut parent_scopes,
+            &mut arm_scope,
             use_map,
             struct_map,
             enum_map,
             stdlib,
             module_name,
         )?;
-        parent_scopes.pop_scope();
+        arm_scope.pop_scope();
+        arm_scopes.push(arm_scope);
     }
+    merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(Ty::Builtin(BuiltinType::Unit))
 }
 
 fn check_match_expr_value(
     match_expr: &MatchExpr,
     functions: &HashMap<String, FunctionSig>,
-    locals: &HashMap<String, Ty>,
+    scopes: &mut Scopes,
+    scrutinee_mode: UseMode,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1774,7 +2015,8 @@ fn check_match_expr_value(
     let match_ty = check_expr(
         &match_expr.expr,
         functions,
-        locals,
+        scopes,
+        scrutinee_mode,
         use_map,
         struct_map,
         enum_map,
@@ -1783,14 +2025,15 @@ fn check_match_expr_value(
         module_name,
     )?;
     let mut result_ty: Option<Ty> = None;
-    let mut parent_scopes = Scopes::from_flat_map(locals.clone());
+    let mut arm_scopes = Vec::with_capacity(match_expr.arms.len());
     for arm in &match_expr.arms {
-        parent_scopes.push_scope();
-        bind_pattern(&arm.pattern, &match_ty, &mut parent_scopes, use_map, enum_map, module_name)?;
+        let mut arm_scope = scopes.clone();
+        arm_scope.push_scope();
+        bind_pattern(&arm.pattern, &match_ty, &mut arm_scope, use_map, enum_map, module_name)?;
         let arm_ty = check_match_arm_value(
             &arm.body,
             functions,
-            &mut parent_scopes,
+            &mut arm_scope,
             use_map,
             struct_map,
             enum_map,
@@ -1798,7 +2041,8 @@ fn check_match_expr_value(
             ret_ty,
             module_name,
         )?;
-        parent_scopes.pop_scope();
+        arm_scope.pop_scope();
+        arm_scopes.push(arm_scope);
         if let Some(prev) = &result_ty {
             if prev != &arm_ty {
                 return Err(TypeError::new(
@@ -1810,6 +2054,7 @@ fn check_match_expr_value(
             result_ty = Some(arm_ty);
         }
     }
+    merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))
 }
 
@@ -1850,12 +2095,12 @@ fn check_match_arm_value(
             module_name,
         )?;
     }
-    let locals_flat = scopes.to_flat_map();
     match last {
         Stmt::Expr(expr_stmt) => check_expr(
             &expr_stmt.expr,
             functions,
-            &locals_flat,
+            scopes,
+            UseMode::Move,
             use_map,
             struct_map,
             enum_map,
@@ -1873,7 +2118,7 @@ fn check_match_arm_value(
 fn check_struct_literal(
     lit: &StructLiteralExpr,
     functions: &HashMap<String, FunctionSig>,
-    locals: &HashMap<String, Ty>,
+    scopes: &mut Scopes,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1915,7 +2160,8 @@ fn check_struct_literal(
         let actual = check_expr(
             &field.expr,
             functions,
-            locals,
+            scopes,
+            UseMode::Move,
             use_map,
             struct_map,
             enum_map,
@@ -2082,6 +2328,79 @@ fn is_orderable_type(ty: &Ty) -> bool {
             | Ty::Builtin(BuiltinType::U32)
             | Ty::Builtin(BuiltinType::U8)
     )
+}
+
+fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {
+    match expr {
+        Expr::Path(path) if path.segments.len() == 1 => {
+            let seg = &path.segments[0];
+            Some((seg.item.as_str(), seg.span))
+        }
+        Expr::FieldAccess(field_access) => leftmost_local_in_chain(&field_access.object),
+        Expr::Grouping(group) => leftmost_local_in_chain(&group.expr),
+        _ => None,
+    }
+}
+
+// Add fully-qualified type names here when stdlib APIs are linear-ready.
+const AFFINE_ROOTS: [&str; 0] = [];
+
+fn is_affine_type(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+) -> bool {
+    let mut visiting = HashSet::new();
+    is_affine_type_inner(ty, struct_map, enum_map, &mut visiting)
+}
+
+fn is_affine_type_inner(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    visiting: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        Ty::Builtin(_) | Ty::Ptr(_) => false,
+        Ty::Path(name, args) => {
+            if name == "Result" {
+                return args
+                    .iter()
+                    .any(|arg| is_affine_type_inner(arg, struct_map, enum_map, visiting));
+            }
+            if AFFINE_ROOTS.contains(&name.as_str()) {
+                return true;
+            }
+            if visiting.contains(name) {
+                return false;
+            }
+            if let Some(info) = struct_map.get(name) {
+                if info.is_opaque && !info.module.starts_with("sys.") {
+                    return true;
+                }
+                visiting.insert(name.clone());
+                let affine = info
+                    .fields
+                    .values()
+                    .any(|field_ty| is_affine_type_inner(field_ty, struct_map, enum_map, visiting));
+                visiting.remove(name);
+                return affine;
+            }
+            if let Some(info) = enum_map.get(name) {
+                visiting.insert(name.clone());
+                let affine = info.payloads.values().any(|payload| {
+                    if let Some(payload_ty) = payload {
+                        is_affine_type_inner(payload_ty, struct_map, enum_map, visiting)
+                    } else {
+                        false
+                    }
+                });
+                visiting.remove(name);
+                return affine;
+            }
+            false
+        }
+    }
 }
 
 // ============================================================================
@@ -2399,10 +2718,12 @@ fn type_of_ast_expr(
     ctx: &LoweringCtx,
     ret_ty: &Ty,
 ) -> Result<Ty, TypeError> {
+    let mut scopes = Scopes::from_flat_map(ctx.local_types.clone());
     check_expr(
         expr,
         ctx.functions,
-        &ctx.local_types,  // Use the types we've been tracking
+        &mut scopes,
+        UseMode::Read,
         ctx.use_map,
         ctx.structs,
         ctx.enums,
