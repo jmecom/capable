@@ -1,0 +1,11 @@
+package safe
+module should_fail_move_opaque
+
+opaque struct Token
+
+pub fn main() -> i32 {
+  let t = Token{}
+  let u = t
+  let v = t
+  return 0
+}
