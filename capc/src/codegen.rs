@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, MemFlags, Signature, Type};
+use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, MemFlags, Signature, Type, Value};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{Configurable, Flags};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
@@ -67,6 +67,7 @@ struct FnInfo {
     sig: FnSig,
     abi_sig: Option<FnSig>,
     symbol: String,
+    runtime_symbol: Option<String>,
     is_runtime: bool,
 }
 
@@ -190,8 +191,8 @@ pub fn build_object(
         module.isa().pointer_type(),
     )?;
 
+    let runtime_intrinsics = register_runtime_intrinsics(module.isa().pointer_type());
     let mut fn_map = HashMap::new();
-    register_runtime_intrinsics(&mut fn_map, module.isa().pointer_type());
     for module_ref in &program.stdlib {
         register_user_functions(
             module_ref,
@@ -200,6 +201,7 @@ pub fn build_object(
             &enum_index,
             &struct_layouts,
             &mut fn_map,
+            &runtime_intrinsics,
             module.isa().pointer_type(),
             true,
         )?;
@@ -212,6 +214,7 @@ pub fn build_object(
             &enum_index,
             &struct_layouts,
             &mut fn_map,
+            &runtime_intrinsics,
             module.isa().pointer_type(),
             false,
         )?;
@@ -223,6 +226,7 @@ pub fn build_object(
         &enum_index,
         &struct_layouts,
         &mut fn_map,
+        &runtime_intrinsics,
         module.isa().pointer_type(),
         false,
     )?;
@@ -252,10 +256,6 @@ pub fn build_object(
                 .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
                 .clone();
             if info.is_runtime {
-                debug_assert!(
-                    key.starts_with("sys."),
-                    "runtime intrinsics should only shadow stdlib modules"
-                );
                 continue;
             }
             let func_id = module
@@ -277,6 +277,29 @@ pub fn build_object(
             builder.append_block_params_for_function_params(block);
             builder.switch_to_block(block);
             // Blocks sealed after body emission.
+
+            if info.runtime_symbol.is_some() {
+                let args = builder.block_params(block).to_vec();
+                let value = emit_runtime_wrapper_call(&mut builder, &mut module, &info, args)?;
+                match value {
+                    ValueRepr::Unit => builder.ins().return_(&[]),
+                    ValueRepr::Single(val) => builder.ins().return_(&[val]),
+                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                        let values = flatten_value(&value);
+                        builder.ins().return_(&values)
+                    }
+                };
+                builder.seal_all_blocks();
+                builder.finalize();
+                if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
+                    eprintln!("=== IR for {} ===\n{}", func.name, ctx.func.display());
+                    return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
+                }
+                module
+                    .define_function(func_id, &mut ctx)
+                    .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+                continue;
+            }
 
             let mut locals: HashMap<String, LocalValue> = HashMap::new();
             let params = builder.block_params(block).to_vec();
@@ -408,7 +431,8 @@ fn append_ty_returns(signature: &mut Signature, ty: &TyKind, ptr_ty: Type) {
     }
 }
 
-fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) {
+fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
+    let mut map = HashMap::new();
     let system_console = FnSig {
         params: vec![TyKind::Handle],
         ret: TyKind::Handle,
@@ -700,6 +724,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: system_console.clone(),
             abi_sig: None,
             symbol: "capable_rt_mint_console".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -709,6 +734,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: system_fs_read.clone(),
             abi_sig: None,
             symbol: "capable_rt_mint_readfs".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -718,6 +744,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: args_len,
             abi_sig: None,
             symbol: "capable_rt_args_len".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -727,6 +754,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: args_at,
             abi_sig: Some(args_at_abi),
             symbol: "capable_rt_args_at".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -736,6 +764,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: io_read_stdin,
             abi_sig: Some(io_read_stdin_abi),
             symbol: "capable_rt_read_stdin_to_string".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -745,6 +774,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_alloc_default.clone(),
             abi_sig: None,
             symbol: "capable_rt_alloc_default".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -754,6 +784,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_malloc,
             abi_sig: None,
             symbol: "capable_rt_malloc".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -763,6 +794,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_free,
             abi_sig: None,
             symbol: "capable_rt_free".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -772,6 +804,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_cast.clone(),
             abi_sig: None,
             symbol: "capable_rt_cast_u8_to_u32".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -781,6 +814,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_cast,
             abi_sig: None,
             symbol: "capable_rt_cast_u32_to_u8".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -790,6 +824,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_slice_from_ptr.clone(),
             abi_sig: None,
             symbol: "capable_rt_slice_from_ptr".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -799,6 +834,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_slice_from_ptr,
             abi_sig: None,
             symbol: "capable_rt_mut_slice_from_ptr".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -808,6 +844,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: console_println,
             abi_sig: None,
             symbol: "capable_rt_console_println".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -817,6 +854,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: console_print,
             abi_sig: None,
             symbol: "capable_rt_console_print".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -826,6 +864,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: console_print_i32.clone(),
             abi_sig: None,
             symbol: "capable_rt_console_print_i32".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -835,6 +874,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: console_print_i32,
             abi_sig: None,
             symbol: "capable_rt_console_println_i32".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -844,6 +884,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: fs_read_to_string,
             abi_sig: Some(fs_read_to_string_abi),
             symbol: "capable_rt_fs_read_to_string".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -853,6 +894,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_buffer_new.clone(),
             abi_sig: Some(mem_buffer_new_abi.clone()),
             symbol: "capable_rt_buffer_new".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -862,6 +904,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_buffer_free,
             abi_sig: None,
             symbol: "capable_rt_buffer_free".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -871,6 +914,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_buffer_len,
             abi_sig: None,
             symbol: "capable_rt_buffer_len".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -880,6 +924,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_buffer_push,
             abi_sig: Some(mem_buffer_push_abi),
             symbol: "capable_rt_buffer_push".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -889,6 +934,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_buffer_as_slice.clone(),
             abi_sig: None,
             symbol: "capable_rt_buffer_as_slice".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -898,6 +944,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_buffer_as_slice,
             abi_sig: None,
             symbol: "capable_rt_buffer_as_mut_slice".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -907,6 +954,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_slice_len.clone(),
             abi_sig: None,
             symbol: "capable_rt_slice_len".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -916,6 +964,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_slice_at.clone(),
             abi_sig: None,
             symbol: "capable_rt_slice_at".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -925,6 +974,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: mem_slice_at,
             abi_sig: None,
             symbol: "capable_rt_mut_slice_at".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -934,6 +984,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_new.clone(),
             abi_sig: None,
             symbol: "capable_rt_vec_u8_new".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -943,6 +994,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_u8_free,
             abi_sig: None,
             symbol: "capable_rt_vec_u8_free".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -952,6 +1004,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_new.clone(),
             abi_sig: None,
             symbol: "capable_rt_vec_i32_new".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -961,6 +1014,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_i32_free,
             abi_sig: None,
             symbol: "capable_rt_vec_i32_free".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -970,6 +1024,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_new,
             abi_sig: None,
             symbol: "capable_rt_vec_string_new".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -979,6 +1034,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_string_free,
             abi_sig: None,
             symbol: "capable_rt_vec_string_free".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -988,6 +1044,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_len.clone(),
             abi_sig: None,
             symbol: "capable_rt_vec_u8_len".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -997,6 +1054,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_u8_get.clone(),
             abi_sig: Some(vec_u8_get_abi),
             symbol: "capable_rt_vec_u8_get".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1006,6 +1064,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_u8_set.clone(),
             abi_sig: Some(vec_u8_set_abi),
             symbol: "capable_rt_vec_u8_set".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1015,6 +1074,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_u8_push.clone(),
             abi_sig: Some(vec_u8_push_abi),
             symbol: "capable_rt_vec_u8_push".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1024,6 +1084,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_u8_pop.clone(),
             abi_sig: Some(vec_u8_pop_abi),
             symbol: "capable_rt_vec_u8_pop".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1033,6 +1094,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_u8_as_slice,
             abi_sig: None,
             symbol: "capable_rt_vec_u8_as_slice".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1042,6 +1104,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_len.clone(),
             abi_sig: None,
             symbol: "capable_rt_vec_i32_len".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1051,6 +1114,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_i32_get.clone(),
             abi_sig: Some(vec_i32_get_abi),
             symbol: "capable_rt_vec_i32_get".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1060,6 +1124,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_i32_set.clone(),
             abi_sig: Some(vec_i32_set_abi),
             symbol: "capable_rt_vec_i32_set".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1069,6 +1134,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_i32_push.clone(),
             abi_sig: Some(vec_i32_push_abi),
             symbol: "capable_rt_vec_i32_push".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1078,6 +1144,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_i32_pop.clone(),
             abi_sig: Some(vec_i32_pop_abi),
             symbol: "capable_rt_vec_i32_pop".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1087,6 +1154,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_string_len,
             abi_sig: None,
             symbol: "capable_rt_vec_string_len".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1096,6 +1164,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_string_get,
             abi_sig: Some(vec_string_get_abi),
             symbol: "capable_rt_vec_string_get".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1105,6 +1174,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_string_push,
             abi_sig: Some(vec_string_push_abi),
             symbol: "capable_rt_vec_string_push".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1114,6 +1184,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: vec_string_pop,
             abi_sig: Some(vec_string_pop_abi),
             symbol: "capable_rt_vec_string_pop".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1123,6 +1194,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_len,
             abi_sig: None,
             symbol: "capable_rt_string_len".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1132,6 +1204,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_byte_at,
             abi_sig: None,
             symbol: "capable_rt_string_byte_at".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1141,6 +1214,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_as_slice.clone(),
             abi_sig: None,
             symbol: "capable_rt_string_as_slice".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1150,6 +1224,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_as_slice,
             abi_sig: None,
             symbol: "capable_rt_string_as_slice".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1159,6 +1234,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_split,
             abi_sig: None,
             symbol: "capable_rt_string_split_whitespace".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1168,6 +1244,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             sig: string_split_delim,
             abi_sig: None,
             symbol: "capable_rt_string_split".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
@@ -1180,11 +1257,13 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
             },
             abi_sig: None,
             symbol: "capable_rt_bytes_is_whitespace".to_string(),
+            runtime_symbol: None,
             is_runtime: true,
         },
     );
 
     let _ = ptr_ty;
+    map
 }
 
 /// Convert typeck::Ty to codegen::TyKind
@@ -1240,6 +1319,7 @@ fn register_user_functions(
     _enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
+    runtime_intrinsics: &HashMap<String, FnInfo>,
     _ptr_ty: Type,
     is_stdlib: bool,
 ) -> Result<(), CodegenError> {
@@ -1255,11 +1335,7 @@ fn register_user_functions(
             ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
         };
         let key = format!("{}.{}", module_name, func.name);
-        if let Some(existing) = map.get(&key) {
-            if is_stdlib && existing.is_runtime {
-                // Allow stdlib wrappers to be overridden by runtime intrinsics.
-                continue;
-            }
+        if map.contains_key(&key) {
             return Err(CodegenError::Codegen(format!(
                 "duplicate function `{key}`"
             )));
@@ -1269,12 +1345,21 @@ fn register_user_functions(
         } else {
             mangle_symbol(module_name, &func.name)
         };
+        let (runtime_symbol, abi_sig) = if is_stdlib {
+            runtime_intrinsics
+                .get(&key)
+                .map(|intrinsic| (Some(intrinsic.symbol.clone()), intrinsic.abi_sig.clone()))
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
         map.insert(
             key,
             FnInfo {
                 sig,
-                abi_sig: None,
+                abi_sig,
                 symbol,
+                runtime_symbol,
                 is_runtime: false,
             },
         );
@@ -1318,6 +1403,7 @@ fn register_extern_functions(
                     sig,
                     abi_sig: None,
                     symbol: func.name.item.clone(),
+                    runtime_symbol: None,
                     is_runtime: true,
                 },
             );
@@ -1348,6 +1434,7 @@ fn _old_extern_handling() {
                         sig,
                         abi_sig: None,
                         symbol: func.name.item.clone(),
+                        runtime_symbol: None,
                         is_runtime: true,
                     },
                 );
@@ -1767,10 +1854,11 @@ fn emit_expr(
                 result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
             }
             let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+            let call_symbol = info.runtime_symbol.as_deref().unwrap_or(&info.symbol);
             let func_id = module
                 .declare_function(
-                    &info.symbol,
-                    if info.is_runtime {
+                    call_symbol,
+                    if info.runtime_symbol.is_some() || info.is_runtime {
                         Linkage::Import
                     } else {
                         Linkage::Export
@@ -2939,10 +3027,11 @@ fn emit_hir_expr(
 
             // Emit the call
             let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+            let call_symbol = info.runtime_symbol.as_deref().unwrap_or(&info.symbol);
             let func_id = module
                 .declare_function(
-                    &info.symbol,
-                    if info.is_runtime {
+                    call_symbol,
+                    if info.runtime_symbol.is_some() || info.is_runtime {
                         Linkage::Import
                     } else {
                         Linkage::Export
@@ -4735,6 +4824,166 @@ fn type_layout_for_ty(
             type_layout_for_tykind(&ty_kind, ptr_ty)
         }
     }
+}
+
+fn emit_runtime_wrapper_call(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    info: &FnInfo,
+    mut args: Vec<Value>,
+) -> Result<ValueRepr, CodegenError> {
+    let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
+    let mut out_slots = None;
+    let mut result_out = None;
+
+    if abi_sig.ret == TyKind::ResultString {
+        let ptr_ty = module.isa().pointer_type();
+        let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            ptr_ty.bytes(),
+        ));
+        let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            8,
+        ));
+        let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            4,
+        ));
+
+        let ptr_ptr = builder.ins().stack_addr(ptr_ty, slot_ptr, 0);
+        let len_ptr = builder.ins().stack_addr(ptr_ty, slot_len, 0);
+        let err_ptr = builder.ins().stack_addr(ptr_ty, slot_err, 0);
+
+        args.push(ptr_ptr);
+        args.push(len_ptr);
+        args.push(err_ptr);
+
+        out_slots = Some((slot_ptr, slot_len, slot_err));
+    }
+
+    if let TyKind::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
+        let ptr_ty = module.isa().pointer_type();
+        let ok_slot = if **ok_ty == TyKind::Unit {
+            None
+        } else {
+            let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                ty.bytes().max(1) as u32,
+            ));
+            let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+            args.push(addr);
+            Some((slot, ty))
+        };
+        let err_slot = if **err_ty == TyKind::Unit {
+            None
+        } else {
+            let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                ty.bytes().max(1) as u32,
+            ));
+            let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
+            args.push(addr);
+            Some((slot, ty))
+        };
+        result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
+    }
+
+    let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+    let call_symbol = info
+        .runtime_symbol
+        .as_deref()
+        .unwrap_or(&info.symbol);
+    let func_id = module
+        .declare_function(call_symbol, Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local = module.declare_func_in_func(func_id, builder.func);
+    let call_inst = builder.ins().call(local, &args);
+    let results = builder.inst_results(call_inst).to_vec();
+
+    if abi_sig.ret == TyKind::ResultString {
+        let tag = results
+            .get(0)
+            .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+        let (slot_ptr, slot_len, slot_err) =
+            out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
+        let ptr_addr = builder
+            .ins()
+            .stack_addr(module.isa().pointer_type(), slot_ptr, 0);
+        let len_addr = builder
+            .ins()
+            .stack_addr(module.isa().pointer_type(), slot_len, 0);
+        let err_addr = builder
+            .ins()
+            .stack_addr(module.isa().pointer_type(), slot_err, 0);
+        let ptr = builder
+            .ins()
+            .load(module.isa().pointer_type(), MemFlags::new(), ptr_addr, 0);
+        let len = builder
+            .ins()
+            .load(ir::types::I64, MemFlags::new(), len_addr, 0);
+        let err = builder
+            .ins()
+            .load(ir::types::I32, MemFlags::new(), err_addr, 0);
+        match &info.sig.ret {
+            TyKind::Result(ok_ty, err_ty) => {
+                if **ok_ty != TyKind::String || **err_ty != TyKind::I32 {
+                    return Err(CodegenError::Unsupported("result out params".to_string()));
+                }
+                return Ok(ValueRepr::Result {
+                    tag: *tag,
+                    ok: Box::new(ValueRepr::Pair(ptr, len)),
+                    err: Box::new(ValueRepr::Single(err)),
+                });
+            }
+            _ => return Err(CodegenError::Unsupported("result out params".to_string())),
+        }
+    }
+
+    if let TyKind::ResultOut(_, _) = &abi_sig.ret {
+        let tag = results
+            .get(0)
+            .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
+        let (ok_slot, err_slot, ok_ty, err_ty) = result_out
+            .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
+        let ok_val = if let Some((slot, ty)) = ok_slot {
+            let addr = builder
+                .ins()
+                .stack_addr(module.isa().pointer_type(), slot, 0);
+            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+            ValueRepr::Single(val)
+        } else {
+            ValueRepr::Unit
+        };
+        let err_val = if let Some((slot, ty)) = err_slot {
+            let addr = builder
+                .ins()
+                .stack_addr(module.isa().pointer_type(), slot, 0);
+            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+            ValueRepr::Single(val)
+        } else {
+            ValueRepr::Unit
+        };
+        match &info.sig.ret {
+            TyKind::Result(_, _) => {
+                return Ok(ValueRepr::Result {
+                    tag: *tag,
+                    ok: Box::new(ok_val),
+                    err: Box::new(err_val),
+                });
+            }
+            _ => {
+                return Err(CodegenError::Unsupported(format!(
+                    "result out params for {ok_ty:?}/{err_ty:?}"
+                )))
+            }
+        }
+    }
+
+    let mut idx = 0;
+    value_from_results(builder, &info.sig.ret, &results, &mut idx)
 }
 
 fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLayout, CodegenError> {
