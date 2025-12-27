@@ -55,7 +55,7 @@ enum TyKind {
     ResultString,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct FnSig {
     params: Vec<TyKind>,
     ret: TyKind,
@@ -1986,6 +1986,7 @@ fn emit_hir_expr(
                 .get(&key)
                 .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
                 .clone();
+            ensure_abi_sig_handled(&info)?;
 
             // Emit arguments
             let mut args = Vec::new();
@@ -2010,6 +2011,8 @@ fn emit_hir_expr(
 
             if abi_sig.ret == TyKind::ResultString {
                 let ptr_ty = module.isa().pointer_type();
+                // ResultString ABI uses u64 for length even on 32-bit.
+                let len_bytes: u32 = 8;
 
                 let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
@@ -2017,7 +2020,7 @@ fn emit_hir_expr(
                 ));
                 let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
-                    8,
+                    len_bytes,
                 ));
                 let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
@@ -2041,10 +2044,12 @@ fn emit_hir_expr(
                     None
                 } else {
                     let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
-                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                        ir::StackSlotKind::ExplicitSlot,
-                        ty.bytes().max(1) as u32,
-                    ));
+                    debug_assert!(ty.bytes().is_power_of_two());
+                debug_assert!(ty.bytes().is_power_of_two());
+                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    ty.bytes().max(1) as u32,
+                ));
                     let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
                     args.push(addr);
                     Some((slot, ty))
@@ -2053,6 +2058,7 @@ fn emit_hir_expr(
                     None
                 } else {
                     let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+                    debug_assert!(ty.bytes().is_power_of_two());
                     let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                         ir::StackSlotKind::ExplicitSlot,
                         ty.bytes().max(1) as u32,
@@ -3696,19 +3702,22 @@ fn emit_runtime_wrapper_call(
     info: &FnInfo,
     mut args: Vec<Value>,
 ) -> Result<ValueRepr, CodegenError> {
+    ensure_abi_sig_handled(info)?;
     let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
     let mut out_slots = None;
     let mut result_out = None;
 
     if abi_sig.ret == TyKind::ResultString {
         let ptr_ty = module.isa().pointer_type();
+        // ResultString ABI uses u64 for length even on 32-bit.
+        let len_bytes: u32 = 8;
         let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
             ir::StackSlotKind::ExplicitSlot,
             ptr_ty.bytes(),
         ));
         let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
             ir::StackSlotKind::ExplicitSlot,
-            8,
+            len_bytes,
         ));
         let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
             ir::StackSlotKind::ExplicitSlot,
@@ -3744,6 +3753,7 @@ fn emit_runtime_wrapper_call(
             None
         } else {
             let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+            debug_assert!(ty.bytes().is_power_of_two());
             let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                 ir::StackSlotKind::ExplicitSlot,
                 ty.bytes().max(1) as u32,
@@ -3848,6 +3858,22 @@ fn emit_runtime_wrapper_call(
 
     let mut idx = 0;
     value_from_results(builder, &info.sig.ret, &results, &mut idx)
+}
+
+fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
+    let Some(abi_sig) = info.abi_sig.as_ref() else {
+        return Ok(());
+    };
+    if abi_sig == &info.sig {
+        return Ok(());
+    }
+    match abi_sig.ret {
+        TyKind::ResultString | TyKind::ResultOut(_, _) => Ok(()),
+        _ => Err(CodegenError::Codegen(format!(
+            "abi signature mismatch for {} without ResultString/ResultOut lowering",
+            info.symbol
+        ))),
+    }
 }
 
 fn type_layout_for_tykind(ty: &TyKind, ptr_ty: Type) -> Result<TypeLayout, CodegenError> {

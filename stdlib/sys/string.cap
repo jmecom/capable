@@ -18,6 +18,7 @@ impl string {
     return ()
   }
 
+  /// bytes() is an alias for as_slice().
   pub fn bytes(self) -> Slice[u8] {
     return self.as_slice()
   }
