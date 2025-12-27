@@ -16,6 +16,8 @@
   "enum"
   "impl"
   "opaque"
+  "linear"
+  "copy"
   "match"
   "true"
   "false"
