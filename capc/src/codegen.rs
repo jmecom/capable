@@ -556,6 +556,10 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![TyKind::Handle, TyKind::ResultString],
         ret: TyKind::ResultString,
     };
+    let system_assert = FnSig {
+        params: vec![TyKind::Handle, TyKind::Bool],
+        ret: TyKind::Unit,
+    };
     let string_len = FnSig {
         params: vec![TyKind::String],
         ret: TyKind::I32,
@@ -745,6 +749,16 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: system_fs_read.clone(),
             abi_sig: None,
             symbol: "capable_rt_mint_readfs".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.system.RootCap__assert".to_string(),
+        FnInfo {
+            sig: system_assert,
+            abi_sig: None,
+            symbol: "capable_rt_assert".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

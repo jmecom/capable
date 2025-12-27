@@ -7,9 +7,11 @@ pub fn main(sys: RootCap) -> i32 {
 
   if (true) {
     let x = 2
+    sys.assert(x == 2)
     c.println("inner x should be 2")
   }
 
+  sys.assert(x == 1)
   c.println("outer x should still be 1")
   c.println("scoping let block test ok")
   return 0

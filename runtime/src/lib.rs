@@ -76,6 +76,14 @@ pub extern "C" fn capable_rt_mint_readfs(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_assert(_sys: Handle, cond: u8) {
+    if cond == 0 {
+        eprintln!("assertion failed");
+        std::process::exit(1);
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_console_print(_console: Handle, ptr: *const u8, len: usize) {
     unsafe { write_bytes(ptr, len, false) };
 }

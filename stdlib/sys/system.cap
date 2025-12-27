@@ -17,6 +17,10 @@ impl RootCap {
     return ()
   }
 
+  pub fn assert(self, cond: bool) -> unit {
+    return ()
+  }
+
   pub fn args_len(self) -> i32 {
     return 0
   }
