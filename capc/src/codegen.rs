@@ -194,6 +194,7 @@ pub fn build_object(
     register_runtime_intrinsics(&mut fn_map, module.isa().pointer_type());
     let all_modules = program.user_modules
         .iter()
+        .chain(program.stdlib.iter())
         .chain(std::iter::once(&program.entry))
         .collect::<Vec<_>>();
     for module_ref in &all_modules {
@@ -670,15 +671,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         FnInfo {
             sig: system_console.clone(),
             abi_sig: None,
-            symbol: "capable_rt_system_console".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mint_console".to_string(),
-        FnInfo {
-            sig: system_console.clone(),
-            abi_sig: None,
+            // Legacy runtime symbol name kept for compatibility.
             symbol: "capable_rt_system_console".to_string(),
             is_runtime: true,
         },
@@ -688,15 +681,7 @@ fn register_runtime_intrinsics(map: &mut HashMap<String, FnInfo>, ptr_ty: Type) 
         FnInfo {
             sig: system_fs_read.clone(),
             abi_sig: None,
-            symbol: "capable_rt_system_fs_read".to_string(),
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mint_readfs".to_string(),
-        FnInfo {
-            sig: system_fs_read,
-            abi_sig: None,
+            // Legacy runtime symbol name kept for compatibility.
             symbol: "capable_rt_system_fs_read".to_string(),
             is_runtime: true,
         },
@@ -1351,6 +1336,10 @@ fn register_user_functions(
             ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
         };
         let key = format!("{}.{}", module_name, func.name);
+        if map.contains_key(&key) {
+            // Keep runtime intrinsics (or previously-registered) entries.
+            continue;
+        }
         let symbol = if module_name == &entry.name && func.name == "main" {
             "capable_main".to_string()
         } else {
