@@ -1,0 +1,11 @@
+package safe
+module should_fail_affine_use_after_move
+
+opaque struct Cap
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  let x = c
+  let y = c
+  return 0
+}

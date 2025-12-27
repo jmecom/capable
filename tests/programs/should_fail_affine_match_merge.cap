@@ -1,0 +1,14 @@
+package safe
+module should_fail_affine_match_merge
+
+opaque struct Cap
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  match 0 {
+    0 => { let x = c; 0 }
+    1 => { 0 }
+  }
+  let y = c
+  return 0
+}

@@ -1,0 +1,15 @@
+package safe
+module should_fail_affine_call_moves
+
+opaque struct Cap
+
+pub fn takes(c: Cap) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  takes(c)
+  takes(c)
+  return 0
+}

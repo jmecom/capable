@@ -1,0 +1,16 @@
+package safe
+module should_pass_affine_non_affine_field_reads
+
+opaque struct Cap
+
+struct Holder {
+  cap: Cap,
+  n: i32
+}
+
+pub fn main() -> i32 {
+  let h = Holder{ cap: Cap{}, n: 7 }
+  let a = h.n
+  let b = h.n
+  return 0
+}
