@@ -1091,17 +1091,34 @@ pub(super) fn check_expr(
                 Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref().clone(),
                 _ => receiver_ty.clone(),
             };
-            let receiver_ptr = Ty::Ptr(Box::new(receiver_base.clone()));
             let receiver_unqualified = Ty::Path(type_name.clone(), receiver_args);
-            let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
             let receiver_ref = Ty::Ref(Box::new(receiver_base.clone()));
             let receiver_ref_unqualified = Ty::Ref(Box::new(receiver_unqualified.clone()));
+            let receiver_ptr = Ty::Ptr(Box::new(receiver_base.clone()));
+            let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
+
+            let expects_ref = matches!(sig.params[0], Ty::Ref(_));
+            let expects_ptr = matches!(sig.params[0], Ty::Ptr(_));
+
+            if matches!(receiver_ty, Ty::Ref(_)) && !expects_ref {
+                return Err(TypeError::new(
+                    "cannot use a reference receiver where a value is expected".to_string(),
+                    method_call.receiver.span(),
+                ));
+            }
+            if matches!(receiver_ty, Ty::Ptr(_)) && !expects_ptr {
+                return Err(TypeError::new(
+                    "cannot use a pointer receiver where a value is expected".to_string(),
+                    method_call.receiver.span(),
+                ));
+            }
+
             if sig.params[0] != receiver_ty
-                && sig.params[0] != receiver_ptr
                 && sig.params[0] != receiver_unqualified
-                && sig.params[0] != receiver_ptr_unqualified
                 && sig.params[0] != receiver_ref
                 && sig.params[0] != receiver_ref_unqualified
+                && sig.params[0] != receiver_ptr
+                && sig.params[0] != receiver_ptr_unqualified
             {
                 return Err(TypeError::new(
                     format!(

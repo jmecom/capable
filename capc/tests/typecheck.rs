@@ -361,6 +361,17 @@ fn typecheck_borrow_local_temp_fails() {
 }
 
 #[test]
+fn typecheck_borrow_local_move_fails() {
+    let source = load_program("should_fail_borrow_local_move.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("argument type mismatch"));
+}
+
+#[test]
 fn typecheck_linear_return_ok() {
     let source = load_program("should_pass_linear_return.cap");
     let module = parse_module(&source).expect("parse module");
