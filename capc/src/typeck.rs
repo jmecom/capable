@@ -2337,6 +2337,7 @@ fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {
             Some((seg.item.as_str(), seg.span))
         }
         Expr::FieldAccess(field_access) => leftmost_local_in_chain(&field_access.object),
+        Expr::Grouping(group) => leftmost_local_in_chain(&group.expr),
         _ => None,
     }
 }
