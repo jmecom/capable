@@ -201,6 +201,42 @@ fn resolve_method_target(
     ))
 }
 
+fn resolve_impl_type_name(
+    target: &Type,
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+    struct_map: &HashMap<String, StructInfo>,
+    module_name: &str,
+    span: Span,
+) -> Result<String, TypeError> {
+    let target_ty = lower_type(target, use_map, stdlib)?;
+    let (impl_module, type_name, _) =
+        resolve_method_target(&target_ty, module_name, struct_map, span)?;
+    if impl_module != module_name {
+        return Err(TypeError::new(
+            "impl blocks must be declared in the defining module".to_string(),
+            span,
+        ));
+    }
+    Ok(type_name)
+}
+
+fn desugar_impl_method(type_name: &str, method: &Function) -> Function {
+    let name = Spanned::new(
+        format!("{type_name}__{}", method.name.item),
+        method.name.span,
+    );
+    Function {
+        name,
+        params: method.params.clone(),
+        ret: method.ret.clone(),
+        body: method.body.clone(),
+        is_pub: method.is_pub,
+        doc: method.doc.clone(),
+        span: method.span,
+    }
+}
+
 fn build_stdlib_index(stdlib: &[Module]) -> Result<StdlibIndex, TypeError> {
     let mut types = HashMap::new();
     for module in stdlib {
@@ -227,55 +263,78 @@ fn collect_functions(
     modules: &[&Module],
     entry_name: &str,
     stdlib: &StdlibIndex,
+    struct_map: &HashMap<String, StructInfo>,
 ) -> Result<HashMap<String, FunctionSig>, TypeError> {
     let mut functions = HashMap::new();
     for module in modules {
         let module_name = module.name.to_string();
         let local_use = UseMap::new(module);
         for item in &module.items {
-            let (name, params, ret, span) = match item {
-                Item::Function(func) => (
-                    &func.name,
-                    &func.params,
-                    &func.ret,
-                    func.name.span,
-                ),
-                Item::ExternFunction(func) => (
-                    &func.name,
-                    &func.params,
-                    &func.ret,
-                    func.name.span,
-                ),
-                _ => continue,
-            };
-            let sig = FunctionSig {
-                params: params
-                    .iter()
-                    .map(|p| lower_type(&p.ty, &local_use, stdlib))
-                    .collect::<Result<_, _>>()?,
-                ret: lower_type(ret, &local_use, stdlib)?,
-                module: module_name.clone(),
-                is_pub: match item {
-                    Item::Function(func) => func.is_pub,
-                    Item::ExternFunction(func) => func.is_pub,
-                    _ => false,
-                },
-            };
-            let qualified_key = format!("{module_name}.{}", name.item);
-            if functions.insert(qualified_key.clone(), sig.clone()).is_some() {
-                return Err(TypeError::new(
-                    format!("duplicate function `{qualified_key}`"),
-                    span,
-                ));
-            }
-            if module_name == entry_name {
-                let key = name.item.clone();
-                if functions.insert(key.clone(), sig).is_some() {
+            let mut add_function = |name: &Ident,
+                                    params: &[Param],
+                                    ret: &Type,
+                                    span: Span,
+                                    is_pub: bool|
+             -> Result<(), TypeError> {
+                let sig = FunctionSig {
+                    params: params
+                        .iter()
+                        .map(|p| lower_type(&p.ty, &local_use, stdlib))
+                        .collect::<Result<_, _>>()?,
+                    ret: lower_type(ret, &local_use, stdlib)?,
+                    module: module_name.clone(),
+                    is_pub,
+                };
+                let qualified_key = format!("{module_name}.{}", name.item);
+                if functions.insert(qualified_key.clone(), sig.clone()).is_some() {
                     return Err(TypeError::new(
-                        format!("duplicate function `{key}`"),
+                        format!("duplicate function `{qualified_key}`"),
                         span,
                     ));
                 }
+                if module_name == entry_name {
+                    let key = name.item.clone();
+                    if functions.insert(key.clone(), sig).is_some() {
+                        return Err(TypeError::new(
+                            format!("duplicate function `{key}`"),
+                            span,
+                        ));
+                    }
+                }
+                Ok(())
+            };
+
+            match item {
+                Item::Function(func) => {
+                    add_function(&func.name, &func.params, &func.ret, func.name.span, func.is_pub)?;
+                }
+                Item::ExternFunction(func) => {
+                    add_function(&func.name, &func.params, &func.ret, func.name.span, func.is_pub)?;
+                }
+                Item::Impl(impl_block) => {
+                    let type_name = resolve_impl_type_name(
+                        &impl_block.target,
+                        &local_use,
+                        stdlib,
+                        struct_map,
+                        &module_name,
+                        impl_block.span,
+                    )?;
+                    for method in &impl_block.methods {
+                        let name = Spanned::new(
+                            format!("{type_name}__{}", method.name.item),
+                            method.name.span,
+                        );
+                        add_function(
+                            &name,
+                            &method.params,
+                            &method.ret,
+                            method.name.span,
+                            method.is_pub,
+                        )?;
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -406,19 +465,44 @@ pub fn type_check_program(
     }
     let struct_map = collect_structs(&modules, &module_name, &stdlib_index)?;
     let enum_map = collect_enums(&modules, &module_name)?;
-    let functions = collect_functions(&modules, &module_name, &stdlib_index)?;
+    let functions = collect_functions(&modules, &module_name, &stdlib_index, &struct_map)?;
 
     for item in &module.items {
-        if let Item::Function(func) = item {
-            check_function(
-                func,
-                &functions,
-                &use_map,
-                &struct_map,
-                &enum_map,
-                &stdlib_index,
-                &module_name,
-            )?;
+        match item {
+            Item::Function(func) => {
+                check_function(
+                    func,
+                    &functions,
+                    &use_map,
+                    &struct_map,
+                    &enum_map,
+                    &stdlib_index,
+                    &module_name,
+                )?;
+            }
+            Item::Impl(impl_block) => {
+                let type_name = resolve_impl_type_name(
+                    &impl_block.target,
+                    &use_map,
+                    &stdlib_index,
+                    &struct_map,
+                    &module_name,
+                    impl_block.span,
+                )?;
+                for method in &impl_block.methods {
+                    let desugared = desugar_impl_method(&type_name, method);
+                    check_function(
+                        &desugared,
+                        &functions,
+                        &use_map,
+                        &struct_map,
+                        &enum_map,
+                        &stdlib_index,
+                        &module_name,
+                    )?;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -476,6 +560,16 @@ fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
                         "raw pointer types require `package unsafe`".to_string(),
                         span,
                     ));
+                }
+            }
+            Item::Impl(impl_block) => {
+                for method in &impl_block.methods {
+                    if let Some(span) = type_contains_ptr_fn(method) {
+                        return Err(TypeError::new(
+                            "raw pointer types require `package unsafe`".to_string(),
+                            span,
+                        ));
+                    }
                 }
             }
             Item::Struct(decl) => {
@@ -1885,9 +1979,27 @@ fn lower_module(
     // Lower all functions
     let mut hir_functions = Vec::new();
     for item in &module.items {
-        if let Item::Function(func) = item {
-            let hir_func = lower_function(func, &mut ctx)?;
-            hir_functions.push(hir_func);
+        match item {
+            Item::Function(func) => {
+                let hir_func = lower_function(func, &mut ctx)?;
+                hir_functions.push(hir_func);
+            }
+            Item::Impl(impl_block) => {
+                let type_name = resolve_impl_type_name(
+                    &impl_block.target,
+                    use_map,
+                    stdlib,
+                    structs,
+                    &module_name,
+                    impl_block.span,
+                )?;
+                for method in &impl_block.methods {
+                    let desugared = desugar_impl_method(&type_name, method);
+                    let hir_func = lower_function(&desugared, &mut ctx)?;
+                    hir_functions.push(hir_func);
+                }
+            }
+            _ => {}
         }
     }
 

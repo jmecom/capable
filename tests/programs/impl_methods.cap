@@ -1,0 +1,27 @@
+module impl_methods
+use sys::system
+use sys::console
+
+struct Pair { left: i32, right: i32 }
+
+impl Pair {
+  fn sum(self: Pair) -> i32 {
+    return self.left + self.right
+  }
+
+  fn add(self: Pair, value: i32) -> i32 {
+    return self.left + value
+  }
+}
+
+pub fn main(sys: System) -> i32 {
+  let c = system::console(sys)
+  let p = Pair { left: 2, right: 5 }
+  let a = p.sum()
+  let b = Pair { left: 7, right: 3 }.add(10)
+  console::print_i32(c, a)
+  console::print(c, " ")
+  console::print_i32(c, b)
+  console::println(c, "")
+  return 0
+}

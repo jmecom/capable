@@ -141,11 +141,47 @@ impl Parser {
                 }
                 Ok(Item::Enum(self.parse_enum(is_pub, doc)?))
             }
+            Some(TokenKind::Impl) => {
+                if is_pub {
+                    return Err(self.error_current(
+                        "impl blocks cannot be marked pub".to_string(),
+                    ));
+                }
+                if is_opaque {
+                    return Err(self.error_current(
+                        "opaque applies only to struct declarations".to_string(),
+                    ));
+                }
+                Ok(Item::Impl(self.parse_impl_block()?))
+            }
             Some(_other) => Err(self.error_current(format!(
                 "expected item, found {{other:?}}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
+    }
+
+    fn parse_impl_block(&mut self) -> Result<ImplBlock, ParseError> {
+        let start = self.expect(TokenKind::Impl)?.span.start;
+        let target = self.parse_type()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut methods = Vec::new();
+        while self.peek_kind() != Some(TokenKind::RBrace) {
+            let doc = self.take_doc_comments();
+            let is_pub = self.maybe_consume(TokenKind::Pub).is_some();
+            if self.peek_kind() != Some(TokenKind::Fn) {
+                return Err(self.error_current(
+                    "expected method declaration in impl block".to_string(),
+                ));
+            }
+            methods.push(self.parse_function(is_pub, doc)?);
+        }
+        let end = self.expect(TokenKind::RBrace)?.span.end;
+        Ok(ImplBlock {
+            target,
+            methods,
+            span: Span::new(start, end),
+        })
     }
 
     fn parse_extern_function(&mut self, is_pub: bool, doc: Option<String>) -> Result<ExternFunction, ParseError> {

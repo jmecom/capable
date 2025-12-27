@@ -118,6 +118,20 @@ fn run_method_calls_import() {
 }
 
 #[test]
+fn run_impl_methods() {
+    let out_dir = make_out_dir("impl_methods");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/impl_methods.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("7 17"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_result_construct() {
     let out_dir = make_out_dir("result_construct");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

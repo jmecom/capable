@@ -53,6 +53,7 @@ pub enum Item {
     ExternFunction(ExternFunction),
     Struct(StructDecl),
     Enum(EnumDecl),
+    Impl(ImplBlock),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +74,13 @@ pub struct ExternFunction {
     pub ret: Type,
     pub is_pub: bool,
     pub doc: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplBlock {
+    pub target: Type,
+    pub methods: Vec<Function>,
     pub span: Span,
 }
 
