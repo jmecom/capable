@@ -162,7 +162,7 @@ fn build_binary(
         miette!("failed to create build dir {}: {err}", build_dir.display())
     })?;
     let obj_path = build_dir.join("program.o");
-    build_object(&program, &module, &user_modules, &obj_path)
+    build_object(&program, &obj_path)
         .map_err(|err| miette!("codegen failed: {err}"))?;
 
     let status = std::process::Command::new("cargo")

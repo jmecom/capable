@@ -2670,8 +2670,8 @@ fn type_kind_inner(
 // ============================================================================
 
 use crate::hir::{
-    HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirField,
-    HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
+    HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirExternFunction,
+    HirField, HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
     HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
     HirStructLiteralField, HirUnary, HirWhileStmt, HirAssignStmt, IntrinsicId, LocalId,
     ResolvedCallee,
@@ -2748,6 +2748,7 @@ fn lower_module(
 
     // Lower all functions
     let mut hir_functions = Vec::new();
+    let mut hir_extern_functions = Vec::new();
     for item in &module.items {
         match item {
             Item::Function(func) => {
@@ -2761,6 +2762,32 @@ fn lower_module(
                     let hir_func = lower_function(&method, &mut ctx)?;
                     hir_functions.push(hir_func);
                 }
+            }
+            Item::ExternFunction(func) => {
+                let params: Result<Vec<HirParam>, TypeError> = func
+                    .params
+                    .iter()
+                    .map(|param| {
+                        let Some(ty) = &param.ty else {
+                            return Err(TypeError::new(
+                                format!("parameter `{}` requires a type annotation", param.name.item),
+                                param.name.span,
+                            ));
+                        };
+                        Ok(HirParam {
+                            local_id: LocalId(0),
+                            name: param.name.item.clone(),
+                            ty: lower_type(ty, use_map, stdlib)?,
+                        })
+                    })
+                    .collect();
+                hir_extern_functions.push(HirExternFunction {
+                    name: func.name.item.clone(),
+                    params: params?,
+                    ret_ty: lower_type(&func.ret, use_map, stdlib)?,
+                    is_pub: func.is_pub,
+                    span: func.span,
+                });
             }
             _ => {}
         }
@@ -2821,6 +2848,7 @@ fn lower_module(
     Ok(HirModule {
         name: module_name,
         functions: hir_functions,
+        extern_functions: hir_extern_functions,
         structs: hir_structs,
         enums: hir_enums,
     })

@@ -12,9 +12,7 @@ use cranelift_native;
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use thiserror::Error;
 
-use crate::ast::{
-    BinaryOp, Item, Literal, Module as AstModule, Path as AstPath, Type as AstType, UnaryOp,
-};
+use crate::ast::{BinaryOp, Literal, UnaryOp};
 
 #[derive(Debug, Error)]
 pub enum CodegenError {
@@ -68,34 +66,6 @@ struct FnInfo {
     symbol: String,
     runtime_symbol: Option<String>,
     is_runtime: bool,
-}
-
-#[derive(Clone, Debug)]
-struct UseMap {
-    aliases: HashMap<String, Vec<String>>,
-}
-
-impl UseMap {
-    fn new(module: &AstModule) -> Self {
-        let mut aliases: HashMap<String, Vec<String>> = HashMap::new();
-        for use_decl in &module.uses {
-            let segments = use_decl
-                .path
-                .segments
-                .iter()
-                .map(|seg| seg.item.clone())
-                .collect::<Vec<_>>();
-            if let Some(alias) = segments.last() {
-                aliases.insert(alias.clone(), segments);
-            }
-        }
-        Self { aliases }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct StdlibIndex {
-    types: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -163,8 +133,6 @@ enum ResultKind {
 
 pub fn build_object(
     program: &crate::hir::HirProgram,
-    entry_ast: &AstModule,
-    user_modules_ast: &[AstModule],
     out_path: &Path,
 ) -> Result<(), CodegenError> {
     let mut flag_builder = cranelift_codegen::settings::builder();
@@ -181,7 +149,6 @@ pub fn build_object(
             .map_err(|err| CodegenError::Codegen(err.to_string()))?,
     );
 
-    let stdlib_index = build_stdlib_index(&program.stdlib);
     let enum_index = build_enum_index(&program.entry, &program.user_modules, &program.stdlib);
     let struct_layouts = build_struct_layout_index(
         &program.entry,
@@ -196,7 +163,6 @@ pub fn build_object(
         register_user_functions(
             module_ref,
             &program.entry,
-            &stdlib_index,
             &enum_index,
             &struct_layouts,
             &mut fn_map,
@@ -220,7 +186,6 @@ pub fn build_object(
         register_user_functions(
             module_ref,
             &program.entry,
-            &stdlib_index,
             &enum_index,
             &struct_layouts,
             &mut fn_map,
@@ -232,7 +197,6 @@ pub fn build_object(
     register_user_functions(
         &program.entry,
         &program.entry,
-        &stdlib_index,
         &enum_index,
         &struct_layouts,
         &mut fn_map,
@@ -247,13 +211,12 @@ pub fn build_object(
         .chain(std::iter::once(&program.entry))
         .collect::<Vec<_>>();
 
-    // Register extern functions from AST modules (not in HIR yet)
-    let all_ast_modules = user_modules_ast
-        .iter()
-        .chain(std::iter::once(entry_ast))
-        .collect::<Vec<_>>();
-    for ast_module in &all_ast_modules {
-        register_extern_functions(ast_module, &stdlib_index, &enum_index, &mut fn_map)?;
+    for module_ref in &all_modules {
+        register_extern_functions_from_hir(
+            module_ref,
+            &struct_layouts,
+            &mut fn_map,
+        )?;
     }
 
     let mut data_counter = 0u32;
@@ -1443,7 +1406,6 @@ fn typeck_ty_to_tykind(
 fn register_user_functions(
     module: &crate::hir::HirModule,
     entry: &crate::hir::HirModule,
-    _stdlib: &StdlibIndex,
     _enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
@@ -1497,45 +1459,32 @@ fn register_user_functions(
     Ok(())
 }
 
-fn register_extern_functions(
-    module: &AstModule,
-    stdlib: &StdlibIndex,
-    enum_index: &EnumIndex,
+fn register_extern_functions_from_hir(
+    module: &crate::hir::HirModule,
+    struct_layouts: &StructLayoutIndex,
     map: &mut HashMap<String, FnInfo>,
 ) -> Result<(), CodegenError> {
-    let module_name = module.name.to_string();
-    let use_map = UseMap::new(module);
-
-    for item in &module.items {
-        if let Item::ExternFunction(func) = item {
-            let sig = FnSig {
-                params: func
-                    .params
-                    .iter()
-                    .map(|p| {
-                        let ty = p.ty.as_ref().ok_or_else(|| {
-                            CodegenError::Codegen(format!(
-                                "extern parameter `{}` requires a type annotation",
-                                p.name.item
-                            ))
-                        })?;
-                        lower_ty(ty, &use_map, stdlib, enum_index)
-                    })
-                    .collect::<Result<Vec<TyKind>, CodegenError>>()?,
-                ret: lower_ty(&func.ret, &use_map, stdlib, enum_index)?,
-            };
-            let key = format!("{}.{}", module_name, func.name.item);
-            map.insert(
-                key,
-                FnInfo {
-                    sig,
-                    abi_sig: None,
-                    symbol: func.name.item.clone(),
-                    runtime_symbol: None,
-                    is_runtime: true,
-                },
-            );
-        }
+    let module_name = &module.name;
+    for func in &module.extern_functions {
+        let sig = FnSig {
+            params: func
+                .params
+                .iter()
+                .map(|p| typeck_ty_to_tykind(&p.ty, Some(struct_layouts)))
+                .collect::<Result<Vec<TyKind>, CodegenError>>()?,
+            ret: typeck_ty_to_tykind(&func.ret_ty, Some(struct_layouts))?,
+        };
+        let key = format!("{}.{}", module_name, func.name);
+        map.insert(
+            key,
+            FnInfo {
+                sig,
+                abi_sig: None,
+                symbol: func.name.clone(),
+                runtime_symbol: None,
+                is_runtime: true,
+            },
+        );
     }
     Ok(())
 }
@@ -2045,11 +1994,10 @@ fn emit_hir_expr(
                 } else {
                     let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
                     debug_assert!(ty.bytes().is_power_of_two());
-                debug_assert!(ty.bytes().is_power_of_two());
-                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    ty.bytes().max(1) as u32,
-                ));
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        ty.bytes().max(1) as u32,
+                    ));
                     let addr = builder.ins().stack_addr(ptr_ty, slot, 0);
                     args.push(addr);
                     Some((slot, ty))
@@ -3458,42 +3406,6 @@ fn value_from_results(
     }
 }
 
-fn resolve_path(path: &AstPath, use_map: &UseMap) -> Vec<String> {
-    if path.segments.len() > 1 {
-        let first = &path.segments[0].item;
-        if let Some(prefix) = use_map.aliases.get(first) {
-            let mut resolved = prefix.clone();
-            for seg in path.segments.iter().skip(1) {
-                resolved.push(seg.item.clone());
-            }
-            return resolved;
-        }
-    }
-    path.segments.iter().map(|seg| seg.item.clone()).collect()
-}
-
-fn build_stdlib_index(stdlib: &[crate::hir::HirModule]) -> StdlibIndex {
-    let mut types = HashMap::new();
-    for module in stdlib {
-        let module_name = &module.name;
-        // Add public structs
-        for st in &module.structs {
-            if st.is_pub {
-                let qualified = format!("{}.{}", module_name, st.name);
-                types.insert(st.name.clone(), qualified);
-            }
-        }
-        // Add public enums
-        for en in &module.enums {
-            if en.is_pub {
-                let qualified = format!("{}.{}", module_name, en.name);
-                types.insert(en.name.clone(), qualified);
-            }
-        }
-    }
-    StdlibIndex { types }
-}
-
 fn build_enum_index(
     entry: &crate::hir::HirModule,
     user_modules: &[crate::hir::HirModule],
@@ -3959,80 +3871,4 @@ fn align_to(value: u32, align: u32) -> u32 {
     } else {
         value + (align - rem)
     }
-}
-
-fn lower_ty(
-    ty: &AstType,
-    use_map: &UseMap,
-    stdlib: &StdlibIndex,
-    enum_index: &EnumIndex,
-) -> Result<TyKind, CodegenError> {
-    let resolved = match ty {
-        AstType::Ptr { .. } => {
-            return Ok(TyKind::Ptr);
-        }
-        AstType::Ref { target, .. } => {
-            return lower_ty(target, use_map, stdlib, enum_index);
-        }
-        AstType::Path { path, .. } => resolve_type_name(path, use_map, stdlib),
-    };
-    if resolved == "i32" {
-        return Ok(TyKind::I32);
-    }
-    if resolved == "u32" {
-        return Ok(TyKind::U32);
-    }
-    if resolved == "u8" {
-        return Ok(TyKind::U8);
-    }
-    if resolved == "bool" {
-        return Ok(TyKind::Bool);
-    }
-    if resolved == "unit" {
-        return Ok(TyKind::Unit);
-    }
-    if resolved == "string" {
-        return Ok(TyKind::String);
-    }
-    if resolved == "Result" {
-        if let AstType::Path { args, .. } = ty {
-            if args.len() == 2 {
-                let ok = lower_ty(&args[0], use_map, stdlib, enum_index)?;
-                let err = lower_ty(&args[1], use_map, stdlib, enum_index)?;
-                return Ok(TyKind::Result(Box::new(ok), Box::new(err)));
-            }
-        }
-    }
-    if resolved == "sys.system.RootCap"
-        || resolved == "sys.console.Console"
-        || resolved == "sys.fs.ReadFS"
-        || resolved == "sys.fs.Filesystem"
-        || resolved == "sys.fs.Dir"
-        || resolved == "sys.fs.FileRead"
-        || resolved == "sys.buffer.Alloc"
-        || resolved == "sys.buffer.Buffer"
-        || resolved == "sys.buffer.Slice"
-        || resolved == "sys.buffer.MutSlice"
-        || resolved == "sys.vec.VecU8"
-        || resolved == "sys.vec.VecI32"
-        || resolved == "sys.vec.VecString"
-    {
-        return Ok(TyKind::Handle);
-    }
-    if enum_index.variants.contains_key(&resolved) {
-        return Ok(TyKind::I32);
-    }
-    return Err(CodegenError::Unsupported(format!(
-        "unknown type `{resolved}`"
-    )));
-}
-
-fn resolve_type_name(path: &AstPath, use_map: &UseMap, stdlib: &StdlibIndex) -> String {
-    let resolved = resolve_path(path, use_map);
-    if resolved.len() == 1 {
-        if let Some(full) = stdlib.types.get(&resolved[0]) {
-            return full.clone();
-        }
-    }
-    resolved.join(".")
 }

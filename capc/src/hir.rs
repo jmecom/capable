@@ -21,6 +21,7 @@ pub struct LocalId(pub usize);
 pub struct HirModule {
     pub name: String,
     pub functions: Vec<HirFunction>,
+    pub extern_functions: Vec<HirExternFunction>,
     pub structs: Vec<HirStruct>,
     pub enums: Vec<HirEnum>,
 }
@@ -40,6 +41,15 @@ pub struct HirFunction {
     pub params: Vec<HirParam>,
     pub ret_ty: Ty,
     pub body: HirBlock,
+    pub is_pub: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirExternFunction {
+    pub name: String,
+    pub params: Vec<HirParam>,
+    pub ret_ty: Ty,
     pub is_pub: bool,
     pub span: Span,
 }
