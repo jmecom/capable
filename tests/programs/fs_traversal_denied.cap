@@ -6,7 +6,14 @@ pub fn main(sys: RootCap) -> i32 {
   let rfs = sys.mint_readfs("./config")
 
   match rfs.read_to_string("../secrets.txt") {
-    Ok(s) => { c.println("BUG: escaped"); return 2 }
-    Err(e) => { c.println("denied"); return 0 }
+    Ok(s) => {
+      sys.assert(false)
+      c.println("BUG: escaped")
+      return 2
+    }
+    Err(e) => {
+      c.println("denied")
+      return 0
+    }
   }
 }

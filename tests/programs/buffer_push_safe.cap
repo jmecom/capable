@@ -16,6 +16,7 @@ pub fn main(sys: RootCap) -> i32 {
         }
       }
       let len = b.len()
+      sys.assert(len == 2)
       if (len == 2) {
         c.println("push ok")
       } else {

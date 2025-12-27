@@ -3,8 +3,11 @@ use sys::system
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
+  let hit = 0
 
   if (true) {
+    hit = 1
+    sys.assert(hit == 1)
     c.println("before return")
     c.println("early return test ok")
     return 0

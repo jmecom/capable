@@ -8,13 +8,25 @@ pub fn main(sys: RootCap) -> i32 {
   let b = make(false)
 
   match (a) {
-    Ok(s) => { c.println(s) }
-    Err(e) => { c.println("bad a"); return 1 }
+    Ok(s) => {
+      sys.assert(s.len() == 5)
+      c.println(s)
+    }
+    Err(e) => {
+      sys.assert(false)
+      c.println("bad a")
+      return 1
+    }
   }
 
   match (b) {
-    Ok(s) => { c.println("bad b"); return 1 }
+    Ok(s) => {
+      sys.assert(false)
+      c.println("bad b")
+      return 1
+    }
     Err(e) => {
+      sys.assert(e == 7)
       c.print_i32(e)
       c.println("")
     }

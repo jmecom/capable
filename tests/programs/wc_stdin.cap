@@ -21,6 +21,7 @@ pub fn main(sys: RootCap) -> i32 {
         }
         i = i + 1
       }
+      sys.assert(lines == 0 && words == 0 && bytes == 0)
       c.print_i32(lines)
       c.print(" ")
       c.print_i32(words)

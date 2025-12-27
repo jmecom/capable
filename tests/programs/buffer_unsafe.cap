@@ -8,6 +8,7 @@ pub fn main(sys: RootCap) -> i32 {
   match alloc.buffer_new(3) {
     Ok(b) => {
       let len = b.len()
+      sys.assert(len == 3)
       if (len == 3) {
         c.println("buffer ok")
       } else {
@@ -15,6 +16,7 @@ pub fn main(sys: RootCap) -> i32 {
       }
       let slice = b.as_slice()
       let s_len = slice.len()
+      sys.assert(s_len == 3)
       if (s_len == 3) {
         c.println("slice ok")
       } else {

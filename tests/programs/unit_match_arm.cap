@@ -3,9 +3,17 @@ use sys::system
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
+  let flag = 0
   match true {
-    true => { c.println("unit match arm ok") }
-    false => { c.println("wrong branch") }
+    true => {
+      flag = 1
+      c.println("unit match arm ok")
+    }
+    false => {
+      flag = 2
+      c.println("wrong branch")
+    }
   }
+  sys.assert(flag == 1)
   return 0
 }

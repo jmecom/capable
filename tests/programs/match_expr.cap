@@ -7,6 +7,12 @@ pub fn main(sys: RootCap) -> i32 {
     true => { "yes" }
     false => { "no" }
   }
+  sys.assert(
+    v.len() == 3 &&
+    v.byte_at(0) == 121u8 &&
+    v.byte_at(1) == 101u8 &&
+    v.byte_at(2) == 115u8
+  )
   c.println(v)
   return 0
 }

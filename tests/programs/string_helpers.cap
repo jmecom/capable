@@ -12,10 +12,7 @@ pub fn main(sys: RootCap) -> i32 {
   let count = words.len()
   let alloc = sys.mint_alloc_default()
   alloc.vec_string_free(words)
-  if (n == 3 && b == 97u8 && count == 3) {
-    c.println("string ok")
-    return 0
-  }
-  c.println("string bad")
-  return 1
+  sys.assert(n == 3 && b == 97u8 && count == 3)
+  c.println("string ok")
+  return 0
 }

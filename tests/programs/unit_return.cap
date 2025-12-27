@@ -7,7 +7,9 @@ fn helper() -> unit {
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
+  let x = 1
   helper()
+  sys.assert(x == 1)
   c.println("unit return ok")
   return 0
 }

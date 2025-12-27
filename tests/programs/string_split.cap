@@ -8,10 +8,7 @@ pub fn main(sys: RootCap) -> i32 {
   let count = parts.len()
   let alloc = sys.mint_alloc_default()
   alloc.vec_string_free(parts)
-  if (count == 3) {
-    c.println("split ok")
-    return 0
-  }
-  c.println("split bad")
-  return 1
+  sys.assert(count == 3)
+  c.println("split ok")
+  return 0
 }

@@ -7,14 +7,12 @@ pub fn main(sys: RootCap) -> i32 {
   let alloc = sys.mint_alloc_default()
   match alloc.buffer_new(1) {
     Ok(b) => {
-      match b.push(42u8) {
-        Ok(unit_val) => {
-          c.println("result unit ok - got Ok(unit)")
-        }
-        Err(e) => {
-          c.println("result unit err - unexpected")
-        }
+      let ok = match b.push(42u8) {
+        Ok(unit_val) => { 1 }
+        Err(e) => { 0 }
       }
+      sys.assert(ok == 1)
+      c.println("result unit ok - got Ok(unit)")
       alloc.buffer_free(b)
       return 0
     }

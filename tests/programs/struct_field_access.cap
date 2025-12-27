@@ -7,6 +7,7 @@ pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let p = Pair { left: 3, right: 4 }
   let sum = p.left + p.right
+  sys.assert(sum == 7)
   c.print_i32(sum)
   c.println("")
   return 0

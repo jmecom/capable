@@ -5,6 +5,7 @@ use sys::system
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
   let n = sys.args_len()
+  sys.assert(n >= 1)
   if (n < 1) {
     c.println("args bad")
     return 1
@@ -12,6 +13,7 @@ pub fn main(sys: RootCap) -> i32 {
   let code = match sys.args_at(0) {
     Ok(s) => {
       let m = s.len()
+      sys.assert(m >= 0)
       if (m >= 0) {
         c.println("args ok")
       }

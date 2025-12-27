@@ -9,6 +9,7 @@ pub fn main(sys: RootCap) -> i32 {
     Ok(b) => {
       let slice = b.as_slice()
       let v = slice.at(0)
+      sys.assert(v == 0u8)
       if (v == 0u8) {
         c.println("slice read ok")
       } else {

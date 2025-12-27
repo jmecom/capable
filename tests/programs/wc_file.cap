@@ -4,7 +4,7 @@ use sys::system
 use sys::console
 use sys::buffer
 
-fn count_text(c: Console, alloc: Alloc, s: string) -> i32 {
+fn count_text(sys: RootCap, c: Console, alloc: Alloc, s: string) -> i32 {
   let buf = s.bytes()
   let bytes = buf.len()
   let words_vec = s.split_whitespace()
@@ -19,6 +19,7 @@ fn count_text(c: Console, alloc: Alloc, s: string) -> i32 {
     }
     i = i + 1
   }
+  sys.assert(lines == 8 && words == 19 && bytes == 128)
   c.print_i32(lines)
   c.print(" ")
   c.print_i32(words)
@@ -42,7 +43,7 @@ pub fn main(sys: RootCap) -> i32 {
       match rfs.read_to_string(path) {
         Ok(s) => {
           let alloc = sys.mint_alloc_default()
-          count_text(c, alloc, s)
+          count_text(sys, c, alloc, s)
         }
         Err(e) => {
           c.println("read err")

@@ -9,6 +9,7 @@ pub fn main(sys: RootCap) -> i32 {
     Ok(b) => {
       let slice = b.as_slice()
       let len = slice.len()
+      sys.assert(len == 3)
       if (len == 3) {
         c.println("buffer ok")
       } else {

@@ -8,6 +8,7 @@ pub fn main(sys: RootCap) -> i32 {
   let p = alloc.malloc(4)
   let slice = alloc.slice_from_ptr(p, 4)
   let len = slice.len()
+  sys.assert(len == 4)
   if (len == 4) {
     c.println("slice ok")
   } else {
