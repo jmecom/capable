@@ -368,7 +368,18 @@ fn typecheck_borrow_local_move_fails() {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     assert!(err
         .to_string()
-        .contains("argument type mismatch"));
+        .contains("cannot pass a reference to a value parameter"));
+}
+
+#[test]
+fn typecheck_borrow_local_assign_fails() {
+    let source = load_program("should_fail_borrow_local_assign.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("cannot assign to a reference local"));
 }
 
 #[test]

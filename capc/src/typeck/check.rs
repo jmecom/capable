@@ -935,6 +935,12 @@ pub(super) fn check_expr(
                     ret_ty,
                     module_name,
                 )?;
+                if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
+                    return Err(TypeError::new(
+                        "cannot pass a reference to a value parameter".to_string(),
+                        arg.span(),
+                    ));
+                }
                 let matches_ref = if let Ty::Ref(inner) = expected {
                     &arg_ty == inner.as_ref() || &arg_ty == expected
                 } else {
@@ -1021,6 +1027,12 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                     )?;
+                    if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
+                        return Err(TypeError::new(
+                            "cannot pass a reference to a value parameter".to_string(),
+                            arg.span(),
+                        ));
+                    }
                     let matches_ref = if let Ty::Ref(inner) = expected {
                         &arg_ty == inner.as_ref() || &arg_ty == expected
                     } else {
@@ -1160,6 +1172,12 @@ pub(super) fn check_expr(
                     ret_ty,
                     module_name,
                 )?;
+                if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
+                    return Err(TypeError::new(
+                        "cannot pass a reference to a value parameter".to_string(),
+                        arg.span(),
+                    ));
+                }
                 let matches_ref = if let Ty::Ref(inner) = expected {
                     &arg_ty == inner.as_ref() || &arg_ty == expected
                 } else {

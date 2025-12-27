@@ -1,0 +1,11 @@
+package safe
+module should_fail_borrow_local_assign
+
+opaque struct Cap
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  let r: &Cap = c
+  r = c
+  return 0
+}

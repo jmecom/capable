@@ -102,6 +102,9 @@ pub extern "C" fn capable_rt_mint_readfs(
         Some(path) => normalize_root(Path::new(&path)),
         None => normalize_root(Path::new("")),
     };
+    let Some(root_path) = root_path else {
+        return 0;
+    };
     let handle = new_handle();
     let mut table = READ_FS.lock().expect("readfs table");
     table.insert(handle, ReadFsState { root: root_path });
@@ -118,6 +121,9 @@ pub extern "C" fn capable_rt_mint_filesystem(
     let root_path = match root {
         Some(path) => normalize_root(Path::new(&path)),
         None => normalize_root(Path::new("")),
+    };
+    let Some(root_path) = root_path else {
+        return 0;
     };
     let handle = new_handle();
     let mut table = FILESYSTEMS.lock().expect("filesystem table");
@@ -1312,7 +1318,7 @@ unsafe fn read_str(ptr: *const u8, len: usize) -> Option<String> {
     std::str::from_utf8(bytes).ok().map(|s| s.to_string())
 }
 
-fn normalize_root(root: &Path) -> PathBuf {
+fn normalize_root(root: &Path) -> Option<PathBuf> {
     let path = if root.is_absolute() {
         root.to_path_buf()
     } else {
@@ -1322,8 +1328,8 @@ fn normalize_root(root: &Path) -> PathBuf {
         }
     };
     match path.canonicalize() {
-        Ok(canon) => canon,
-        Err(_) => normalize_path(&path),
+        Ok(canon) => Some(canon),
+        Err(_) => None,
     }
 }
 
@@ -1348,30 +1354,15 @@ fn normalize_relative(path: &Path) -> Option<PathBuf> {
     }
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
-            Component::RootDir => out.push(Component::RootDir.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                let _ = out.pop();
-            }
-            Component::Normal(part) => out.push(part),
-        }
-    }
-    out
-}
-
 extern "C" {
     fn capable_main(sys: Handle) -> i32;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_relative;
+    use super::{normalize_relative, normalize_root};
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn normalize_relative_allows_simple_paths() {
@@ -1396,5 +1387,22 @@ mod tests {
     #[test]
     fn normalize_relative_rejects_absolute() {
         assert!(normalize_relative(Path::new("/abs/path")).is_none());
+    }
+
+    #[test]
+    fn normalize_root_rejects_missing_paths() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let name = format!("capable-missing-{nanos}");
+        let path = std::env::temp_dir().join(name);
+        assert_eq!(normalize_root(&path), None);
+    }
+
+    #[test]
+    fn normalize_root_accepts_existing_path() {
+        let cwd = std::env::current_dir().expect("cwd");
+        assert!(normalize_root(&cwd).is_some());
     }
 }
