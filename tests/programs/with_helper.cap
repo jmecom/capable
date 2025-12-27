@@ -2,8 +2,8 @@ module with_helper
 use helper
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let total = helper::add(1, 2)
   c.println("ok")
   return total

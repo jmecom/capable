@@ -1,13 +1,13 @@
 module fs_traversal_denied
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let rfs = sys.mint_readfs("./config")
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let rfs = rc.mint_readfs("./config")
 
   match rfs.read_to_string("../secrets.txt") {
     Ok(s) => {
-      sys.assert(false)
+      c.assert(false)
       c.println("BUG: escaped")
       return 2
     }

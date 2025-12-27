@@ -1,6 +1,6 @@
 module should_fail_console_wrong_type
 
-pub fn main(sys: RootCap) -> i32 {
+pub fn main(rc: RootCap) -> i32 {
   let c: i32 = 0
   c.println("nope")
   return 0

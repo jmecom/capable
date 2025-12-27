@@ -19,4 +19,8 @@ impl Console {
   pub fn println_i32(self, v: i32) -> unit {
     return ()
   }
+
+  pub fn assert(self, cond: bool) -> unit {
+    return ()
+  }
 }

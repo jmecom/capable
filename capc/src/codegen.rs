@@ -488,6 +488,14 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![TyKind::Handle],
         ret: TyKind::Handle,
     };
+    let system_mint_args = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Handle,
+    };
+    let system_mint_stdin = FnSig {
+        params: vec![TyKind::Handle],
+        ret: TyKind::Handle,
+    };
     let mem_slice_from_ptr = FnSig {
         params: vec![TyKind::Handle, TyKind::Ptr, TyKind::I32],
         ret: TyKind::Handle,
@@ -556,7 +564,7 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![TyKind::Handle, TyKind::ResultString],
         ret: TyKind::ResultString,
     };
-    let system_assert = FnSig {
+    let console_assert = FnSig {
         params: vec![TyKind::Handle, TyKind::Bool],
         ret: TyKind::Unit,
     };
@@ -754,17 +762,27 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.system.RootCap__assert".to_string(),
+        "sys.system.RootCap__mint_args".to_string(),
         FnInfo {
-            sig: system_assert,
+            sig: system_mint_args,
             abi_sig: None,
-            symbol: "capable_rt_assert".to_string(),
+            symbol: "capable_rt_mint_args".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
     );
     map.insert(
-        "sys.system.RootCap__args_len".to_string(),
+        "sys.system.RootCap__mint_stdin".to_string(),
+        FnInfo {
+            sig: system_mint_stdin,
+            abi_sig: None,
+            symbol: "capable_rt_mint_stdin".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.args.Args__len".to_string(),
         FnInfo {
             sig: args_len,
             abi_sig: None,
@@ -774,7 +792,7 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.system.RootCap__args_at".to_string(),
+        "sys.args.Args__at".to_string(),
         FnInfo {
             sig: args_at,
             abi_sig: Some(args_at_abi),
@@ -784,7 +802,7 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.system.RootCap__read_stdin_to_string".to_string(),
+        "sys.stdin.Stdin__read_to_string".to_string(),
         FnInfo {
             sig: io_read_stdin,
             abi_sig: Some(io_read_stdin_abi),
@@ -839,6 +857,16 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: console_print_i32,
             abi_sig: None,
             symbol: "capable_rt_console_println_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__assert".to_string(),
+        FnInfo {
+            sig: console_assert,
+            abi_sig: None,
+            symbol: "capable_rt_assert".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

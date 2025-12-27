@@ -2,14 +2,14 @@ package safe
 module buffer_safe
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let alloc = sys.mint_alloc_default()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   match alloc.buffer_new(3) {
     Ok(b) => {
       let slice = b.as_slice()
       let len = slice.len()
-      sys.assert(len == 3)
+      c.assert(len == 3)
       if (len == 3) {
         c.println("buffer ok")
       } else {

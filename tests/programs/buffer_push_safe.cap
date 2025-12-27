@@ -2,9 +2,9 @@ package safe
 module buffer_push_safe
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let alloc = sys.mint_alloc_default()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   match alloc.buffer_new(1) {
     Ok(b) => {
       match b.push(7u8) {
@@ -16,7 +16,7 @@ pub fn main(sys: RootCap) -> i32 {
         }
       }
       let len = b.len()
-      sys.assert(len == 2)
+      c.assert(len == 2)
       if (len == 2) {
         c.println("push ok")
       } else {

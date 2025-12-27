@@ -1,8 +1,8 @@
 module scoping_assign
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let x = 1
 
   if (true) {
@@ -10,7 +10,7 @@ pub fn main(sys: RootCap) -> i32 {
     x = 2
   }
 
-  sys.assert(x == 2)
+  c.assert(x == 2)
   c.println("x was mutated in inner scope")
   c.println("scoping assign test ok")
   return 0

@@ -2,18 +2,18 @@ module fs_traversal_kind
 use sys::system
 use sys::fs
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let rfs = sys.mint_readfs("./config")
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let rfs = rc.mint_readfs("./config")
 
   match rfs.read_to_string("../secrets.txt") {
     Ok(s) => {
-      sys.assert(false)
+      c.assert(false)
       c.println("BUG: escaped")
       return 2
     }
     Err(e) => {
-      sys.assert(e == fs::FsErr::InvalidPath)
+      c.assert(e == fs::FsErr::InvalidPath)
       if (e == fs::FsErr::InvalidPath) {
         c.println("invalid")
         return 0

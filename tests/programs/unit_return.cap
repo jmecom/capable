@@ -5,11 +5,11 @@ fn helper() -> unit {
   return ()
 }
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let x = 1
   helper()
-  sys.assert(x == 1)
+  c.assert(x == 1)
   c.println("unit return ok")
   return 0
 }

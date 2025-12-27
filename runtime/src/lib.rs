@@ -59,6 +59,16 @@ pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_mint_args(_sys: Handle) -> Handle {
+    new_handle()
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_mint_stdin(_sys: Handle) -> Handle {
+    new_handle()
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_mint_readfs(
     _sys: Handle,
     root_ptr: *const u8,

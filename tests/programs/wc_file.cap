@@ -4,7 +4,7 @@ use sys::system
 use sys::console
 use sys::buffer
 
-fn count_text(sys: RootCap, c: Console, alloc: Alloc, s: string) -> i32 {
+fn count_text(c: Console, alloc: Alloc, s: string) -> i32 {
   let buf = s.bytes()
   let bytes = buf.len()
   let words_vec = s.split_whitespace()
@@ -19,7 +19,7 @@ fn count_text(sys: RootCap, c: Console, alloc: Alloc, s: string) -> i32 {
     }
     i = i + 1
   }
-  sys.assert(lines == 8 && words == 19 && bytes == 128)
+  c.assert(lines == 8 && words == 19 && bytes == 126)
   c.print_i32(lines)
   c.print(" ")
   c.print_i32(words)
@@ -29,21 +29,22 @@ fn count_text(sys: RootCap, c: Console, alloc: Alloc, s: string) -> i32 {
   return 0
 }
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let args = rc.mint_args()
 
-  if (sys.args_len() < 2) {
+  if (args.len() < 2) {
     c.println("usage: wc <path>")
     return 1
   }
 
-  let code = match sys.args_at(1) {
+  let code = match args.at(1) {
     Ok(path) => {
-      let rfs = sys.mint_readfs("./")
+      let rfs = rc.mint_readfs("./")
       match rfs.read_to_string(path) {
         Ok(s) => {
-          let alloc = sys.mint_alloc_default()
-          count_text(sys, c, alloc, s)
+          let alloc = rc.mint_alloc_default()
+          count_text(c, alloc, s)
         }
         Err(e) => {
           c.println("read err")

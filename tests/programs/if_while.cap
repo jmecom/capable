@@ -1,8 +1,8 @@
 module if_while
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   if true { c.println("yes") }
   while false { c.println("loop") }
   return 0

@@ -2,13 +2,13 @@ package unsafe
 module slice_unsafe
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let alloc = sys.mint_alloc_default()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   let p = alloc.malloc(4)
   let slice = alloc.slice_from_ptr(p, 4)
   let len = slice.len()
-  sys.assert(len == 4)
+  c.assert(len == 4)
   if (len == 4) {
     c.println("slice ok")
   } else {

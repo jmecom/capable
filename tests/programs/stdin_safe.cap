@@ -2,12 +2,13 @@ package safe
 module stdin_safe
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let code = match sys.read_stdin_to_string() {
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let stdin = rc.mint_stdin()
+  let code = match stdin.read_to_string() {
     Ok(s) => {
       let n = s.len()
-      sys.assert(n == 0)
+      c.assert(n == 0)
       if (n == 0) {
         c.println("stdin ok")
       } else {

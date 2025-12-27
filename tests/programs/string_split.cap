@@ -2,13 +2,13 @@ package safe
 module string_split
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let parts = "a,b,c".split(44u8)
   let count = parts.len()
-  let alloc = sys.mint_alloc_default()
+  let alloc = rc.mint_alloc_default()
   alloc.vec_string_free(parts)
-  sys.assert(count == 3)
+  c.assert(count == 3)
   c.println("split ok")
   return 0
 }

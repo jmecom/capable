@@ -4,8 +4,8 @@ use sys::system
 
 extern fn demo_log(msg: string) -> unit
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   demo_log("hello from extern demo")
   c.println("capable still works")
   return 0

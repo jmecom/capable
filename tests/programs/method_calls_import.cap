@@ -2,11 +2,11 @@ module method_calls_import
 use method_helper
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let p = method_helper::Pair { left: 2, right: 5 }
   let sum = p.sum()
-  sys.assert(sum == 7)
+  c.assert(sum == 7)
   c.print_i32(sum)
   c.println("")
   return 0
