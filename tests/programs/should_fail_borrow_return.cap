@@ -1,0 +1,9 @@
+package safe
+module should_fail_borrow_return
+
+opaque struct Cap
+
+pub fn main() -> &Cap {
+  let c = Cap{}
+  return c
+}

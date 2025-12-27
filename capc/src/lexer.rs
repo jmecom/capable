@@ -76,6 +76,8 @@ pub enum TokenKind {
     AndAnd,
     #[token("||")]
     OrOr,
+    #[token("&")]
+    Ampersand,
 
     #[token("+")]
     Plus,

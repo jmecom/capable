@@ -8,6 +8,7 @@ pub enum Ty {
     Builtin(BuiltinType),
     Path(String, Vec<Ty>),
     Ptr(Box<Ty>),
+    Ref(Box<Ty>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,10 +356,11 @@ fn validate_impl_method(
     let mut params = method.params.clone();
     let expected = target_ty.clone();
     let expected_ptr = Ty::Ptr(Box::new(target_ty.clone()));
+    let expected_ref = Ty::Ref(Box::new(target_ty.clone()));
 
     if let Some(ty) = &first_param.ty {
         let lowered = lower_type(ty, use_map, stdlib)?;
-        if lowered != expected && lowered != expected_ptr {
+        if lowered != expected && lowered != expected_ptr && lowered != expected_ref {
             return Err(TypeError::new(
                 format!(
                     "first parameter must be self: {type_name} (found {lowered:?})"
@@ -591,6 +593,12 @@ fn collect_structs(
                 }
                 let mut fields = HashMap::new();
                 for field in &decl.fields {
+                    if let Some(span) = type_contains_ref(&field.ty) {
+                        return Err(TypeError::new(
+                            "reference types cannot be stored in structs".to_string(),
+                            span,
+                        ));
+                    }
                     let ty = lower_type(&field.ty, &local_use, stdlib)?;
                     if fields.insert(field.name.item.clone(), ty).is_some() {
                         return Err(TypeError::new(
@@ -672,6 +680,12 @@ fn collect_enums(
                     }
                     variants.push(variant.name.item.clone());
                     let payload_ty = if let Some(payload) = &variant.payload {
+                        if let Some(span) = type_contains_ref(payload) {
+                            return Err(TypeError::new(
+                                "reference types cannot be stored in enums".to_string(),
+                                span,
+                            ));
+                        }
                         Some(lower_type(payload, &local_use, stdlib)?)
                     } else {
                         None
@@ -889,9 +903,25 @@ fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
 fn type_contains_ptr(ty: &Type) -> Option<Span> {
     match ty {
         Type::Ptr { span, .. } => Some(*span),
+        Type::Ref { target, .. } => type_contains_ptr(target),
         Type::Path { args, .. } => {
             for arg in args {
                 if let Some(span) = type_contains_ptr(arg) {
+                    return Some(span);
+                }
+            }
+            None
+        }
+    }
+}
+
+fn type_contains_ref(ty: &Type) -> Option<Span> {
+    match ty {
+        Type::Ref { span, .. } => Some(*span),
+        Type::Ptr { target, .. } => type_contains_ref(target),
+        Type::Path { args, .. } => {
+            for arg in args {
+                if let Some(span) = type_contains_ref(arg) {
                     return Some(span);
                 }
             }
@@ -1027,12 +1057,36 @@ fn check_function(
                 param.name.span,
             ));
         };
+        if let Some(span) = type_contains_ref(ty) {
+            match ty {
+                Type::Ref { target, .. } => {
+                    if type_contains_ref(target).is_some() {
+                        return Err(TypeError::new(
+                            "nested reference types are not allowed".to_string(),
+                            span,
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(TypeError::new(
+                        "reference types are only allowed as direct parameter types".to_string(),
+                        span,
+                    ));
+                }
+            }
+        }
         let ty = lower_type(ty, use_map, stdlib)?;
         params_map.insert(param.name.item.clone(), ty);
     }
     let mut scopes = Scopes::from_flat_map(params_map);
 
     let ret_ty = lower_type(&func.ret, use_map, stdlib)?;
+    if let Some(span) = type_contains_ref(&func.ret) {
+        return Err(TypeError::new(
+            "reference types cannot be returned".to_string(),
+            span,
+        ));
+    }
 
     for stmt in &func.body.stmts {
         check_stmt(
@@ -1096,6 +1150,12 @@ fn check_stmt(
                 module_name,
             )?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
+                if let Some(span) = type_contains_ref(annot) {
+                    return Err(TypeError::new(
+                        "reference types cannot be stored in locals".to_string(),
+                        span,
+                    ));
+                }
                 let annot_ty = lower_type(annot, use_map, stdlib)?;
                 if annot_ty != expr_ty {
                     return Err(TypeError::new(
@@ -1652,11 +1712,16 @@ fn check_expr(
                 ));
             }
             for (arg, expected) in call.args.iter().zip(&sig.params) {
+                let (expected_inner, use_mode) = if let Ty::Ref(inner) = expected {
+                    (inner.as_ref(), UseMode::Read)
+                } else {
+                    (expected, UseMode::Move)
+                };
                 let arg_ty = check_expr(
                     arg,
                     functions,
                     scopes,
-                    UseMode::Move,
+                    use_mode,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1664,7 +1729,12 @@ fn check_expr(
                     ret_ty,
                     module_name,
                 )?;
-                if &arg_ty != expected {
+                let matches_ref = if let Ty::Ref(inner) = expected {
+                    &arg_ty == inner.as_ref()
+                } else {
+                    false
+                };
+                if &arg_ty != expected_inner && !matches_ref {
                     return Err(TypeError::new(
                         format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
                         arg.span(),
@@ -1730,11 +1800,16 @@ fn check_expr(
                     ));
                 }
                 for (arg, expected) in method_call.args.iter().zip(&sig.params) {
+                    let (expected_inner, use_mode) = if let Ty::Ref(inner) = expected {
+                        (inner.as_ref(), UseMode::Read)
+                    } else {
+                        (expected, UseMode::Move)
+                    };
                     let arg_ty = check_expr(
                         arg,
                         functions,
                         scopes,
-                        UseMode::Move,
+                        use_mode,
                         use_map,
                         struct_map,
                         enum_map,
@@ -1742,12 +1817,17 @@ fn check_expr(
                         ret_ty,
                         module_name,
                     )?;
-                    if &arg_ty != expected {
-                        return Err(TypeError::new(
-                            format!(
-                                "argument type mismatch: expected {expected:?}, found {arg_ty:?}"
-                            ),
-                            arg.span(),
+                let matches_ref = if let Ty::Ref(inner) = expected {
+                    &arg_ty == inner.as_ref()
+                } else {
+                    false
+                };
+                if &arg_ty != expected_inner && !matches_ref {
+                    return Err(TypeError::new(
+                        format!(
+                            "argument type mismatch: expected {expected:?}, found {arg_ty:?}"
+                        ),
+                        arg.span(),
                         ));
                     }
                 }
@@ -1759,7 +1839,7 @@ fn check_expr(
                 &method_call.receiver,
                 functions,
                 scopes,
-                UseMode::Move,
+                UseMode::Read,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1807,10 +1887,14 @@ fn check_expr(
             let receiver_ptr = Ty::Ptr(Box::new(receiver_ty.clone()));
             let receiver_unqualified = Ty::Path(type_name.clone(), receiver_args);
             let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
+            let receiver_ref = Ty::Ref(Box::new(receiver_ty.clone()));
+            let receiver_ref_unqualified = Ty::Ref(Box::new(receiver_unqualified.clone()));
             if sig.params[0] != receiver_ty
                 && sig.params[0] != receiver_ptr
                 && sig.params[0] != receiver_unqualified
                 && sig.params[0] != receiver_ptr_unqualified
+                && sig.params[0] != receiver_ref
+                && sig.params[0] != receiver_ref_unqualified
             {
                 return Err(TypeError::new(
                     format!(
@@ -1820,9 +1904,9 @@ fn check_expr(
                     method_call.receiver.span(),
                 ));
             }
-            for (arg, expected) in method_call.args.iter().zip(&sig.params[1..]) {
-                let arg_ty = check_expr(
-                    arg,
+            if sig.params[0] != receiver_ref && sig.params[0] != receiver_ref_unqualified {
+                let _ = check_expr(
+                    &method_call.receiver,
                     functions,
                     scopes,
                     UseMode::Move,
@@ -1833,7 +1917,31 @@ fn check_expr(
                     ret_ty,
                     module_name,
                 )?;
-                if &arg_ty != expected {
+            }
+            for (arg, expected) in method_call.args.iter().zip(&sig.params[1..]) {
+                let (expected_inner, use_mode) = if let Ty::Ref(inner) = expected {
+                    (inner.as_ref(), UseMode::Read)
+                } else {
+                    (expected, UseMode::Move)
+                };
+                let arg_ty = check_expr(
+                    arg,
+                    functions,
+                    scopes,
+                    use_mode,
+                    use_map,
+                    struct_map,
+                    enum_map,
+                    stdlib,
+                    ret_ty,
+                    module_name,
+                )?;
+                let matches_ref = if let Ty::Ref(inner) = expected {
+                    &arg_ty == inner.as_ref()
+                } else {
+                    false
+                };
+                if &arg_ty != expected_inner && !matches_ref {
                     return Err(TypeError::new(
                         format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
                         arg.span(),
@@ -2435,6 +2543,7 @@ fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> Str
 fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, TypeError> {
     match ty {
         Type::Ptr { target, .. } => Ok(Ty::Ptr(Box::new(lower_type(target, use_map, stdlib)?))),
+        Type::Ref { target, .. } => Ok(Ty::Ref(Box::new(lower_type(target, use_map, stdlib)?))),
         Type::Path { path, args, .. } => {
             let resolved = resolve_path(path, use_map);
             let path_segments = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
@@ -2521,7 +2630,7 @@ fn type_kind_inner(
     visiting: &mut HashSet<String>,
 ) -> TypeKind {
     match ty {
-        Ty::Builtin(_) | Ty::Ptr(_) => TypeKind::Unrestricted,
+        Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => TypeKind::Unrestricted,
         Ty::Path(name, args) => {
             if name == "Result" {
                 return args.iter().fold(TypeKind::Unrestricted, |acc, arg| {

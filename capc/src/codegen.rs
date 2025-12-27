@@ -1436,6 +1436,7 @@ fn typeck_ty_to_tykind(
             }
         },
         Ty::Ptr(_inner) => Ok(TyKind::Ptr),
+        Ty::Ref(inner) => typeck_ty_to_tykind(inner, struct_layouts),
     }
 }
 
@@ -2481,6 +2482,15 @@ fn store_value_by_ty(
             builder.ins().store(MemFlags::new(), val, addr, 0);
             Ok(())
         }
+        Ty::Ref(inner) => store_value_by_ty(
+            builder,
+            base_ptr,
+            offset,
+            inner,
+            value,
+            struct_layouts,
+            module,
+        ),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let ValueRepr::Result { tag, ok, err } = value else {
@@ -2605,6 +2615,14 @@ fn load_value_by_ty(
         Ty::Ptr(_) => Ok(ValueRepr::Single(
             builder.ins().load(ptr_ty, MemFlags::new(), addr, 0),
         )),
+        Ty::Ref(inner) => load_value_by_ty(
+            builder,
+            base_ptr,
+            offset,
+            inner,
+            struct_layouts,
+            module,
+        ),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let ok_layout = type_layout_from_index(&args[0], struct_layouts, ptr_ty)?;
@@ -3330,6 +3348,7 @@ fn zero_value_for_ty(
             zero_value_for_tykind(builder, &typeck_ty_to_tykind(ty, struct_layouts)?, ptr_ty)
         }
         Ty::Ptr(_) => zero_value_for_tykind(builder, &TyKind::Ptr, ptr_ty),
+        Ty::Ref(inner) => zero_value_for_ty(builder, inner, ptr_ty, struct_layouts),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let tag = builder.ins().iconst(ir::types::I8, 0);
@@ -3925,6 +3944,9 @@ fn lower_ty(
     let resolved = match ty {
         AstType::Ptr { .. } => {
             return Ok(TyKind::Ptr);
+        }
+        AstType::Ref { target, .. } => {
+            return lower_ty(target, use_map, stdlib, enum_index);
         }
         AstType::Path { path, .. } => resolve_type_name(path, use_map, stdlib),
     };

@@ -1,0 +1,17 @@
+package safe
+module should_pass_borrow_self
+
+opaque struct Cap
+
+impl Cap {
+  pub fn ping(self: &Cap) -> i32 {
+    return 1
+  }
+}
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  let a = c.ping()
+  let b = c.ping()
+  return 0
+}

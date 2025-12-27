@@ -355,6 +355,7 @@ pub enum Pattern {
 pub enum Type {
     Path { path: Path, args: Vec<Type>, span: Span },
     Ptr { target: Box<Type>, span: Span },
+    Ref { target: Box<Type>, span: Span },
 }
 
 impl Type {
@@ -362,6 +363,7 @@ impl Type {
         match self {
             Type::Path { span, .. } => *span,
             Type::Ptr { span, .. } => *span,
+            Type::Ref { span, .. } => *span,
         }
     }
 }

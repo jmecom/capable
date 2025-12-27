@@ -926,6 +926,15 @@ impl Parser {
                 span,
             });
         }
+        if self.peek_kind() == Some(TokenKind::Ampersand) {
+            let start = self.bump().unwrap().span.start;
+            let target = self.parse_type()?;
+            let span = Span::new(start, target.span().end);
+            return Ok(Type::Ref {
+                target: Box::new(target),
+                span,
+            });
+        }
 
         let path = self.parse_path()?;
         let mut args = Vec::new();
