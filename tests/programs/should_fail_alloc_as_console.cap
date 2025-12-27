@@ -1,0 +1,8 @@
+module should_fail_alloc_as_console
+use sys::system
+
+pub fn main(sys: RootCap) -> i32 {
+  let a = sys.alloc_default()
+  a.println("nope")
+  return 0
+}

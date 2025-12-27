@@ -1,0 +1,8 @@
+module should_fail_console_as_alloc
+use sys::system
+
+pub fn main(sys: RootCap) -> i32 {
+  let c = sys.mint_console()
+  let ignored = c.buffer_new(1)
+  return 0
+}

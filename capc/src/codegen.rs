@@ -1232,6 +1232,7 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     map.insert(
         "sys.string.string__bytes".to_string(),
         FnInfo {
+            // bytes() is an alias for as_slice(); both map to the same runtime symbol.
             sig: string_as_slice,
             abi_sig: None,
             symbol: "capable_rt_string_as_slice".to_string(),

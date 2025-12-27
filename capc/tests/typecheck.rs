@@ -86,6 +86,26 @@ fn typecheck_missing_console_cap() {
 }
 
 #[test]
+fn typecheck_console_as_alloc_fails() {
+    let source = load_program("should_fail_console_as_alloc.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("unknown method `sys.console.Console__buffer_new`"));
+}
+
+#[test]
+fn typecheck_alloc_as_console_fails() {
+    let source = load_program("should_fail_alloc_as_console.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("unknown method `sys.buffer.Alloc__println`"));
+}
+
+#[test]
 fn typecheck_opaque_console_constructor_fails() {
     let source = load_program("should_fail_forge_console.cap");
     let module = parse_module(&source).expect("parse module");
