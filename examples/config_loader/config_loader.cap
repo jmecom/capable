@@ -32,32 +32,28 @@ fn parse_line(c: Console, alloc: Alloc, line: string) -> Result[unit, VecErr] {
   return Ok(())
 }
 
-fn parse_config(c: Console, alloc: Alloc, contents: string) -> unit {
+fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result[unit, VecErr] {
   let lines = contents.lines()
   let i = 0
   while i < lines.len() {
-    let line_res = lines.get(i)
-    match (line_res) {
-      Ok(line) => {
-        match (parse_line(c, alloc, line)) {
-          Ok(_) => {
-          }
-          Err(_) => {
-          }
-        }
-      }
-      Err(_) => {
-      }
-    }
+    let line = lines.get(i)?
+    parse_line(c, alloc, line)?
     i = i + 1
   }
   alloc.vec_string_free(lines)
+  return Ok(())
 }
 
 fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result[unit, FsErr] {
   let contents = fs.read_to_string("app.conf")?
-  parse_config(c, alloc, contents)
-  return Ok(())
+  match (parse_config(c, alloc, contents)) {
+    Ok(_) => {
+      return Ok(())
+    }
+    Err(_) => {
+      return Err(fs::FsErr::IoError)
+    }
+  }
 }
 
 pub fn main(rc: RootCap) -> i32 {

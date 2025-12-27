@@ -202,8 +202,21 @@ fn run_config_loader() {
         "examples/config_loader/config_loader.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("config ok"), "stdout was: {stdout:?}");
-    assert!(stdout.contains("key: host"), "stdout was: {stdout:?}");
+    let lines: Vec<&str> = stdout
+        .lines()
+        .map(|line| line.trim_end())
+        .filter(|line| !line.is_empty())
+        .collect();
+    let expected = vec![
+        "key: host",
+        "value: localhost",
+        "key: port",
+        "value: 8080",
+        "key: log_level",
+        "value: info",
+        "config ok",
+    ];
+    assert_eq!(lines, expected, "stdout was: {stdout:?}");
 }
 
 #[test]
