@@ -1,6 +1,18 @@
 package safe
 module sys::args
 
+pub opaque struct Args
+
 pub enum ArgsErr {
   OutOfRange
+}
+
+impl Args {
+  pub fn len(self) -> i32 {
+    return 0
+  }
+
+  pub fn at(self, index: i32) -> Result[string, ArgsErr] {
+    return Err(ArgsErr::OutOfRange)
+  }
 }

@@ -1,8 +1,8 @@
 module should_fail_alloc_as_console
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let a = sys.mint_alloc_default()
+pub fn main(rc: RootCap) -> i32 {
+  let a = rc.mint_alloc_default()
   a.println("nope")
   return 0
 }

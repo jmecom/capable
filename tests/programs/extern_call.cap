@@ -5,8 +5,8 @@ use sys::console
 
 extern fn capable_rt_mint_console(sys: RootCap) -> Console
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = capable_rt_mint_console(sys)
+pub fn main(rc: RootCap) -> i32 {
+  let c = capable_rt_mint_console(rc)
   c.println("hi")
   return 0
 }

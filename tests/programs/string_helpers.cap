@@ -2,20 +2,17 @@ package safe
 module string_helpers
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let s = "abc"
   let buf = s.bytes()
   let n = buf.len()
   let b = buf.at(0)
   let words = "a b  c".split_whitespace()
   let count = words.len()
-  let alloc = sys.mint_alloc_default()
+  let alloc = rc.mint_alloc_default()
   alloc.vec_string_free(words)
-  if (n == 3 && b == 97u8 && count == 3) {
-    c.println("string ok")
-    return 0
-  }
-  c.println("string bad")
-  return 1
+  c.assert(n == 3 && b == 97u8 && count == 3)
+  c.println("string ok")
+  return 0
 }

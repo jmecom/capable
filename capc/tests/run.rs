@@ -300,8 +300,8 @@ fn run_wc_file() {
         "tests/programs/hello.cap",
     ]);
     assert_eq!(code, 0);
-    // Stdlib method-only refactor shortened hello.cap.
-    assert!(stdout.contains("8 19 128"), "stdout was: {stdout:?}");
+    // RootCap rc rename shortened hello.cap.
+    assert!(stdout.contains("8 19 126"), "stdout was: {stdout:?}");
 }
 
 #[test]

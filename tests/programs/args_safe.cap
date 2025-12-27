@@ -2,16 +2,19 @@ package safe
 module args_safe
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let n = sys.args_len()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let args = rc.mint_args()
+  let n = args.len()
+  c.assert(n >= 1)
   if (n < 1) {
     c.println("args bad")
     return 1
   }
-  let code = match sys.args_at(0) {
+  let code = match args.at(0) {
     Ok(s) => {
       let m = s.len()
+      c.assert(m >= 0)
       if (m >= 0) {
         c.println("args ok")
       }

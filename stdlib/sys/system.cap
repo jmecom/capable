@@ -3,7 +3,7 @@ module sys::system
 use sys::console
 use sys::fs
 use sys::args
-use sys::io
+use sys::stdin
 use sys::buffer
 
 pub opaque struct RootCap
@@ -17,19 +17,15 @@ impl RootCap {
     return ()
   }
 
-  pub fn args_len(self) -> i32 {
-    return 0
-  }
-
-  pub fn args_at(self, index: i32) -> Result[string, args::ArgsErr] {
-    return Err(args::ArgsErr::OutOfRange)
-  }
-
-  pub fn read_stdin_to_string(self) -> Result[string, io::IoErr] {
-    return Err(io::IoErr::IoError)
-  }
-
   pub fn mint_alloc_default(self) -> buffer::Alloc {
+    return ()
+  }
+
+  pub fn mint_args(self) -> args::Args {
+    return ()
+  }
+
+  pub fn mint_stdin(self) -> stdin::Stdin {
     return ()
   }
 }

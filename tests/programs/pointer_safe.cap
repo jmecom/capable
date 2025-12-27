@@ -5,6 +5,6 @@ struct Holder {
   ptr: *u32
 }
 
-pub fn main(sys: RootCap) -> i32 {
+pub fn main(rc: RootCap) -> i32 {
   return 0
 }

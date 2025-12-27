@@ -13,12 +13,15 @@ impl Pair {
   }
 }
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let p = Pair { left: 3, right: 4 }
   let a = p.sum()
   let b = Pair { left: 5, right: 6 }.sum()
   let c2 = p.add(10)
+  c.assert(a == 7)
+  c.assert(b == 11)
+  c.assert(c2 == 13)
   c.print_i32(a)
   c.print(" ")
   c.print_i32(b)

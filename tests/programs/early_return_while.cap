@@ -1,11 +1,14 @@
 module early_return_while
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
 
   let cond = true
+  let hit = 0
   while (cond) {
+    hit = 1
+    c.assert(hit == 1)
     c.println("loop iteration")
     c.println("early return while test ok")
     return 0

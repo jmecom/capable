@@ -2,6 +2,6 @@ module should_fail_reserved_type_name
 
 struct string { }
 
-pub fn main(sys: RootCap) -> i32 {
+pub fn main(rc: RootCap) -> i32 {
   return 0
 }

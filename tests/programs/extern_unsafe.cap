@@ -4,6 +4,6 @@ use sys::system
 
 extern fn host_log(msg: string) -> unit
 
-pub fn main(sys: RootCap) -> i32 {
+pub fn main(rc: RootCap) -> i32 {
   return 0
 }

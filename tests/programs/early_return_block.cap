@@ -1,10 +1,13 @@
 module early_return_block
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let hit = 0
 
   if (true) {
+    hit = 1
+    c.assert(hit == 1)
     c.println("before return")
     c.println("early return test ok")
     return 0

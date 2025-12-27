@@ -59,6 +59,16 @@ pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_mint_args(_sys: Handle) -> Handle {
+    new_handle()
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_mint_stdin(_sys: Handle) -> Handle {
+    new_handle()
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_mint_readfs(
     _sys: Handle,
     root_ptr: *const u8,
@@ -73,6 +83,14 @@ pub extern "C" fn capable_rt_mint_readfs(
     let mut table = READ_FS.lock().expect("readfs table");
     table.insert(handle, ReadFsState { root: root_path });
     handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_assert(_sys: Handle, cond: u8) {
+    if cond == 0 {
+        eprintln!("assertion failed");
+        std::process::exit(1);
+    }
 }
 
 #[no_mangle]

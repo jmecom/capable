@@ -6,6 +6,6 @@ fn parse_bytes(data: Slice[u8]) -> i32 {
   return 0
 }
 
-pub fn main(sys: RootCap) -> i32 {
+pub fn main(rc: RootCap) -> i32 {
   return 0
 }

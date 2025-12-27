@@ -2,12 +2,13 @@ package unsafe
 module buffer_unsafe
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let alloc = sys.mint_alloc_default()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   match alloc.buffer_new(3) {
     Ok(b) => {
       let len = b.len()
+      c.assert(len == 3)
       if (len == 3) {
         c.println("buffer ok")
       } else {
@@ -15,6 +16,7 @@ pub fn main(sys: RootCap) -> i32 {
       }
       let slice = b.as_slice()
       let s_len = slice.len()
+      c.assert(s_len == 3)
       if (s_len == 3) {
         c.println("slice ok")
       } else {

@@ -5,14 +5,22 @@ fn helper() -> unit {
   return ()
 }
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   // Test that match arms can return unit
   // Match on a bool, but both arms return unit
+  let flag = 0
   match true {
-    true => { helper() }
-    false => { helper() }
+    true => {
+      helper()
+      flag = 1
+    }
+    false => {
+      helper()
+      flag = 2
+    }
   }
+  c.assert(flag == 1)
   c.println("unit match multi ok")
   return 0
 }

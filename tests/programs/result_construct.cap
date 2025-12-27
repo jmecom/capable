@@ -2,19 +2,31 @@ package safe
 module result_construct
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let a = make(true)
   let b = make(false)
 
   match (a) {
-    Ok(s) => { c.println(s) }
-    Err(e) => { c.println("bad a"); return 1 }
+    Ok(s) => {
+      c.assert(s.len() == 5)
+      c.println(s)
+    }
+    Err(e) => {
+      c.assert(false)
+      c.println("bad a")
+      return 1
+    }
   }
 
   match (b) {
-    Ok(s) => { c.println("bad b"); return 1 }
+    Ok(s) => {
+      c.assert(false)
+      c.println("bad b")
+      return 1
+    }
     Err(e) => {
+      c.assert(e == 7)
       c.print_i32(e)
       c.println("")
     }

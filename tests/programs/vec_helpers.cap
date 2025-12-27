@@ -2,9 +2,9 @@ package safe
 module vec_helpers
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let alloc = sys.mint_alloc_default()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   let v = alloc.vec_u8_new()
   match v.push(65u8) {
     Ok(x) => {}
@@ -18,11 +18,10 @@ pub fn main(sys: RootCap) -> i32 {
   let b = v.get(1)
   match (b) {
     Ok(x) => {
-      if (len == 2 && x == 66u8) {
-        c.println("vec ok")
-        alloc.vec_u8_free(v)
-        return 0
-      }
+      c.assert(len == 2 && x == 66u8)
+      c.println("vec ok")
+      alloc.vec_u8_free(v)
+      return 0
     }
     Err(e) => {}
   }

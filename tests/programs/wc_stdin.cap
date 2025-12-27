@@ -2,15 +2,16 @@ package safe
 module wc_stdin
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
-  let code = match sys.read_stdin_to_string() {
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let stdin = rc.mint_stdin()
+  let code = match stdin.read_to_string() {
     Ok(s) => {
       let buf = s.bytes()
       let bytes = buf.len()
       let words_vec = s.split_whitespace()
       let words = words_vec.len()
-      let alloc = sys.mint_alloc_default()
+      let alloc = rc.mint_alloc_default()
       alloc.vec_string_free(words_vec)
       let i: i32 = 0
       let lines: i32 = 0
@@ -21,6 +22,7 @@ pub fn main(sys: RootCap) -> i32 {
         }
         i = i + 1
       }
+      c.assert(lines == 0 && words == 0 && bytes == 0)
       c.print_i32(lines)
       c.print(" ")
       c.print_i32(words)

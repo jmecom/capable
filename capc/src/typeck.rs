@@ -51,12 +51,6 @@ struct Scopes {
 }
 
 impl Scopes {
-    fn new() -> Self {
-        Scopes {
-            stack: vec![HashMap::new()],
-        }
-    }
-
     /// Push a new scope (entering a block)
     fn push_scope(&mut self) {
         self.stack.push(HashMap::new());

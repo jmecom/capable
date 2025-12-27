@@ -2,16 +2,13 @@ package safe
 module bytes_helpers
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
   let s = " \n"
   let buf = s.bytes()
   let b0 = buf.at(0)
   let b1 = buf.at(1)
-  if (b0.is_whitespace() && b1.is_whitespace()) {
-    c.println("bytes ok")
-    return 0
-  }
-  c.println("bytes bad")
-  return 1
+  c.assert(b0.is_whitespace() && b1.is_whitespace())
+  c.println("bytes ok")
+  return 0
 }

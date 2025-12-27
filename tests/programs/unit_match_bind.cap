@@ -1,10 +1,15 @@
 module unit_match_bind
 use sys::system
 
-pub fn main(sys: RootCap) -> i32 {
-  let c = sys.mint_console()
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let flag = 0
   match () {
-    x => { c.println("unit match bind ok") }
+    x => {
+      flag = 1
+      c.println("unit match bind ok")
+    }
   }
+  c.assert(flag == 1)
   return 0
 }
