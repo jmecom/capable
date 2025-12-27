@@ -4,14 +4,15 @@ use sys::system
 
 pub fn main(sys: RootCap) -> i32 {
   let c = sys.mint_console()
-  let p = sys.malloc(4)
-  let slice = sys.slice_from_ptr(p, 4)
+  let alloc = sys.alloc_default()
+  let p = alloc.malloc(4)
+  let slice = alloc.slice_from_ptr(p, 4)
   let len = slice.len()
   if (len == 4) {
     c.println("slice ok")
   } else {
     c.println("slice bad")
   }
-  sys.free(p)
+  alloc.free(p)
   return 0
 }

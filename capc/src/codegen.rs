@@ -790,66 +790,6 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.system.RootCap__malloc".to_string(),
-        FnInfo {
-            sig: mem_malloc,
-            abi_sig: None,
-            symbol: "capable_rt_malloc".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__free".to_string(),
-        FnInfo {
-            sig: mem_free,
-            abi_sig: None,
-            symbol: "capable_rt_free".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__cast_u8_to_u32".to_string(),
-        FnInfo {
-            sig: mem_cast.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_cast_u8_to_u32".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__cast_u32_to_u8".to_string(),
-        FnInfo {
-            sig: mem_cast,
-            abi_sig: None,
-            symbol: "capable_rt_cast_u32_to_u8".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_from_ptr".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.system.RootCap__mut_slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr,
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
         "sys.console.Console__println".to_string(),
         FnInfo {
             sig: console_println,
@@ -905,6 +845,66 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: mem_buffer_new.clone(),
             abi_sig: Some(mem_buffer_new_abi.clone()),
             symbol: "capable_rt_buffer_new".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__malloc".to_string(),
+        FnInfo {
+            sig: mem_malloc,
+            abi_sig: None,
+            symbol: "capable_rt_malloc".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__free".to_string(),
+        FnInfo {
+            sig: mem_free,
+            abi_sig: None,
+            symbol: "capable_rt_free".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__cast_u8_to_u32".to_string(),
+        FnInfo {
+            sig: mem_cast.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_cast_u8_to_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__cast_u32_to_u8".to_string(),
+        FnInfo {
+            sig: mem_cast,
+            abi_sig: None,
+            symbol: "capable_rt_cast_u32_to_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__slice_from_ptr".to_string(),
+        FnInfo {
+            sig: mem_slice_from_ptr.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_from_ptr".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__mut_slice_from_ptr".to_string(),
+        FnInfo {
+            sig: mem_slice_from_ptr,
+            abi_sig: None,
+            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
