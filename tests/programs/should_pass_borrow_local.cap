@@ -3,8 +3,15 @@ module should_pass_borrow_local
 
 opaque struct Cap
 
+impl Cap {
+  pub fn ping(self: &Cap) -> i32 {
+    return 1
+  }
+}
+
 pub fn main() -> i32 {
   let c = Cap{}
   let r: &Cap = c
-  return 0
+  let v = r.ping()
+  return v
 }

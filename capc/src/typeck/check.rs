@@ -1087,10 +1087,14 @@ pub(super) fn check_expr(
                     method_call.span,
                 ));
             }
-            let receiver_ptr = Ty::Ptr(Box::new(receiver_ty.clone()));
+            let receiver_base = match &receiver_ty {
+                Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref().clone(),
+                _ => receiver_ty.clone(),
+            };
+            let receiver_ptr = Ty::Ptr(Box::new(receiver_base.clone()));
             let receiver_unqualified = Ty::Path(type_name.clone(), receiver_args);
             let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
-            let receiver_ref = Ty::Ref(Box::new(receiver_ty.clone()));
+            let receiver_ref = Ty::Ref(Box::new(receiver_base.clone()));
             let receiver_ref_unqualified = Ty::Ref(Box::new(receiver_unqualified.clone()));
             if sig.params[0] != receiver_ty
                 && sig.params[0] != receiver_ptr

@@ -255,7 +255,11 @@ fn resolve_method_target(
     struct_map: &HashMap<String, StructInfo>,
     span: Span,
 ) -> Result<(String, String, Vec<Ty>), TypeError> {
-    let (receiver_name, receiver_args) = match receiver_ty {
+    let base_ty = match receiver_ty {
+        Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+        _ => receiver_ty,
+    };
+    let (receiver_name, receiver_args) = match base_ty {
         Ty::Path(name, args) => (name.as_str(), args),
         Ty::Builtin(BuiltinType::String) => {
             return Ok((
