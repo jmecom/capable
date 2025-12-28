@@ -14,6 +14,7 @@ use super::{FnInfo, FnSig};
 
 pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     let mut map = HashMap::new();
+    // System + args.
     let system_console = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
@@ -26,6 +27,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::String],
         ret: AbiType::Handle,
     };
+    // Filesystem.
     let fs_root_dir = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
@@ -54,6 +56,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::ResultString],
         ret: AbiType::ResultString,
     };
+    // Console.
     let console_println = FnSig {
         params: vec![AbiType::Handle, AbiType::String],
         ret: AbiType::Unit,
@@ -66,6 +69,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Unit,
     };
+    // Math.
     let math_i32 = FnSig {
         params: vec![AbiType::I32, AbiType::I32],
         ret: AbiType::I32,
@@ -78,6 +82,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::U8, AbiType::U8],
         ret: AbiType::U8,
     };
+    // Buffer + slices.
     let mem_malloc = FnSig {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Ptr,
@@ -110,6 +115,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultString],
         ret: AbiType::ResultString,
     };
+    // Buffer + slices.
     let mem_slice_from_ptr = FnSig {
         params: vec![AbiType::Handle, AbiType::Ptr, AbiType::I32],
         ret: AbiType::Handle,
@@ -122,6 +128,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::U8,
     };
+    // Vecs.
     let mem_buffer_new = FnSig {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
@@ -310,6 +317,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::Handle],
         ret: AbiType::Unit,
     };
+    // Strings.
     let string_len = FnSig {
         params: vec![AbiType::String],
         ret: AbiType::I32,
@@ -334,6 +342,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::String, AbiType::U8],
         ret: AbiType::Handle,
     };
+    // Vec lengths.
     let vec_u8_len = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::I32,
@@ -343,6 +352,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ret: AbiType::I32,
     };
 
+    // === System + args ===
     map.insert(
         "sys.system.RootCap__mint_console".to_string(),
         FnInfo {
@@ -416,6 +426,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Stdin ===
     map.insert(
         "sys.stdin.Stdin__read_to_string".to_string(),
         FnInfo {
@@ -432,6 +443,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Alloc ===
     map.insert(
         "sys.system.RootCap__mint_alloc_default".to_string(),
         FnInfo {
@@ -442,6 +454,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Console ===
     map.insert(
         "sys.console.Console__println".to_string(),
         FnInfo {
@@ -495,6 +508,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Math ===
     map.insert(
         "sys.math.add_wrap_i32".to_string(),
         FnInfo {
@@ -585,6 +599,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Filesystem ===
     map.insert(
         "sys.fs.ReadFS__read_to_string".to_string(),
         FnInfo {
@@ -635,6 +650,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Buffer + slices ===
     map.insert(
         "sys.buffer.Alloc__buffer_new".to_string(),
         FnInfo {
@@ -785,6 +801,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Vec ===
     map.insert(
         "sys.buffer.Alloc__vec_u8_new".to_string(),
         FnInfo {
@@ -995,6 +1012,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === String ===
     map.insert(
         "sys.string.string__len".to_string(),
         FnInfo {
@@ -1066,6 +1084,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             is_runtime: true,
         },
     );
+    // === Bytes ===
     map.insert(
         "sys.bytes.u8__is_whitespace".to_string(),
         FnInfo {

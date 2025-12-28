@@ -21,6 +21,16 @@ use super::{
 use super::layout::{align_to, resolve_struct_layout, type_layout_for_abi};
 use super::sig_to_clif;
 
+#[derive(Copy, Clone, Debug)]
+struct ResultStringSlots {
+    slot_ptr: ir::StackSlot,
+    slot_len: ir::StackSlot,
+    slot_err: ir::StackSlot,
+    ptr_align: u32,
+    len_align: u32,
+    err_align: u32,
+}
+
 
 /// Emit a single HIR statement.
 pub(super) fn emit_hir_stmt(
@@ -607,39 +617,15 @@ fn emit_hir_expr_inner(
             }
 
             // Handle result out-parameters (same logic as AST version)
-            let mut out_slots = None;
+            let mut out_slots: Option<ResultStringSlots> = None;
             let mut result_out = None;
             let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
 
             if abi_sig.ret == AbiType::ResultString {
                 let ptr_ty = module.isa().pointer_type();
-                let ptr_align = ptr_ty.bytes() as u32;
-                let len_bytes = result_string_len_bytes();
-                let len_align = len_bytes;
-                let err_align = 4u32;
-
-                let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    aligned_slot_size(ptr_ty.bytes() as u32, ptr_align),
-                ));
-                let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    aligned_slot_size(len_bytes, len_align),
-                ));
-                let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    aligned_slot_size(4, err_align),
-                ));
-
-                let ptr_ptr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
-                let len_ptr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
-                let err_ptr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
-
-                args.push(ptr_ptr);
-                args.push(len_ptr);
-                args.push(err_ptr);
-
-                out_slots = Some((slot_ptr, slot_len, slot_err));
+                let slots = result_string_slots(builder, ptr_ty);
+                push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
+                out_slots = Some(slots);
             }
 
             if let AbiType::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
@@ -698,25 +684,10 @@ fn emit_hir_expr_inner(
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
-                let (slot_ptr, slot_len, slot_err) =
+                let slots =
                     out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
                 let ptr_ty = module.isa().pointer_type();
-                let ptr_align = ptr_ty.bytes() as u32;
-                let len_align = result_string_len_bytes();
-                let err_align = 4u32;
-                let ptr_addr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
-                let len_addr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
-                let err_addr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
-                let ptr =
-                    builder
-                        .ins()
-                        .load(module.isa().pointer_type(), MemFlags::new(), ptr_addr, 0);
-                let len = builder
-                    .ins()
-                    .load(ir::types::I64, MemFlags::new(), len_addr, 0);
-                let err = builder
-                    .ins()
-                    .load(ir::types::I32, MemFlags::new(), err_addr, 0);
+                let (ptr, len, err) = read_result_string_slots(builder, ptr_ty, &slots);
                 match &info.sig.ret {
                     AbiType::Result(ok_ty, err_ty) => {
                         if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
@@ -1493,6 +1464,65 @@ fn aligned_slot_size(size: u32, align: u32) -> u32 {
 /// ResultString ABI uses a u64 length slot across targets.
 fn result_string_len_bytes() -> u32 {
     8
+}
+
+fn result_string_slots(builder: &mut FunctionBuilder, ptr_ty: Type) -> ResultStringSlots {
+    let ptr_align = ptr_ty.bytes() as u32;
+    let len_bytes = result_string_len_bytes();
+    let len_align = len_bytes;
+    let err_align = 4u32;
+    let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
+        ir::StackSlotKind::ExplicitSlot,
+        aligned_slot_size(ptr_ty.bytes() as u32, ptr_align),
+    ));
+    let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
+        ir::StackSlotKind::ExplicitSlot,
+        aligned_slot_size(len_bytes, len_align),
+    ));
+    let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
+        ir::StackSlotKind::ExplicitSlot,
+        aligned_slot_size(4, err_align),
+    ));
+    ResultStringSlots {
+        slot_ptr,
+        slot_len,
+        slot_err,
+        ptr_align,
+        len_align,
+        err_align,
+    }
+}
+
+fn push_result_string_out_params(
+    builder: &mut FunctionBuilder,
+    ptr_ty: Type,
+    slots: &ResultStringSlots,
+    args: &mut Vec<Value>,
+) {
+    let ptr_ptr = aligned_stack_addr(builder, slots.slot_ptr, slots.ptr_align, ptr_ty);
+    let len_ptr = aligned_stack_addr(builder, slots.slot_len, slots.len_align, ptr_ty);
+    let err_ptr = aligned_stack_addr(builder, slots.slot_err, slots.err_align, ptr_ty);
+    args.push(ptr_ptr);
+    args.push(len_ptr);
+    args.push(err_ptr);
+}
+
+fn read_result_string_slots(
+    builder: &mut FunctionBuilder,
+    ptr_ty: Type,
+    slots: &ResultStringSlots,
+) -> (Value, Value, Value) {
+    let ptr_addr = aligned_stack_addr(builder, slots.slot_ptr, slots.ptr_align, ptr_ty);
+    let len_addr = aligned_stack_addr(builder, slots.slot_len, slots.len_align, ptr_ty);
+    let err_addr = aligned_stack_addr(builder, slots.slot_err, slots.err_align, ptr_ty);
+    let ptr = builder.ins().load(ptr_ty, MemFlags::new(), ptr_addr, 0);
+    let len = builder
+        .ins()
+        .load(ir::types::I64, MemFlags::new(), len_addr, 0);
+    let err = builder
+        .ins()
+        .load(ir::types::I32, MemFlags::new(), err_addr, 0);
+    (ptr, len, err)
 }
 
 /// Compute pointer/len offsets for the string layout.
@@ -2293,37 +2323,14 @@ pub(super) fn emit_runtime_wrapper_call(
 ) -> Result<ValueRepr, CodegenError> {
     ensure_abi_sig_handled(info)?;
     let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
-    let mut out_slots = None;
+    let mut out_slots: Option<ResultStringSlots> = None;
     let mut result_out = None;
 
     if abi_sig.ret == AbiType::ResultString {
         let ptr_ty = module.isa().pointer_type();
-        let ptr_align = ptr_ty.bytes() as u32;
-        let len_bytes = result_string_len_bytes();
-        let len_align = len_bytes;
-        let err_align = 4u32;
-        let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
-            ir::StackSlotKind::ExplicitSlot,
-            aligned_slot_size(ptr_ty.bytes(), ptr_align),
-        ));
-        let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
-            ir::StackSlotKind::ExplicitSlot,
-            aligned_slot_size(len_bytes, len_align),
-        ));
-        let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
-            ir::StackSlotKind::ExplicitSlot,
-            aligned_slot_size(4, err_align),
-        ));
-
-        let ptr_ptr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
-        let len_ptr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
-        let err_ptr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
-
-        args.push(ptr_ptr);
-        args.push(len_ptr);
-        args.push(err_ptr);
-
-        out_slots = Some((slot_ptr, slot_len, slot_err));
+        let slots = result_string_slots(builder, ptr_ty);
+        push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
+        out_slots = Some(slots);
     }
 
     if let AbiType::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
@@ -2375,24 +2382,9 @@ pub(super) fn emit_runtime_wrapper_call(
         let tag = results
             .get(0)
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
-        let (slot_ptr, slot_len, slot_err) =
-            out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
+        let slots = out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
         let ptr_ty = module.isa().pointer_type();
-        let ptr_align = ptr_ty.bytes() as u32;
-        let len_align = result_string_len_bytes();
-        let err_align = 4u32;
-        let ptr_addr = aligned_stack_addr(builder, slot_ptr, ptr_align, ptr_ty);
-        let len_addr = aligned_stack_addr(builder, slot_len, len_align, ptr_ty);
-        let err_addr = aligned_stack_addr(builder, slot_err, err_align, ptr_ty);
-        let ptr = builder
-            .ins()
-            .load(module.isa().pointer_type(), MemFlags::new(), ptr_addr, 0);
-        let len = builder
-            .ins()
-            .load(ir::types::I64, MemFlags::new(), len_addr, 0);
-        let err = builder
-            .ins()
-            .load(ir::types::I32, MemFlags::new(), err_addr, 0);
+        let (ptr, len, err) = read_result_string_slots(builder, ptr_ty, &slots);
         match &info.sig.ret {
             AbiType::Result(ok_ty, err_ty) => {
                 if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
