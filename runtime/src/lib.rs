@@ -95,6 +95,15 @@ fn take_handle<T>(
     table.remove(&handle)
 }
 
+fn with_table<T, R>(
+    table: &LazyLock<Mutex<HashMap<Handle, T>>>,
+    label: &'static str,
+    f: impl FnOnce(&mut HashMap<Handle, T>) -> R,
+) -> R {
+    let mut table = table.lock().expect(label);
+    f(&mut table)
+}
+
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     new_handle()
@@ -418,14 +427,15 @@ pub extern "C" fn capable_rt_alloc_default(_sys: Handle) -> Handle {
 pub extern "C" fn capable_rt_slice_from_ptr(_sys: Handle, ptr: *mut u8, len: i32) -> Handle {
     let len = len.max(0) as usize;
     let handle = new_handle();
-    let mut table = SLICES.lock().expect("slice table");
-    table.insert(
-        handle,
-        SliceState {
-            ptr: ptr as usize,
-            len,
-        },
-    );
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(
+            handle,
+            SliceState {
+                ptr: ptr as usize,
+                len,
+            },
+        );
+    });
     handle
 }
 
@@ -433,24 +443,26 @@ pub extern "C" fn capable_rt_slice_from_ptr(_sys: Handle, ptr: *mut u8, len: i32
 pub extern "C" fn capable_rt_mut_slice_from_ptr(_sys: Handle, ptr: *mut u8, len: i32) -> Handle {
     let len = len.max(0) as usize;
     let handle = new_handle();
-    let mut table = SLICES.lock().expect("slice table");
-    table.insert(
-        handle,
-        SliceState {
-            ptr: ptr as usize,
-            len,
-        },
-    );
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(
+            handle,
+            SliceState {
+                ptr: ptr as usize,
+                len,
+            },
+        );
+    });
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_slice_len(slice: Handle) -> i32 {
-    let table = SLICES.lock().expect("slice table");
-    table
-        .get(&slice)
-        .map(|state| state.len.min(i32::MAX as usize) as i32)
-        .unwrap_or(0)
+    with_table(&SLICES, "slice table", |table| {
+        table
+            .get(&slice)
+            .map(|state| state.len.min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
 }
 
 #[no_mangle]
@@ -459,15 +471,16 @@ pub extern "C" fn capable_rt_slice_at(slice: Handle, index: i32) -> u8 {
         Ok(idx) => idx,
         Err(_) => return 0,
     };
-    let table = SLICES.lock().expect("slice table");
-    let Some(state) = table.get(&slice) else {
-        return 0;
-    };
-    if state.ptr == 0 || idx >= state.len {
-        return 0;
-    }
-    let ptr = state.ptr as *mut u8;
-    unsafe { *ptr.add(idx) }
+    with_table(&SLICES, "slice table", |table| {
+        let Some(state) = table.get(&slice) else {
+            return 0;
+        };
+        if state.ptr == 0 || idx >= state.len {
+            return 0;
+        }
+        let ptr = state.ptr as *mut u8;
+        unsafe { *ptr.add(idx) }
+    })
 }
 
 #[no_mangle]
@@ -476,15 +489,16 @@ pub extern "C" fn capable_rt_mut_slice_at(slice: Handle, index: i32) -> u8 {
         Ok(idx) => idx,
         Err(_) => return 0,
     };
-    let table = SLICES.lock().expect("slice table");
-    let Some(state) = table.get(&slice) else {
-        return 0;
-    };
-    if state.ptr == 0 || idx >= state.len {
-        return 0;
-    }
-    let ptr = state.ptr as *mut u8;
-    unsafe { *ptr.add(idx) }
+    with_table(&SLICES, "slice table", |table| {
+        let Some(state) = table.get(&slice) else {
+            return 0;
+        };
+        if state.ptr == 0 || idx >= state.len {
+            return 0;
+        }
+        let ptr = state.ptr as *mut u8;
+        unsafe { *ptr.add(idx) }
+    })
 }
 
 #[no_mangle]
@@ -514,8 +528,9 @@ pub extern "C" fn capable_rt_buffer_new(
     }
     data.resize(len, 0);
     let handle = new_handle();
-    let mut table = BUFFERS.lock().expect("buffer table");
-    table.insert(handle, data);
+    with_table(&BUFFERS, "buffer table", |table| {
+        table.insert(handle, data);
+    });
     unsafe {
         if !out_ok.is_null() {
             *out_ok = handle;
@@ -526,11 +541,12 @@ pub extern "C" fn capable_rt_buffer_new(
 
 #[no_mangle]
 pub extern "C" fn capable_rt_buffer_len(buffer: Handle) -> i32 {
-    let table = BUFFERS.lock().expect("buffer table");
-    table
-        .get(&buffer)
-        .map(|data| data.len().min(i32::MAX as usize) as i32)
-        .unwrap_or(0)
+    with_table(&BUFFERS, "buffer table", |table| {
+        table
+            .get(&buffer)
+            .map(|data| data.len().min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
 }
 
 #[no_mangle]
@@ -539,98 +555,88 @@ pub extern "C" fn capable_rt_buffer_push(
     value: u8,
     out_err: *mut i32,
 ) -> u8 {
-    let mut table = BUFFERS.lock().expect("buffer table");
-    let Some(data) = table.get_mut(&buffer) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+    with_table(&BUFFERS, "buffer table", |table| {
+        let Some(data) = table.get_mut(&buffer) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
-        }
-        return 1;
-    };
-    if data.try_reserve(1).is_err() {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+            return 1;
+        };
+        if data.try_reserve(1).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
+            return 1;
         }
-        return 1;
-    }
-    data.push(value);
-    0
+        data.push(value);
+        0
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_buffer_free(_alloc: Handle, buffer: Handle) {
-    let mut table = BUFFERS.lock().expect("buffer table");
-    table.remove(&buffer);
+    with_table(&BUFFERS, "buffer table", |table| {
+        table.remove(&buffer);
+    });
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_buffer_as_slice(buffer: Handle) -> Handle {
-    let table = BUFFERS.lock().expect("buffer table");
-    let Some(data) = table.get(&buffer) else {
+    let Some((ptr, len)) = with_table(&BUFFERS, "buffer table", |table| {
+        let Some(data) = table.get(&buffer) else {
+            return None;
+        };
+        let ptr = if data.is_empty() { 0 } else { data.as_ptr() as usize };
+        Some((ptr, data.len()))
+    }) else {
         return 0;
     };
     let handle = new_handle();
-    let ptr = if data.is_empty() {
-        0
-    } else {
-        data.as_ptr() as usize
-    };
-    let len = data.len();
-    drop(table);
-    let mut slices = SLICES.lock().expect("slice table");
-    slices.insert(
-        handle,
-        SliceState {
-            ptr,
-            len,
-        },
-    );
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(handle, SliceState { ptr, len });
+    });
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_buffer_as_mut_slice(buffer: Handle) -> Handle {
-    let mut table = BUFFERS.lock().expect("buffer table");
-    let Some(data) = table.get_mut(&buffer) else {
+    let Some((ptr, len)) = with_table(&BUFFERS, "buffer table", |table| {
+        let Some(data) = table.get_mut(&buffer) else {
+            return None;
+        };
+        let ptr = if data.is_empty() { 0 } else { data.as_mut_ptr() as usize };
+        Some((ptr, data.len()))
+    }) else {
         return 0;
     };
     let handle = new_handle();
-    let ptr = if data.is_empty() {
-        0
-    } else {
-        data.as_mut_ptr() as usize
-    };
-    let len = data.len();
-    drop(table);
-    let mut slices = SLICES.lock().expect("slice table");
-    slices.insert(
-        handle,
-        SliceState {
-            ptr,
-            len,
-        },
-    );
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(handle, SliceState { ptr, len });
+    });
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_u8_new(_alloc: Handle) -> Handle {
     let handle = new_handle();
-    let mut table = VECS_U8.lock().expect("vec u8 table");
-    table.insert(handle, Vec::new());
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        table.insert(handle, Vec::new());
+    });
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_u8_len(vec: Handle) -> i32 {
-    let table = VECS_U8.lock().expect("vec u8 table");
-    table
-        .get(&vec)
-        .map(|data| data.len().min(i32::MAX as usize) as i32)
-        .unwrap_or(0)
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.len().min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
 }
 
 #[no_mangle]
@@ -651,29 +657,30 @@ pub extern "C" fn capable_rt_vec_u8_get(
             return 1;
         }
     };
-    let table = VECS_U8.lock().expect("vec u8 table");
-    let Some(data) = table.get(&vec) else {
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(data) = table.get(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        };
+        let Some(value) = data.get(idx) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        };
         unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
+            if !out_ok.is_null() {
+                *out_ok = *value;
             }
         }
-        return 1;
-    };
-    let Some(value) = data.get(idx) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
-            }
-        }
-        return 1;
-    };
-    unsafe {
-        if !out_ok.is_null() {
-            *out_ok = *value;
-        }
-    }
-    0
+        0
+    })
 }
 
 #[no_mangle]
@@ -694,25 +701,26 @@ pub extern "C" fn capable_rt_vec_u8_set(
             return 1;
         }
     };
-    let mut table = VECS_U8.lock().expect("vec u8 table");
-    let Some(data) = table.get_mut(&vec) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
             }
-        }
-        return 1;
-    };
-    if idx >= data.len() {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
+            return 1;
+        };
+        if idx >= data.len() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
             }
+            return 1;
         }
-        return 1;
-    }
-    data[idx] = value;
-    0
+        data[idx] = value;
+        0
+    })
 }
 
 #[no_mangle]
@@ -721,25 +729,26 @@ pub extern "C" fn capable_rt_vec_u8_push(
     value: u8,
     out_err: *mut i32,
 ) -> u8 {
-    let mut table = VECS_U8.lock().expect("vec u8 table");
-    let Some(data) = table.get_mut(&vec) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
-        }
-        return 1;
-    };
-    if data.try_reserve(1).is_err() {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+            return 1;
+        };
+        if data.try_reserve(1).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
+            return 1;
         }
-        return 1;
-    }
-    data.push(value);
-    0
+        data.push(value);
+        0
+    })
 }
 
 #[no_mangle]
@@ -748,77 +757,74 @@ pub extern "C" fn capable_rt_vec_u8_pop(
     out_ok: *mut u8,
     out_err: *mut i32,
 ) -> u8 {
-    let mut table = VECS_U8.lock().expect("vec u8 table");
-    let Some(data) = table.get_mut(&vec) else {
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::Empty as i32;
+                }
+            }
+            return 1;
+        };
+        let Some(value) = data.pop() else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::Empty as i32;
+                }
+            }
+            return 1;
+        };
         unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::Empty as i32;
+            if !out_ok.is_null() {
+                *out_ok = value;
             }
         }
-        return 1;
-    };
-    let Some(value) = data.pop() else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::Empty as i32;
-            }
-        }
-        return 1;
-    };
-    unsafe {
-        if !out_ok.is_null() {
-            *out_ok = value;
-        }
-    }
-    0
+        0
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_u8_as_slice(vec: Handle) -> Handle {
-    let table = VECS_U8.lock().expect("vec u8 table");
-    let Some(data) = table.get(&vec) else {
+    let Some((ptr, len)) = with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(data) = table.get(&vec) else {
+            return None;
+        };
+        let ptr = if data.is_empty() { 0 } else { data.as_ptr() as usize };
+        Some((ptr, data.len()))
+    }) else {
         return 0;
     };
     let handle = new_handle();
-    let ptr = if data.is_empty() {
-        0
-    } else {
-        data.as_ptr() as usize
-    };
-    let len = data.len();
-    drop(table);
-    let mut slices = SLICES.lock().expect("slice table");
-    slices.insert(
-        handle,
-        SliceState {
-            ptr,
-            len,
-        },
-    );
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(handle, SliceState { ptr, len });
+    });
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_u8_free(_alloc: Handle, vec: Handle) {
-    let mut table = VECS_U8.lock().expect("vec u8 table");
-    table.remove(&vec);
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        table.remove(&vec);
+    });
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_i32_new(_alloc: Handle) -> Handle {
     let handle = new_handle();
-    let mut table = VECS_I32.lock().expect("vec i32 table");
-    table.insert(handle, Vec::new());
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        table.insert(handle, Vec::new());
+    });
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_i32_len(vec: Handle) -> i32 {
-    let table = VECS_I32.lock().expect("vec i32 table");
-    table
-        .get(&vec)
-        .map(|data| data.len().min(i32::MAX as usize) as i32)
-        .unwrap_or(0)
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.len().min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
 }
 
 #[no_mangle]
@@ -839,29 +845,30 @@ pub extern "C" fn capable_rt_vec_i32_get(
             return 1;
         }
     };
-    let table = VECS_I32.lock().expect("vec i32 table");
-    let Some(data) = table.get(&vec) else {
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        let Some(data) = table.get(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        };
+        let Some(value) = data.get(idx) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        };
         unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
+            if !out_ok.is_null() {
+                *out_ok = *value;
             }
         }
-        return 1;
-    };
-    let Some(value) = data.get(idx) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
-            }
-        }
-        return 1;
-    };
-    unsafe {
-        if !out_ok.is_null() {
-            *out_ok = *value;
-        }
-    }
-    0
+        0
+    })
 }
 
 #[no_mangle]
@@ -882,25 +889,26 @@ pub extern "C" fn capable_rt_vec_i32_set(
             return 1;
         }
     };
-    let mut table = VECS_I32.lock().expect("vec i32 table");
-    let Some(data) = table.get_mut(&vec) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
             }
-        }
-        return 1;
-    };
-    if idx >= data.len() {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::OutOfRange as i32;
+            return 1;
+        };
+        if idx >= data.len() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
             }
+            return 1;
         }
-        return 1;
-    }
-    data[idx] = value;
-    0
+        data[idx] = value;
+        0
+    })
 }
 
 #[no_mangle]
@@ -909,25 +917,26 @@ pub extern "C" fn capable_rt_vec_i32_push(
     value: i32,
     out_err: *mut i32,
 ) -> u8 {
-    let mut table = VECS_I32.lock().expect("vec i32 table");
-    let Some(data) = table.get_mut(&vec) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
-        }
-        return 1;
-    };
-    if data.try_reserve(1).is_err() {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+            return 1;
+        };
+        if data.try_reserve(1).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
+            return 1;
         }
-        return 1;
-    }
-    data.push(value);
-    0
+        data.push(value);
+        0
+    })
 }
 
 #[no_mangle]
@@ -936,52 +945,56 @@ pub extern "C" fn capable_rt_vec_i32_pop(
     out_ok: *mut i32,
     out_err: *mut i32,
 ) -> u8 {
-    let mut table = VECS_I32.lock().expect("vec i32 table");
-    let Some(data) = table.get_mut(&vec) else {
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::Empty as i32;
+                }
+            }
+            return 1;
+        };
+        let Some(value) = data.pop() else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::Empty as i32;
+                }
+            }
+            return 1;
+        };
         unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::Empty as i32;
+            if !out_ok.is_null() {
+                *out_ok = value;
             }
         }
-        return 1;
-    };
-    let Some(value) = data.pop() else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = VecErr::Empty as i32;
-            }
-        }
-        return 1;
-    };
-    unsafe {
-        if !out_ok.is_null() {
-            *out_ok = value;
-        }
-    }
-    0
+        0
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_i32_free(_alloc: Handle, vec: Handle) {
-    let mut table = VECS_I32.lock().expect("vec i32 table");
-    table.remove(&vec);
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        table.remove(&vec);
+    });
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_string_new(_alloc: Handle) -> Handle {
     let handle = new_handle();
-    let mut table = VECS_STRING.lock().expect("vec string table");
-    table.insert(handle, Vec::new());
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.insert(handle, Vec::new());
+    });
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_string_len(vec: Handle) -> i32 {
-    let table = VECS_STRING.lock().expect("vec string table");
-    table
-        .get(&vec)
-        .map(|data| data.len().min(i32::MAX as usize) as i32)
-        .unwrap_or(0)
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.len().min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
 }
 
 #[no_mangle]
@@ -998,14 +1011,15 @@ pub extern "C" fn capable_rt_vec_string_get(
             return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
         }
     };
-    let table = VECS_STRING.lock().expect("vec string table");
-    let Some(data) = table.get(&vec) else {
-        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
-    };
-    let Some(value) = data.get(idx) else {
-        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
-    };
-    write_string_result(out_ptr, out_len, out_err, Ok(value.clone()))
+    with_table(&VECS_STRING, "vec string table", |table| {
+        let Some(data) = table.get(&vec) else {
+            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+        };
+        let Some(value) = data.get(idx) else {
+            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+        };
+        write_string_result(out_ptr, out_len, out_err, Ok(value.clone()))
+    })
 }
 
 #[no_mangle]
@@ -1024,25 +1038,26 @@ pub extern "C" fn capable_rt_vec_string_push(
         }
         return 1;
     };
-    let mut table = VECS_STRING.lock().expect("vec string table");
-    let Some(data) = table.get_mut(&vec) else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+    with_table(&VECS_STRING, "vec string table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
-        }
-        return 1;
-    };
-    if data.try_reserve(1).is_err() {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
+            return 1;
+        };
+        if data.try_reserve(1).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
             }
+            return 1;
         }
-        return 1;
-    }
-    data.push(value);
-    0
+        data.push(value);
+        0
+    })
 }
 
 #[no_mangle]
@@ -1052,20 +1067,22 @@ pub extern "C" fn capable_rt_vec_string_pop(
     out_len: *mut u64,
     out_err: *mut i32,
 ) -> u8 {
-    let mut table = VECS_STRING.lock().expect("vec string table");
-    let Some(data) = table.get_mut(&vec) else {
-        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
-    };
-    let Some(value) = data.pop() else {
-        return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
-    };
-    write_string_result(out_ptr, out_len, out_err, Ok(value))
+    with_table(&VECS_STRING, "vec string table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
+        };
+        let Some(value) = data.pop() else {
+            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
+        };
+        write_string_result(out_ptr, out_len, out_err, Ok(value))
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_string_free(_alloc: Handle, vec: Handle) {
-    let mut table = VECS_STRING.lock().expect("vec string table");
-    table.remove(&vec);
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.remove(&vec);
+    });
 }
 
 #[no_mangle]
@@ -1079,8 +1096,9 @@ pub extern "C" fn capable_rt_string_split_whitespace(
         vec.extend(value.split_whitespace().map(|s| s.to_string()));
     }
     let handle = new_handle();
-    let mut table = VECS_STRING.lock().expect("vec string table");
-    table.insert(handle, vec);
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.insert(handle, vec);
+    });
     handle
 }
 
@@ -1106,8 +1124,9 @@ pub extern "C" fn capable_rt_string_split(
         vec.push(part.to_string());
     }
     let handle = new_handle();
-    let mut table = VECS_STRING.lock().expect("vec string table");
-    table.insert(handle, vec);
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.insert(handle, vec);
+    });
     handle
 }
 
@@ -1122,8 +1141,9 @@ pub extern "C" fn capable_rt_string_split_lines(ptr: *const u8, len: usize) -> H
         }
     }
     let handle = new_handle();
-    let mut table = VECS_STRING.lock().expect("vec string table");
-    table.insert(handle, vec);
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.insert(handle, vec);
+    });
     handle
 }
 
@@ -1225,14 +1245,15 @@ pub extern "C" fn capable_rt_string_byte_at(
 #[no_mangle]
 pub extern "C" fn capable_rt_string_as_slice(ptr: *const u8, len: usize) -> Handle {
     let handle = new_handle();
-    let mut table = SLICES.lock().expect("slice table");
-    table.insert(
-        handle,
-        SliceState {
-            ptr: ptr as usize,
-            len,
-        },
-    );
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(
+            handle,
+            SliceState {
+                ptr: ptr as usize,
+                len,
+            },
+        );
+    });
     handle
 }
 
