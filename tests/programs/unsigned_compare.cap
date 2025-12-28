@@ -1,0 +1,12 @@
+module unsigned_compare
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let max = 255u8
+  let zero = 0u8
+  c.assert(max > zero)
+  c.assert(zero < max)
+  c.println("unsigned compare ok")
+  return 0
+}

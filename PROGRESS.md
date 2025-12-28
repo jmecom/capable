@@ -44,3 +44,4 @@ This file summarizes major milestones added recently.
 - Match exhaustiveness enforced with missing-variant diagnostics.
 - Exhaustiveness errors now point at the `match` keyword span.
 - Variable shadowing now rejected by the typechecker.
+- Unsigned comparisons now use unsigned ordering.

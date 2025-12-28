@@ -792,19 +792,35 @@ fn emit_hir_expr(
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Lt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedLessThan, a, b);
+                    let cmp = builder.ins().icmp(cmp_cc(&binary.left, IntCC::SignedLessThan, IntCC::UnsignedLessThan), a, b);
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Lte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedLessThanOrEqual, a, b);
+                    let cmp = builder.ins().icmp(
+                        cmp_cc(&binary.left, IntCC::SignedLessThanOrEqual, IntCC::UnsignedLessThanOrEqual),
+                        a,
+                        b,
+                    );
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Gt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, a, b);
+                    let cmp = builder.ins().icmp(
+                        cmp_cc(&binary.left, IntCC::SignedGreaterThan, IntCC::UnsignedGreaterThan),
+                        a,
+                        b,
+                    );
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Gte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, a, b);
+                    let cmp = builder.ins().icmp(
+                        cmp_cc(
+                            &binary.left,
+                            IntCC::SignedGreaterThanOrEqual,
+                            IntCC::UnsignedGreaterThanOrEqual,
+                        ),
+                        a,
+                        b,
+                    );
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 _ => Err(CodegenError::Unsupported("binary op".to_string())),
@@ -973,6 +989,26 @@ fn is_unsigned_int(ty: &crate::hir::HirType) -> bool {
         crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::U32)
             | crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::U8)
     )
+}
+
+fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
+    let ty = match expr {
+        crate::hir::HirExpr::Literal(lit) => &lit.ty,
+        crate::hir::HirExpr::Local(local) => &local.ty,
+        crate::hir::HirExpr::EnumVariant(variant) => &variant.enum_ty,
+        crate::hir::HirExpr::Call(call) => &call.ret_ty,
+        crate::hir::HirExpr::FieldAccess(field) => &field.field_ty,
+        crate::hir::HirExpr::StructLiteral(lit) => &lit.struct_ty,
+        crate::hir::HirExpr::Unary(unary) => &unary.ty,
+        crate::hir::HirExpr::Binary(binary) => &binary.ty,
+        crate::hir::HirExpr::Match(m) => &m.result_ty,
+        crate::hir::HirExpr::Try(t) => &t.ok_ty,
+    };
+    if is_unsigned_int(ty) {
+        unsigned
+    } else {
+        signed
+    }
 }
 
 /// Emit a struct literal into a stack slot and return its address value.
