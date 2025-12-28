@@ -1,0 +1,7 @@
+module app
+
+fn main() -> unit {
+  let a: i32 = 1
+  let b = 2u8
+  let _c = a + b
+}

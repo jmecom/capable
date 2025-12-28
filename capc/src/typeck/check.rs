@@ -1348,6 +1348,11 @@ pub(super) fn check_expr(
                         || left == Ty::Builtin(BuiltinType::I64))
                     {
                         Ok(left)
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
                     } else {
                         Err(TypeError::new(
                             "binary arithmetic expects matching integer types".to_string(),
@@ -1358,6 +1363,11 @@ pub(super) fn check_expr(
                 BinaryOp::Eq | BinaryOp::Neq => {
                     if left == right {
                         Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
                     } else {
                         Err(TypeError::new(
                             "comparison expects matching operand types".to_string(),
@@ -1368,6 +1378,11 @@ pub(super) fn check_expr(
                 BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
                     if left == right && is_orderable_type(&left) {
                         Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
                     } else {
                         Err(TypeError::new(
                             "ordering expects matching integer types".to_string(),
@@ -1986,6 +2001,16 @@ fn bind_pattern(
 }
 
 fn is_orderable_type(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Builtin(BuiltinType::I32)
+            | Ty::Builtin(BuiltinType::I64)
+            | Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U8)
+    )
+}
+
+fn is_numeric_type(ty: &Ty) -> bool {
     matches!(
         ty,
         Ty::Builtin(BuiltinType::I32)

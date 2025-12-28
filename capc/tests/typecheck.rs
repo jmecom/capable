@@ -267,6 +267,28 @@ fn typecheck_try_question_err_mismatch_fails() {
 }
 
 #[test]
+fn typecheck_numeric_add_mismatch_fails() {
+    let source = load_program("should_fail_numeric_add_mismatch.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("implicit numeric conversions are not allowed"));
+}
+
+#[test]
+fn typecheck_numeric_cmp_mismatch_fails() {
+    let source = load_program("should_fail_numeric_cmp_mismatch.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("implicit numeric conversions are not allowed"));
+}
+
+#[test]
 fn typecheck_dup_affine_field_fails() {
     let source = load_program("should_fail_dup_affine_field.cap");
     let module = parse_module(&source).expect("parse module");
