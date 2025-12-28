@@ -5,6 +5,17 @@ use thiserror::Error;
 
 use crate::ast::Span;
 
+/// Prefix an error message with context for consistent diagnostics.
+pub fn format_with_context(context: impl AsRef<str>, message: impl AsRef<str>) -> String {
+    let prefix = context.as_ref();
+    let message = message.as_ref();
+    if prefix.is_empty() {
+        message.to_string()
+    } else {
+        format!("{prefix}: {message}")
+    }
+}
+
 #[derive(Debug, Error, Diagnostic)]
 #[error("{message}")]
 #[allow(unused)]
@@ -25,10 +36,7 @@ impl ParseError {
     }
 
     pub fn with_context(mut self, context: impl AsRef<str>) -> Self {
-        let prefix = context.as_ref();
-        if !prefix.is_empty() {
-            self.message = format!("{prefix}: {}", self.message);
-        }
+        self.message = format_with_context(context, &self.message);
         self
     }
 
@@ -61,10 +69,7 @@ impl TypeError {
     }
 
     pub fn with_context(mut self, context: impl AsRef<str>) -> Self {
-        let prefix = context.as_ref();
-        if !prefix.is_empty() {
-            self.message = format!("{prefix}: {}", self.message);
-        }
+        self.message = format_with_context(context, &self.message);
         self
     }
 

@@ -12,6 +12,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::abi::AbiType;
+use crate::error::format_with_context;
 use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, Signature, Type};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{Configurable, Flags};
@@ -69,6 +70,21 @@ impl CodegenError {
         match self {
             CodegenError::Spanned { .. } => self,
             other => CodegenError::spanned(other.to_string(), span),
+        }
+    }
+
+    pub fn with_context(self, context: impl AsRef<str>) -> Self {
+        match self {
+            CodegenError::Spanned {
+                message,
+                span,
+                span_raw,
+            } => CodegenError::Spanned {
+                message: format_with_context(context, message),
+                span,
+                span_raw,
+            },
+            other => CodegenError::Codegen(format_with_context(context, other.to_string())),
         }
     }
 }
