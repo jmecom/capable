@@ -52,6 +52,14 @@ impl TypeError {
         }
     }
 
+    pub fn with_context(mut self, context: impl AsRef<str>) -> Self {
+        let prefix = context.as_ref();
+        if !prefix.is_empty() {
+            self.message = format!("{prefix}: {}", self.message);
+        }
+        self
+    }
+
     pub fn span(&self) -> Span {
         self.span_raw
     }

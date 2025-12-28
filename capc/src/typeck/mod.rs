@@ -738,7 +738,8 @@ pub fn type_check_program(
                         &stdlib_index,
                         &module_name,
                         Some(&mut table),
-                    )?;
+                    )
+                    .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
                     type_tables.insert(function_key(&module_name, &func.name.item), table);
                 }
                 Item::Impl(impl_block) => {
@@ -760,7 +761,8 @@ pub fn type_check_program(
                             &stdlib_index,
                             &module_name,
                             Some(&mut table),
-                        )?;
+                        )
+                        .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
                         type_tables.insert(function_key(&module_name, &method.name.item), table);
                     }
                 }
@@ -789,6 +791,7 @@ pub fn type_check_program(
                 Some(&type_tables),
                 true,
             )
+            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
@@ -806,6 +809,7 @@ pub fn type_check_program(
                 Some(&type_tables),
                 false,
             )
+            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
@@ -818,7 +822,8 @@ pub fn type_check_program(
         &stdlib_index,
         Some(&type_tables),
         false,
-    )?;
+    )
+    .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
 
     Ok(crate::hir::HirProgram {
         entry: hir_entry,
