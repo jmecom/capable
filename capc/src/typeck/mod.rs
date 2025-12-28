@@ -711,14 +711,20 @@ pub fn type_check_program(
         .chain(std::iter::once(module))
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();
-    check::validate_package_safety(module)?;
+    check::validate_package_safety(module)
+        .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
     for user_module in user_modules {
-        check::validate_package_safety(user_module)?;
+        check::validate_package_safety(user_module)
+            .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
     }
-    let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)?;
-    let enum_map = collect::collect_enums(&modules, &module_name, &stdlib_index)?;
-    collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)?;
-    let functions = collect::collect_functions(&modules, &module_name, &stdlib_index, &struct_map)?;
+    let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)
+        .map_err(|err| err.with_context("while collecting structs"))?;
+    let enum_map = collect::collect_enums(&modules, &module_name, &stdlib_index)
+        .map_err(|err| err.with_context("while collecting enums"))?;
+    collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)
+        .map_err(|err| err.with_context("while validating copy structs"))?;
+    let functions = collect::collect_functions(&modules, &module_name, &stdlib_index, &struct_map)
+        .map_err(|err| err.with_context("while collecting functions"))?;
 
     let mut type_tables: FunctionTypeTables = HashMap::new();
 
