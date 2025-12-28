@@ -26,7 +26,7 @@ use super::sig_to_clif;
 pub(super) fn emit_hir_stmt(
     builder: &mut FunctionBuilder,
     stmt: &crate::hir::HirStmt,
-    locals: &mut HashMap<String, LocalValue>,
+    locals: &mut HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -49,7 +49,7 @@ pub(super) fn emit_hir_stmt(
 fn emit_hir_stmt_inner(
     builder: &mut FunctionBuilder,
     stmt: &crate::hir::HirStmt,
-    locals: &mut HashMap<String, LocalValue>,
+    locals: &mut HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -62,10 +62,10 @@ fn emit_hir_stmt_inner(
         HirStmt::Let(let_stmt) => {
             if matches!(let_stmt.ty.ty, crate::typeck::Ty::Ref(_)) {
                 if let crate::hir::HirExpr::Local(local) = &let_stmt.expr {
-                    let Some(value) = locals.get(&local.name).cloned() else {
+                    let Some(value) = locals.get(&local.local_id).cloned() else {
                         return Err(CodegenError::UnknownVariable(local.name.clone()));
                     };
-                    locals.insert(let_stmt.name.clone(), value);
+                    locals.insert(let_stmt.local_id, value);
                     return Ok(Flow::Continues);
                 }
             }
@@ -104,12 +104,12 @@ fn emit_hir_stmt_inner(
                     module,
                 )?;
                 locals.insert(
-                    let_stmt.name.clone(),
+                    let_stmt.local_id,
                     LocalValue::StructSlot(slot, let_stmt.ty.clone(), align),
                 );
             } else {
                 let local = store_local(builder, value);
-                locals.insert(let_stmt.name.clone(), local);
+                locals.insert(let_stmt.local_id, local);
             }
         }
         HirStmt::Assign(assign) => {
@@ -123,7 +123,7 @@ fn emit_hir_stmt_inner(
                 module,
                 data_counter,
             )?;
-            let Some(local) = locals.get_mut(&assign.name) else {
+            let Some(local) = locals.get_mut(&assign.local_id) else {
                 return Err(CodegenError::UnknownVariable(assign.name.clone()));
             };
             match local {
@@ -346,7 +346,7 @@ fn emit_hir_stmt_inner(
 fn emit_hir_expr(
     builder: &mut FunctionBuilder,
     expr: &crate::hir::HirExpr,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -369,7 +369,7 @@ fn emit_hir_expr(
 fn emit_hir_expr_inner(
     builder: &mut FunctionBuilder,
     expr: &crate::hir::HirExpr,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -393,8 +393,7 @@ fn emit_hir_expr_inner(
             Literal::Unit => Ok(ValueRepr::Unit),
         },
         HirExpr::Local(local) => {
-            // Look up the local by name (we still use String keys in the HashMap)
-            if let Some(value) = locals.get(&local.name) {
+            if let Some(value) = locals.get(&local.local_id) {
                 return Ok(load_local(builder, value, module.isa().pointer_type()));
             }
             Err(CodegenError::UnknownVariable(local.name.clone()))
@@ -1053,7 +1052,7 @@ fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
 fn emit_hir_struct_literal(
     builder: &mut FunctionBuilder,
     literal: &crate::hir::HirStructLiteral,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1111,7 +1110,7 @@ fn emit_hir_struct_literal(
 fn emit_hir_field_access(
     builder: &mut FunctionBuilder,
     field_access: &crate::hir::HirFieldAccess,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1523,7 +1522,7 @@ fn emit_hir_short_circuit_expr(
     lhs_val: ir::Value,
     rhs_expr: &crate::hir::HirExpr,
     is_and: bool,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1574,7 +1573,7 @@ fn emit_hir_short_circuit_expr(
 fn emit_hir_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1689,7 +1688,7 @@ fn emit_hir_match_stmt(
 fn emit_hir_match_expr(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1964,20 +1963,20 @@ fn hir_bind_match_pattern_value(
     pattern: &crate::hir::HirPattern,
     value: &ValueRepr,
     result: Option<&(ValueRepr, ValueRepr)>,
-    locals: &mut HashMap<String, LocalValue>,
+    locals: &mut HashMap<crate::hir::LocalId, LocalValue>,
 ) -> Result<(), CodegenError> {
     use crate::hir::HirPattern;
 
     match pattern {
         HirPattern::Wildcard => Ok(()),
         HirPattern::Literal(_) => Ok(()),
-        HirPattern::Binding(_id, name) => {
+        HirPattern::Binding(local_id, _name) => {
             // Bind the entire value to the variable
-            locals.insert(name.clone(), store_local(builder, value.clone()));
+            locals.insert(*local_id, store_local(builder, value.clone()));
             Ok(())
         }
         HirPattern::Variant { variant_name, binding, .. } => {
-            if let Some((_local_id, name)) = binding {
+            if let Some((local_id, _name)) = binding {
                 // Bind the inner value based on variant
                 let Some((ok_val, err_val)) = result else {
                     return Err(CodegenError::Unsupported(
@@ -1985,9 +1984,9 @@ fn hir_bind_match_pattern_value(
                     ));
                 };
                 if variant_name == "Ok" {
-                    locals.insert(name.clone(), store_local(builder, ok_val.clone()));
+                    locals.insert(*local_id, store_local(builder, ok_val.clone()));
                 } else if variant_name == "Err" {
-                    locals.insert(name.clone(), store_local(builder, err_val.clone()));
+                    locals.insert(*local_id, store_local(builder, err_val.clone()));
                 }
             }
             Ok(())

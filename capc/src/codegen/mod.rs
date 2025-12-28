@@ -307,14 +307,14 @@ pub fn build_object(
                 continue;
             }
 
-            let mut locals: HashMap<String, LocalValue> = HashMap::new();
+            let mut locals: HashMap<crate::hir::LocalId, LocalValue> = HashMap::new();
             let params = builder.block_params(block).to_vec();
             let mut param_index = 0;
             for param in &func.params {
                 let value =
                     value_from_params(&mut builder, &param.ty.abi, &params, &mut param_index)?;
                 let local = store_local(&mut builder, value);
-                locals.insert(param.name.clone(), local);
+                locals.insert(param.local_id, local);
             }
 
             let mut terminated = false;
