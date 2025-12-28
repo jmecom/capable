@@ -152,7 +152,6 @@ pub(super) fn lower_module(
                         let lowered = lower_type(&func.ret, use_map, stdlib)?;
                         hir_type_for(lowered, &ctx, func.ret.span())?
                     },
-                    is_pub: func.is_pub,
                 });
             }
             _ => {}
@@ -176,10 +175,7 @@ pub(super) fn lower_module(
             hir_structs.push(HirStruct {
                 name: decl.name.item.clone(),
                 fields: fields?,
-                is_pub: decl.is_pub,
                 is_opaque: decl.is_opaque,
-                is_linear: decl.is_linear,
-                is_copy: decl.is_copy,
             });
         }
     }
@@ -208,7 +204,6 @@ pub(super) fn lower_module(
             hir_enums.push(HirEnum {
                 name: decl.name.item.clone(),
                 variants: variants?,
-                is_pub: decl.is_pub,
             });
         }
     }
@@ -261,7 +256,6 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         params,
         ret_ty: hir_ret_ty,
         body,
-        is_pub: func.is_pub,
     })
 }
 

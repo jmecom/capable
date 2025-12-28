@@ -49,7 +49,6 @@ pub struct HirFunction {
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
     pub body: HirBlock,
-    pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +56,6 @@ pub struct HirExternFunction {
     pub name: String,
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
-    pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -71,10 +69,7 @@ pub struct HirParam {
 pub struct HirStruct {
     pub name: String,
     pub fields: Vec<HirField>,
-    pub is_pub: bool,
     pub is_opaque: bool,
-    pub is_linear: bool,
-    pub is_copy: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +83,6 @@ pub struct HirField {
 pub struct HirEnum {
     pub name: String,
     pub variants: Vec<HirEnumVariant>,
-    pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
