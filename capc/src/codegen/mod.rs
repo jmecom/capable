@@ -5,6 +5,8 @@
 //! - `emit`: HIR -> Cranelift emission and ABI lowering helpers.
 //! - `layout`: type/struct layout computation and enum indexing.
 
+#![allow(unused_assignments)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -17,6 +19,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{Linkage, Module as ModuleTrait};
 use cranelift_native;
 use cranelift_object::{ObjectBuilder, ObjectModule};
+use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 mod emit;
@@ -25,8 +28,19 @@ mod layout;
 use emit::{emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local, value_from_params};
 use layout::{build_enum_index, build_struct_layout_index};
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
+#[allow(unused_assignments)]
 pub enum CodegenError {
+    #[error("{message}")]
+    #[diagnostic(code(codegen::spanned))]
+    Spanned {
+        #[allow(dead_code)]
+        message: String,
+        #[label]
+        span: SourceSpan,
+        #[allow(dead_code)]
+        span_raw: crate::ast::Span,
+    },
     #[error("unsupported {0}")]
     Unsupported(String),
     #[error("unknown function `{0}`")]
@@ -37,6 +51,24 @@ pub enum CodegenError {
     Io(String),
     #[error("codegen error: {0}")]
     Codegen(String),
+}
+
+impl CodegenError {
+    pub fn spanned(message: impl Into<String>, span: crate::ast::Span) -> Self {
+        let source_span: SourceSpan = (span.start, span.end.saturating_sub(span.start)).into();
+        CodegenError::Spanned {
+            message: message.into(),
+            span: source_span,
+            span_raw: span,
+        }
+    }
+
+    pub fn with_span(self, span: crate::ast::Span) -> Self {
+        match self {
+            CodegenError::Spanned { .. } => self,
+            other => CodegenError::spanned(other.to_string(), span),
+        }
+    }
 }
 
 /// Tracks control flow state during code emission.

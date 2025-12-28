@@ -162,8 +162,10 @@ fn build_binary(
         miette!("failed to create build dir {}: {err}", build_dir.display())
     })?;
     let obj_path = build_dir.join("program.o");
-    build_object(&program, &obj_path)
-        .map_err(|err| miette!("codegen failed: {err}"))?;
+    build_object(&program, &obj_path).map_err(|err| {
+        let named = NamedSource::new(path.display().to_string(), source.clone());
+        miette::Report::new(err).with_source_code(named)
+    })?;
 
     let status = std::process::Command::new("cargo")
         .arg("build")

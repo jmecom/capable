@@ -33,6 +33,29 @@ pub(super) fn emit_hir_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<Flow, CodegenError> {
+    emit_hir_stmt_inner(
+        builder,
+        stmt,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )
+    .map_err(|err| err.with_span(stmt.span()))
+}
+
+fn emit_hir_stmt_inner(
+    builder: &mut FunctionBuilder,
+    stmt: &crate::hir::HirStmt,
+    locals: &mut HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<Flow, CodegenError> {
     use crate::hir::HirStmt;
 
     match stmt {
@@ -321,6 +344,29 @@ pub(super) fn emit_hir_stmt(
 
 /// Emit a single HIR expression and return its lowered value representation.
 fn emit_hir_expr(
+    builder: &mut FunctionBuilder,
+    expr: &crate::hir::HirExpr,
+    locals: &HashMap<String, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    emit_hir_expr_inner(
+        builder,
+        expr,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )
+    .map_err(|err| err.with_span(expr.span()))
+}
+
+fn emit_hir_expr_inner(
     builder: &mut FunctionBuilder,
     expr: &crate::hir::HirExpr,
     locals: &HashMap<String, LocalValue>,

@@ -120,6 +120,19 @@ pub enum HirStmt {
     Expr(HirExprStmt),
 }
 
+impl HirStmt {
+    pub fn span(&self) -> Span {
+        match self {
+            HirStmt::Let(s) => s.span,
+            HirStmt::Assign(s) => s.span,
+            HirStmt::Return(s) => s.span,
+            HirStmt::If(s) => s.span,
+            HirStmt::While(s) => s.span,
+            HirStmt::Expr(s) => s.span,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HirLetStmt {
     pub local_id: LocalId,
