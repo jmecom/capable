@@ -50,7 +50,6 @@ pub struct HirFunction {
     pub ret_ty: HirType,
     pub body: HirBlock,
     pub is_pub: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -59,7 +58,6 @@ pub struct HirExternFunction {
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
     pub is_pub: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +75,6 @@ pub struct HirStruct {
     pub is_opaque: bool,
     pub is_linear: bool,
     pub is_copy: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +89,6 @@ pub struct HirEnum {
     pub name: String,
     pub variants: Vec<HirEnumVariant>,
     pub is_pub: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

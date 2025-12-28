@@ -153,7 +153,6 @@ pub(super) fn lower_module(
                         hir_type_for(lowered, &ctx, func.ret.span())?
                     },
                     is_pub: func.is_pub,
-                    span: func.span,
                 });
             }
             _ => {}
@@ -181,7 +180,6 @@ pub(super) fn lower_module(
                 is_opaque: decl.is_opaque,
                 is_linear: decl.is_linear,
                 is_copy: decl.is_copy,
-                span: decl.span,
             });
         }
     }
@@ -211,7 +209,6 @@ pub(super) fn lower_module(
                 name: decl.name.item.clone(),
                 variants: variants?,
                 is_pub: decl.is_pub,
-                span: decl.span,
             });
         }
     }
@@ -265,7 +262,6 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         ret_ty: hir_ret_ty,
         body,
         is_pub: func.is_pub,
-        span: func.span,
     })
 }
 
