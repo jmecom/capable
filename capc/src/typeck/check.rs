@@ -6,8 +6,34 @@ use crate::error::TypeError;
 use super::{
     is_affine_type, lower_type, resolve_enum_variant, resolve_method_target, resolve_path,
     resolve_type_name, type_contains_ref, type_kind, BuiltinType, EnumInfo, FunctionSig, MoveState,
-    Scopes, SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, UseMap, UseMode,
+    Scopes, SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable, UseMap, UseMode,
 };
+
+/// Optional recorder for expression types during checking.
+pub(super) struct TypeRecorder<'a> {
+    table: Option<&'a mut TypeTable>,
+}
+
+impl<'a> TypeRecorder<'a> {
+    pub(super) fn new(table: Option<&'a mut TypeTable>) -> Self {
+        Self { table }
+    }
+
+    pub(super) fn record(&mut self, expr: &Expr, ty: &Ty) {
+        if let Some(table) = self.table.as_deref_mut() {
+            table.record(expr.span(), ty.clone());
+        }
+    }
+}
+
+fn record_expr_type(
+    recorder: &mut TypeRecorder,
+    expr: &Expr,
+    ty: Ty,
+) -> Result<Ty, TypeError> {
+    recorder.record(expr, &ty);
+    Ok(ty)
+}
 
 /// Safe packages cannot mention externs or raw pointer types anywhere.
 pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
@@ -195,6 +221,7 @@ pub(super) fn check_function(
     enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
+    type_table: Option<&mut TypeTable>,
 ) -> Result<(), TypeError> {
     let mut params_map = HashMap::new();
     for param in &func.params {
@@ -226,6 +253,7 @@ pub(super) fn check_function(
         params_map.insert(param.name.item.clone(), ty);
     }
     let mut scopes = Scopes::from_flat_map(params_map);
+    let mut recorder = TypeRecorder::new(type_table);
 
     let ret_ty = lower_type(&func.ret, use_map, stdlib)?;
     if let Some(span) = type_contains_ref(&func.ret) {
@@ -241,6 +269,7 @@ pub(super) fn check_function(
             &ret_ty,
             functions,
             &mut scopes,
+            &mut recorder,
             use_map,
             struct_map,
             enum_map,
@@ -276,6 +305,7 @@ fn check_stmt(
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -304,6 +334,7 @@ fn check_stmt(
                 functions,
                 scopes,
                 expr_use_mode,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -396,6 +427,7 @@ fn check_stmt(
                 functions,
                 scopes,
                 UseMode::Move,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -420,6 +452,7 @@ fn check_stmt(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -444,6 +477,7 @@ fn check_stmt(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -463,6 +497,7 @@ fn check_stmt(
                 ret_ty,
                 functions,
                 &mut then_scopes,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -476,6 +511,7 @@ fn check_stmt(
                     ret_ty,
                     functions,
                     &mut else_scopes,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -498,6 +534,7 @@ fn check_stmt(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -517,6 +554,7 @@ fn check_stmt(
                 ret_ty,
                 functions,
                 &mut body_scopes,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -538,6 +576,7 @@ fn check_stmt(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -551,6 +590,7 @@ fn check_stmt(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -571,6 +611,7 @@ fn check_block(
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -584,6 +625,7 @@ fn check_block(
             ret_ty,
             functions,
             scopes,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -781,6 +823,7 @@ pub(super) fn check_expr(
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
     use_mode: UseMode,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -788,7 +831,7 @@ pub(super) fn check_expr(
     ret_ty: &Ty,
     module_name: &str,
 ) -> Result<Ty, TypeError> {
-    match expr {
+    let ty = match expr {
         Expr::Literal(lit) => match &lit.value {
             Literal::Int(_) => Ok(Ty::Builtin(BuiltinType::I32)),
             Literal::U8(_) => Ok(Ty::Builtin(BuiltinType::U8)),
@@ -810,11 +853,11 @@ pub(super) fn check_expr(
                     if use_mode == UseMode::Move && is_affine_type(&ty, struct_map, enum_map) {
                         scopes.mark_moved(name, path.segments[0].span)?;
                     }
-                    return Ok(ty);
+                    return record_expr_type(recorder, expr, ty);
                 }
             }
             if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
-                return Ok(ty);
+                return record_expr_type(recorder, expr, ty);
             }
             Err(TypeError::new(
                 format!("unknown value `{path}`"),
@@ -843,6 +886,7 @@ pub(super) fn check_expr(
                         functions,
                         scopes,
                         UseMode::Move,
+                        recorder,
                         use_map,
                         struct_map,
                         enum_map,
@@ -850,7 +894,7 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                     )?;
-                    return Ok(Ty::Builtin(BuiltinType::Unit));
+                    return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
                 }
                 if name == "Ok" || name == "Err" {
                     if call.args.len() != 1 {
@@ -864,6 +908,7 @@ pub(super) fn check_expr(
                         functions,
                         scopes,
                         UseMode::Move,
+                        recorder,
                         use_map,
                         struct_map,
                         enum_map,
@@ -880,17 +925,21 @@ pub(super) fn check_expr(
                                     call.args[0].span(),
                                 ));
                             }
-                            return Ok(ret_ty.clone());
+                            return record_expr_type(recorder, expr, ret_ty.clone());
                         }
                     }
-                    return Ok(Ty::Path(
+                    return record_expr_type(
+                        recorder,
+                        expr,
+                        Ty::Path(
                         "Result".to_string(),
                         if name == "Ok" {
                             vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
                         } else {
                             vec![Ty::Builtin(BuiltinType::Unit), arg_ty]
                         },
-                    ));
+                        ),
+                    );
                 }
             }
 
@@ -934,6 +983,7 @@ pub(super) fn check_expr(
                     functions,
                     scopes,
                     use_mode,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1026,6 +1076,7 @@ pub(super) fn check_expr(
                         functions,
                         scopes,
                         use_mode,
+                        recorder,
                         use_map,
                         struct_map,
                         enum_map,
@@ -1053,7 +1104,7 @@ pub(super) fn check_expr(
                         ));
                     }
                 }
-                return Ok(sig.ret.clone());
+                return record_expr_type(recorder, expr, sig.ret.clone());
             }
 
             let receiver_ty = check_expr(
@@ -1061,6 +1112,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1085,6 +1137,7 @@ pub(super) fn check_expr(
                                 functions,
                                 scopes,
                                 UseMode::Move,
+                                recorder,
                                 use_map,
                                 struct_map,
                                 enum_map,
@@ -1100,7 +1153,7 @@ pub(super) fn check_expr(
                                     method_call.args[0].span(),
                                 ));
                             }
-                            return Ok(ok_ty.clone());
+                            return record_expr_type(recorder, expr, ok_ty.clone());
                         }
                         "unwrap_err_or" => {
                             if method_call.args.len() != 1 {
@@ -1114,6 +1167,7 @@ pub(super) fn check_expr(
                                 functions,
                                 scopes,
                                 UseMode::Move,
+                                recorder,
                                 use_map,
                                 struct_map,
                                 enum_map,
@@ -1129,7 +1183,7 @@ pub(super) fn check_expr(
                                     method_call.args[0].span(),
                                 ));
                             }
-                            return Ok(err_ty.clone());
+                            return record_expr_type(recorder, expr, err_ty.clone());
                         }
                         _ => {}
                     }
@@ -1219,6 +1273,7 @@ pub(super) fn check_expr(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1238,6 +1293,7 @@ pub(super) fn check_expr(
                     functions,
                     scopes,
                     use_mode,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1269,6 +1325,7 @@ pub(super) fn check_expr(
             lit,
             functions,
             scopes,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1282,6 +1339,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1320,6 +1378,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1332,6 +1391,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1409,6 +1469,7 @@ pub(super) fn check_expr(
             functions,
             scopes,
             use_mode,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1422,6 +1483,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Move,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1467,6 +1529,7 @@ pub(super) fn check_expr(
             functions,
             scopes,
             use_mode,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1494,7 +1557,7 @@ pub(super) fn check_expr(
             if !base_is_local {
                 if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
                     if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map, module_name) {
-                        return Ok(ty);
+                        return record_expr_type(recorder, expr, ty);
                     }
                 }
             }
@@ -1504,6 +1567,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Project,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1572,7 +1636,9 @@ pub(super) fn check_expr(
             }
             Ok(field_ty)
         }
-    }
+    }?;
+    recorder.record(expr, &ty);
+    Ok(ty)
 }
 
 /// Check a statement-form match (arms may return, no value required).
@@ -1581,6 +1647,7 @@ fn check_match_stmt(
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
     scrutinee_mode: UseMode,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1593,6 +1660,7 @@ fn check_match_stmt(
         functions,
         scopes,
         scrutinee_mode,
+        recorder,
         use_map,
         struct_map,
         enum_map,
@@ -1610,6 +1678,7 @@ fn check_match_stmt(
             ret_ty,
             functions,
             &mut arm_scope,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1637,6 +1706,7 @@ fn check_match_expr_value(
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
     scrutinee_mode: UseMode,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1649,6 +1719,7 @@ fn check_match_expr_value(
         functions,
         scopes,
         scrutinee_mode,
+        recorder,
         use_map,
         struct_map,
         enum_map,
@@ -1666,6 +1737,7 @@ fn check_match_expr_value(
             &arm.body,
             functions,
             &mut arm_scope,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1703,6 +1775,7 @@ fn check_match_arm_value(
     block: &Block,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1728,6 +1801,7 @@ fn check_match_arm_value(
             ret_ty,
             functions,
             scopes,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1741,6 +1815,7 @@ fn check_match_arm_value(
             functions,
             scopes,
             UseMode::Move,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1876,6 +1951,7 @@ fn check_struct_literal(
     lit: &StructLiteralExpr,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1919,6 +1995,7 @@ fn check_struct_literal(
             functions,
             scopes,
             UseMode::Move,
+            recorder,
             use_map,
             struct_map,
             enum_map,

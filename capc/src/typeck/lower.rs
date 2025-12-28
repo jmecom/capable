@@ -12,8 +12,9 @@ use crate::hir::{
 };
 
 use super::{
-    check, lower_type, resolve_enum_variant, resolve_method_target, resolve_type_name, EnumInfo,
-    FunctionSig, SpanExt, StructInfo, StdlibIndex, Ty, UseMap,
+    check, function_key, lower_type, resolve_enum_variant, resolve_method_target, resolve_type_name,
+    EnumInfo, FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo, Ty, TypeTable,
+    UseMap,
 };
 
 /// Context for HIR lowering (uses the type checker as source of truth).
@@ -24,6 +25,8 @@ struct LoweringCtx<'a> {
     use_map: &'a UseMap,
     stdlib: &'a StdlibIndex,
     module_name: &'a str,
+    type_tables: Option<&'a FunctionTypeTables>,
+    type_table: Option<&'a TypeTable>,
     /// Maps variable names to their LocalId
     local_map: HashMap<String, LocalId>,
     /// Maps variable names to their types (needed for type checking during lowering)
@@ -39,6 +42,7 @@ impl<'a> LoweringCtx<'a> {
         use_map: &'a UseMap,
         stdlib: &'a StdlibIndex,
         module_name: &'a str,
+        type_tables: Option<&'a FunctionTypeTables>,
     ) -> Self {
         Self {
             functions,
@@ -47,6 +51,8 @@ impl<'a> LoweringCtx<'a> {
             use_map,
             stdlib,
             module_name,
+            type_tables,
+            type_table: None,
             local_map: HashMap::new(),
             local_types: HashMap::new(),
             local_counter: 0,
@@ -82,9 +88,18 @@ pub(super) fn lower_module(
     enums: &HashMap<String, EnumInfo>,
     use_map: &UseMap,
     stdlib: &StdlibIndex,
+    type_tables: Option<&FunctionTypeTables>,
 ) -> Result<crate::hir::HirModule, TypeError> {
     let module_name = module.name.to_string();
-    let mut ctx = LoweringCtx::new(functions, structs, enums, use_map, stdlib, &module_name);
+    let mut ctx = LoweringCtx::new(
+        functions,
+        structs,
+        enums,
+        use_map,
+        stdlib,
+        &module_name,
+        type_tables,
+    );
 
     let mut hir_functions = Vec::new();
     let mut hir_extern_functions = Vec::new();
@@ -211,6 +226,9 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     ctx.local_counter = 0;
     ctx.local_map.clear();
     ctx.local_types.clear();
+    ctx.type_table = ctx
+        .type_tables
+        .and_then(|tables| tables.get(&function_key(ctx.module_name, &func.name.item)));
 
     let params: Result<Vec<HirParam>, TypeError> = func
         .params
@@ -361,12 +379,23 @@ fn type_of_ast_expr(
     ctx: &LoweringCtx,
     ret_ty: &Ty,
 ) -> Result<Ty, TypeError> {
+    if let Some(table) = ctx.type_table {
+        if let Some(ty) = table.get(expr.span()) {
+            return Ok(ty.clone());
+        }
+        return Err(TypeError::new(
+            "internal error: missing type information during lowering".to_string(),
+            expr.span(),
+        ));
+    }
     let mut scopes = super::Scopes::from_flat_map(ctx.local_types.clone());
+    let mut recorder = super::check::TypeRecorder::new(None);
     check::check_expr(
         expr,
         ctx.functions,
         &mut scopes,
         super::UseMode::Read,
+        &mut recorder,
         ctx.use_map,
         ctx.structs,
         ctx.enums,
@@ -1075,6 +1104,7 @@ mod tests {
             &use_map,
             &stdlib,
             "foo",
+            None,
         );
         let ty = Ty::Path("Pair".to_string(), Vec::new());
         let abi = abi_type_for(&ty, &ctx, Span::new(0, 0)).expect("abi");
