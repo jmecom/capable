@@ -45,6 +45,30 @@ pub(super) fn function_key(module_name: &str, func_name: &str) -> String {
     format!("{module_name}::{func_name}")
 }
 
+/// Return true if the type is a built-in numeric type.
+pub fn is_numeric_type(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Builtin(BuiltinType::I32)
+            | Ty::Builtin(BuiltinType::I64)
+            | Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U8)
+    )
+}
+
+/// Return true if the type can be ordered with <, <=, >, >=.
+pub fn is_orderable_type(ty: &Ty) -> bool {
+    is_numeric_type(ty)
+}
+
+/// Return true if the type is an unsigned integer.
+pub fn is_unsigned_type(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Builtin(BuiltinType::U32) | Ty::Builtin(BuiltinType::U8)
+    )
+}
+
 /// Collected type information for expressions within a single function.
 #[derive(Debug, Default, Clone)]
 struct TypeTable {

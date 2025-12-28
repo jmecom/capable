@@ -4,9 +4,10 @@ use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    is_affine_type, lower_type, resolve_enum_variant, resolve_method_target, resolve_path,
-    resolve_type_name, type_contains_ref, type_kind, BuiltinType, EnumInfo, FunctionSig, MoveState,
-    Scopes, SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable, UseMap, UseMode,
+    is_affine_type, is_numeric_type, is_orderable_type, lower_type, resolve_enum_variant,
+    resolve_method_target, resolve_path, resolve_type_name, type_contains_ref, type_kind,
+    BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo, Ty,
+    TypeKind, TypeTable, UseMap, UseMode,
 };
 
 /// Optional recorder for expression types during checking.
@@ -2075,26 +2076,6 @@ fn bind_pattern(
         }
         Pattern::Literal(_) | Pattern::Wildcard(_) => Ok(()),
     }
-}
-
-fn is_orderable_type(ty: &Ty) -> bool {
-    matches!(
-        ty,
-        Ty::Builtin(BuiltinType::I32)
-            | Ty::Builtin(BuiltinType::I64)
-            | Ty::Builtin(BuiltinType::U32)
-            | Ty::Builtin(BuiltinType::U8)
-    )
-}
-
-fn is_numeric_type(ty: &Ty) -> bool {
-    matches!(
-        ty,
-        Ty::Builtin(BuiltinType::I32)
-            | Ty::Builtin(BuiltinType::I64)
-            | Ty::Builtin(BuiltinType::U32)
-            | Ty::Builtin(BuiltinType::U8)
-    )
 }
 
 fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {

@@ -908,7 +908,7 @@ fn emit_checked_add(
     b: Value,
     ty: &crate::hir::HirType,
 ) -> Result<Value, CodegenError> {
-    let (sum, overflow) = if is_unsigned_int(ty) {
+    let (sum, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
         builder.ins().uadd_overflow(a, b)
     } else {
         builder.ins().sadd_overflow(a, b)
@@ -923,7 +923,7 @@ fn emit_checked_sub(
     b: Value,
     ty: &crate::hir::HirType,
 ) -> Result<Value, CodegenError> {
-    let (diff, overflow) = if is_unsigned_int(ty) {
+    let (diff, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
         builder.ins().usub_overflow(a, b)
     } else {
         builder.ins().ssub_overflow(a, b)
@@ -938,7 +938,7 @@ fn emit_checked_mul(
     b: Value,
     ty: &crate::hir::HirType,
 ) -> Result<Value, CodegenError> {
-    let (prod, overflow) = if is_unsigned_int(ty) {
+    let (prod, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
         builder.ins().umul_overflow(a, b)
     } else {
         builder.ins().smul_overflow(a, b)
@@ -964,7 +964,7 @@ fn emit_checked_div(
     builder.switch_to_block(ok_block);
     builder.seal_block(trap_block);
     builder.seal_block(ok_block);
-    let value = if is_unsigned_int(ty) {
+    let value = if crate::typeck::is_unsigned_type(&ty.ty) {
         builder.ins().udiv(a, b)
     } else {
         builder.ins().sdiv(a, b)
@@ -983,14 +983,6 @@ fn trap_on_overflow(builder: &mut FunctionBuilder, overflow: Value) {
     builder.seal_block(ok_block);
 }
 
-fn is_unsigned_int(ty: &crate::hir::HirType) -> bool {
-    matches!(
-        ty.ty,
-        crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::U32)
-            | crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::U8)
-    )
-}
-
 fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
     let ty = match expr {
         crate::hir::HirExpr::Literal(lit) => &lit.ty,
@@ -1004,7 +996,7 @@ fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
         crate::hir::HirExpr::Match(m) => &m.result_ty,
         crate::hir::HirExpr::Try(t) => &t.ok_ty,
     };
-    if is_unsigned_int(ty) {
+    if crate::typeck::is_unsigned_type(&ty.ty) {
         unsigned
     } else {
         signed
