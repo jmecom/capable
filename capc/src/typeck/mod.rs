@@ -787,6 +787,7 @@ pub fn type_check_program(
                 &use_map,
                 &stdlib_index,
                 Some(&type_tables),
+                true,
             )
         })
         .collect();
@@ -803,6 +804,7 @@ pub fn type_check_program(
                 &use_map,
                 &stdlib_index,
                 Some(&type_tables),
+                false,
             )
         })
         .collect();
@@ -815,6 +817,7 @@ pub fn type_check_program(
         &use_map,
         &stdlib_index,
         Some(&type_tables),
+        false,
     )?;
 
     Ok(crate::hir::HirProgram {

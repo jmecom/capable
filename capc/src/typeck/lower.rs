@@ -27,6 +27,7 @@ struct LoweringCtx<'a> {
     module_name: &'a str,
     type_tables: Option<&'a FunctionTypeTables>,
     type_table: Option<&'a TypeTable>,
+    allow_type_fallback: bool,
     /// Maps variable names to their LocalId
     local_map: HashMap<String, LocalId>,
     /// Maps variable names to their types (needed for type checking during lowering)
@@ -43,6 +44,7 @@ impl<'a> LoweringCtx<'a> {
         stdlib: &'a StdlibIndex,
         module_name: &'a str,
         type_tables: Option<&'a FunctionTypeTables>,
+        allow_type_fallback: bool,
     ) -> Self {
         Self {
             functions,
@@ -53,6 +55,7 @@ impl<'a> LoweringCtx<'a> {
             module_name,
             type_tables,
             type_table: None,
+            allow_type_fallback,
             local_map: HashMap::new(),
             local_types: HashMap::new(),
             local_counter: 0,
@@ -89,6 +92,7 @@ pub(super) fn lower_module(
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     type_tables: Option<&FunctionTypeTables>,
+    allow_type_fallback: bool,
 ) -> Result<crate::hir::HirModule, TypeError> {
     let module_name = module.name.to_string();
     let mut ctx = LoweringCtx::new(
@@ -99,6 +103,7 @@ pub(super) fn lower_module(
         stdlib,
         &module_name,
         type_tables,
+        allow_type_fallback,
     );
 
     let mut hir_functions = Vec::new();
@@ -385,6 +390,12 @@ fn type_of_ast_expr(
         }
         return Err(TypeError::new(
             "internal error: missing type information during lowering".to_string(),
+            expr.span(),
+        ));
+    }
+    if !ctx.allow_type_fallback {
+        return Err(TypeError::new(
+            "internal error: lowering requires typed expression data".to_string(),
             expr.span(),
         ));
     }
@@ -1105,6 +1116,7 @@ mod tests {
             &stdlib,
             "foo",
             None,
+            true,
         );
         let ty = Ty::Path("Pair".to_string(), Vec::new());
         let abi = abi_type_for(&ty, &ctx, Span::new(0, 0)).expect("abi");
