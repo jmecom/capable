@@ -423,7 +423,9 @@ fn emit_hir_expr_inner(
             if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty.ty {
                 if ty_name == "Result" && args.len() == 2 {
                     let AbiType::Result(ok_abi, err_abi) = &variant.enum_ty.abi else {
-                        return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                        return Err(CodegenError::Unsupported(
+                            abi_quirks::result_abi_mismatch_error().to_string(),
+                        ));
                     };
                     let ok_ty = crate::hir::HirType {
                         ty: args[0].clone(),
@@ -539,7 +541,9 @@ fn emit_hir_expr_inner(
             let ret_value = match &try_expr.ret_ty.ty {
                 crate::typeck::Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
                     let AbiType::Result(ok_abi, _err_abi) = &try_expr.ret_ty.abi else {
-                        return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                        return Err(CodegenError::Unsupported(
+                            abi_quirks::result_abi_mismatch_error().to_string(),
+                        ));
                     };
                     let ok_ty = crate::hir::HirType {
                         ty: args[0].clone(),
@@ -692,7 +696,9 @@ fn emit_hir_expr_inner(
                 match &info.sig.ret {
                     AbiType::Result(ok_ty, err_ty) => {
                         if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
-                            return Err(CodegenError::Unsupported("result out params".to_string()));
+                            return Err(CodegenError::Unsupported(
+                                abi_quirks::result_out_params_error().to_string(),
+                            ));
                         }
                         Ok(ValueRepr::Result {
                             tag: *tag,
@@ -700,7 +706,9 @@ fn emit_hir_expr_inner(
                             err: Box::new(ValueRepr::Single(err)),
                         })
                     }
-                    _ => Err(CodegenError::Unsupported("result out params".to_string())),
+                    _ => Err(CodegenError::Unsupported(
+                        abi_quirks::result_out_params_error().to_string(),
+                    )),
                 }
             } else if abi_quirks::is_result_out(&abi_sig.ret) {
                 let tag = results
@@ -1214,7 +1222,9 @@ fn store_value_by_ty(
                     return Err(CodegenError::Unsupported("store result".to_string()));
                 };
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
-                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_abi_mismatch_error().to_string(),
+                    ));
                 };
                 let ok_ty = crate::hir::HirType {
                     ty: args[0].clone(),
@@ -1361,7 +1371,9 @@ fn load_value_by_ty(
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
-                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_abi_mismatch_error().to_string(),
+                    ));
                 };
                 let ok_ty = crate::hir::HirType {
                     ty: args[0].clone(),
@@ -2140,7 +2152,9 @@ fn value_type_for_result_out(ty: &AbiType, ptr_ty: Type) -> Result<ir::Type, Cod
         AbiType::Handle => Ok(ir::types::I64),
         AbiType::Ptr => Ok(ptr_ty),
         AbiType::Unit => Err(CodegenError::Unsupported("result out unit".to_string())),
-        _ => Err(CodegenError::Unsupported("result out params".to_string())),
+        _ => Err(CodegenError::Unsupported(
+            abi_quirks::result_out_params_error().to_string(),
+        )),
     }
 }
 
@@ -2171,8 +2185,12 @@ fn zero_value_for_tykind(
                 err: Box::new(err_val),
             })
         }
-        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
-        AbiType::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported(
+            abi_quirks::result_out_params_error().to_string(),
+        )),
+        AbiType::ResultString => Err(CodegenError::Unsupported(
+            abi_quirks::result_string_params_error().to_string(),
+        )),
     }
 }
 
@@ -2197,7 +2215,9 @@ fn zero_value_for_ty(
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
-                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_abi_mismatch_error().to_string(),
+                    ));
                 };
                 let ok_ty = crate::hir::HirType {
                     ty: args[0].clone(),
@@ -2305,8 +2325,12 @@ fn value_from_results(
                 err: Box::new(err_val),
             })
         }
-        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
-        AbiType::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported(
+            abi_quirks::result_out_params_error().to_string(),
+        )),
+        AbiType::ResultString => Err(CodegenError::Unsupported(
+            abi_quirks::result_string_params_error().to_string(),
+        )),
     }
 }
 
@@ -2385,7 +2409,9 @@ pub(super) fn emit_runtime_wrapper_call(
         match &info.sig.ret {
             AbiType::Result(ok_ty, err_ty) => {
                 if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
-                    return Err(CodegenError::Unsupported("result out params".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_out_params_error().to_string(),
+                    ));
                 }
                 return Ok(ValueRepr::Result {
                     tag: *tag,
@@ -2393,7 +2419,9 @@ pub(super) fn emit_runtime_wrapper_call(
                     err: Box::new(ValueRepr::Single(err)),
                 });
             }
-            _ => return Err(CodegenError::Unsupported("result out params".to_string())),
+            _ => return Err(CodegenError::Unsupported(
+                abi_quirks::result_out_params_error().to_string(),
+            )),
         }
     }
 

@@ -36,3 +36,18 @@ pub fn abi_sig_requires_lowering(abi_sig: &FnSig, sig: &FnSig) -> bool {
 pub fn result_lowering_layout_error() -> &'static str {
     "layout for result out params"
 }
+
+/// Error message used when a Result ABI form is not supported.
+pub fn result_abi_mismatch_error() -> &'static str {
+    "result abi mismatch"
+}
+
+/// Error message used when ResultOut lowering is requested but unsupported.
+pub fn result_out_params_error() -> &'static str {
+    "result out params"
+}
+
+/// Error message used when ResultString lowering is requested but unsupported.
+pub fn result_string_params_error() -> &'static str {
+    "result abi"
+}
