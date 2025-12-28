@@ -3,6 +3,7 @@
 //! Any stdlib function listed here is treated as an intrinsic: its `.cap` body
 //! is ignored, and codegen emits a direct call to the runtime symbol. If a
 //! function is not listed here, the Capable implementation is used instead.
+//! See `stdlib/README.md` for the stdlib-facing explanation.
 
 use std::collections::HashMap;
 
