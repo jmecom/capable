@@ -1,0 +1,1104 @@
+//! Runtime intrinsic registry.
+//!
+//! Any stdlib function listed here is treated as an intrinsic: its `.cap` body
+//! is ignored, and codegen emits a direct call to the runtime symbol. If a
+//! function is not listed here, the Capable implementation is used instead.
+
+use std::collections::HashMap;
+
+use cranelift_codegen::ir::Type;
+
+use crate::abi::AbiType;
+
+use super::{FnInfo, FnSig};
+
+pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
+    let mut map = HashMap::new();
+    // System + args.
+    let system_console = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let system_fs_read = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
+    };
+    let system_filesystem = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
+    };
+    // Filesystem.
+    let fs_root_dir = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let fs_subdir = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
+    };
+    let fs_open_read = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Handle,
+    };
+    let fs_read_to_string = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let fs_read_to_string_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::String, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
+    let fs_file_read_to_string = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let fs_file_read_to_string_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
+    // Console.
+    let console_println = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Unit,
+    };
+    let console_print = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Unit,
+    };
+    let console_print_i32 = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Unit,
+    };
+    // Math.
+    let math_i32 = FnSig {
+        params: vec![AbiType::I32, AbiType::I32],
+        ret: AbiType::I32,
+    };
+    let math_u32 = FnSig {
+        params: vec![AbiType::U32, AbiType::U32],
+        ret: AbiType::U32,
+    };
+    let math_u8 = FnSig {
+        params: vec![AbiType::U8, AbiType::U8],
+        ret: AbiType::U8,
+    };
+    // Buffer + slices.
+    let mem_malloc = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Ptr,
+    };
+    let mem_free = FnSig {
+        params: vec![AbiType::Handle, AbiType::Ptr],
+        ret: AbiType::Unit,
+    };
+    let mem_cast = FnSig {
+        params: vec![AbiType::Handle, AbiType::Ptr],
+        ret: AbiType::Ptr,
+    };
+    let mem_alloc_default = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let system_mint_args = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let system_mint_stdin = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let args_at = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let args_at_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
+    // Buffer + slices.
+    let mem_slice_from_ptr = FnSig {
+        params: vec![AbiType::Handle, AbiType::Ptr, AbiType::I32],
+        ret: AbiType::Handle,
+    };
+    let mem_slice_len = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
+    };
+    let mem_slice_at = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::U8,
+    };
+    // Vecs.
+    let mem_buffer_new = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_new_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_len = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
+    };
+    let mem_buffer_push = FnSig {
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_push_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::U8,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_as_slice = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let mem_buffer_as_mut_slice = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let mem_buffer_free = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let vec_new = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let vec_u8_get = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::U8), Box::new(AbiType::I32)),
+    };
+    let vec_u8_get_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
+    };
+    let vec_u8_set = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::U8],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_set_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::U8,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_push = FnSig {
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_push_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::U8,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_pop = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::U8), Box::new(AbiType::I32)),
+    };
+    let vec_u8_pop_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::U8), Box::new(AbiType::I32)),
+    };
+    let vec_u8_as_slice = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let vec_u8_free = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let vec_i32_get = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+    };
+    let vec_i32_get_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+    };
+    let vec_i32_set = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_set_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_push = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_push_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_pop = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+    };
+    let vec_i32_pop_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+    };
+    let vec_i32_free = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let vec_string_len = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
+    };
+    let vec_string_get = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let vec_string_get_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
+    let vec_string_push = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_string_push_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_string_pop = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let vec_string_pop_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
+    let vec_string_free = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    // Strings.
+    let string_len = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::I32,
+    };
+    let string_byte_at = FnSig {
+        params: vec![AbiType::String, AbiType::I32],
+        ret: AbiType::U8,
+    };
+    let string_as_slice = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::Handle,
+    };
+    let string_split = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::Handle,
+    };
+    let string_lines = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::Handle,
+    };
+    let string_split_delim = FnSig {
+        params: vec![AbiType::String, AbiType::U8],
+        ret: AbiType::Handle,
+    };
+    // Vec lengths.
+    let vec_u8_len = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
+    };
+    let vec_i32_len = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::I32,
+    };
+
+    // === System + args ===
+    map.insert(
+        "sys.system.RootCap__mint_console".to_string(),
+        FnInfo {
+            sig: system_console,
+            abi_sig: None,
+            symbol: "capable_rt_mint_console".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.system.RootCap__mint_readfs".to_string(),
+        FnInfo {
+            sig: system_fs_read,
+            abi_sig: None,
+            symbol: "capable_rt_mint_readfs".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.system.RootCap__mint_filesystem".to_string(),
+        FnInfo {
+            sig: system_filesystem,
+            abi_sig: None,
+            symbol: "capable_rt_mint_filesystem".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.system.RootCap__mint_args".to_string(),
+        FnInfo {
+            sig: system_mint_args,
+            abi_sig: None,
+            symbol: "capable_rt_mint_args".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.system.RootCap__mint_stdin".to_string(),
+        FnInfo {
+            sig: system_mint_stdin,
+            abi_sig: None,
+            symbol: "capable_rt_mint_stdin".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.args.Args__len".to_string(),
+        FnInfo {
+            sig: FnSig {
+                params: vec![AbiType::Handle],
+                ret: AbiType::I32,
+            },
+            abi_sig: None,
+            symbol: "capable_rt_args_len".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.args.Args__at".to_string(),
+        FnInfo {
+            sig: args_at,
+            abi_sig: Some(args_at_abi),
+            symbol: "capable_rt_args_at".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Stdin ===
+    map.insert(
+        "sys.stdin.Stdin__read_to_string".to_string(),
+        FnInfo {
+            sig: FnSig {
+                params: vec![AbiType::Handle],
+                ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+            },
+            abi_sig: Some(FnSig {
+                params: vec![AbiType::Handle, AbiType::ResultString],
+                ret: AbiType::ResultString,
+            }),
+            symbol: "capable_rt_read_stdin_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Alloc ===
+    map.insert(
+        "sys.system.RootCap__mint_alloc_default".to_string(),
+        FnInfo {
+            sig: mem_alloc_default,
+            abi_sig: None,
+            symbol: "capable_rt_alloc_default".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Console ===
+    map.insert(
+        "sys.console.Console__println".to_string(),
+        FnInfo {
+            sig: console_println,
+            abi_sig: None,
+            symbol: "capable_rt_console_println".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__print".to_string(),
+        FnInfo {
+            sig: console_print,
+            abi_sig: None,
+            symbol: "capable_rt_console_print".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__print_i32".to_string(),
+        FnInfo {
+            sig: console_print_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_console_print_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__println_i32".to_string(),
+        FnInfo {
+            sig: console_print_i32,
+            abi_sig: None,
+            symbol: "capable_rt_console_println_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.console.Console__assert".to_string(),
+        FnInfo {
+            sig: FnSig {
+                params: vec![AbiType::Handle, AbiType::Bool, AbiType::String],
+                ret: AbiType::Unit,
+            },
+            abi_sig: None,
+            symbol: "capable_rt_assert".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Math ===
+    map.insert(
+        "sys.math.add_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Filesystem ===
+    map.insert(
+        "sys.fs.ReadFS__read_to_string".to_string(),
+        FnInfo {
+            sig: fs_read_to_string,
+            abi_sig: Some(fs_read_to_string_abi),
+            symbol: "capable_rt_fs_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Filesystem__root_dir".to_string(),
+        FnInfo {
+            sig: fs_root_dir,
+            abi_sig: None,
+            symbol: "capable_rt_fs_root_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__subdir".to_string(),
+        FnInfo {
+            sig: fs_subdir,
+            abi_sig: None,
+            symbol: "capable_rt_fs_subdir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__open_read".to_string(),
+        FnInfo {
+            sig: fs_open_read,
+            abi_sig: None,
+            symbol: "capable_rt_fs_open_read".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.FileRead__read_to_string".to_string(),
+        FnInfo {
+            sig: fs_file_read_to_string,
+            abi_sig: Some(fs_file_read_to_string_abi),
+            symbol: "capable_rt_fs_file_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Buffer + slices ===
+    map.insert(
+        "sys.buffer.Alloc__buffer_new".to_string(),
+        FnInfo {
+            sig: mem_buffer_new,
+            abi_sig: Some(mem_buffer_new_abi),
+            symbol: "capable_rt_buffer_new".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__buffer_free".to_string(),
+        FnInfo {
+            sig: mem_buffer_free,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_free".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__malloc".to_string(),
+        FnInfo {
+            sig: mem_malloc,
+            abi_sig: None,
+            symbol: "capable_rt_malloc".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__free".to_string(),
+        FnInfo {
+            sig: mem_free,
+            abi_sig: None,
+            symbol: "capable_rt_free".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__cast_u8_to_u32".to_string(),
+        FnInfo {
+            sig: mem_cast.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_cast_u8_to_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__cast_u32_to_u8".to_string(),
+        FnInfo {
+            sig: mem_cast,
+            abi_sig: None,
+            symbol: "capable_rt_cast_u32_to_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__slice_from_ptr".to_string(),
+        FnInfo {
+            sig: mem_slice_from_ptr.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_from_ptr".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__mut_slice_from_ptr".to_string(),
+        FnInfo {
+            sig: mem_slice_from_ptr,
+            abi_sig: None,
+            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__len".to_string(),
+        FnInfo {
+            sig: mem_buffer_len,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_len".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__push".to_string(),
+        FnInfo {
+            sig: mem_buffer_push,
+            abi_sig: Some(mem_buffer_push_abi),
+            symbol: "capable_rt_buffer_push".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__as_slice".to_string(),
+        FnInfo {
+            sig: mem_buffer_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_as_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__as_mut_slice".to_string(),
+        FnInfo {
+            sig: mem_buffer_as_mut_slice,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_as_mut_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Slice__len".to_string(),
+        FnInfo {
+            sig: mem_slice_len,
+            abi_sig: None,
+            symbol: "capable_rt_slice_len".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Slice__at".to_string(),
+        FnInfo {
+            sig: mem_slice_at.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_slice_at".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.MutSlice__at".to_string(),
+        FnInfo {
+            sig: mem_slice_at,
+            abi_sig: None,
+            symbol: "capable_rt_mut_slice_at".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Vec ===
+    map.insert(
+        "sys.buffer.Alloc__vec_u8_new".to_string(),
+        FnInfo {
+            sig: vec_new.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_new".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__vec_u8_free".to_string(),
+        FnInfo {
+            sig: vec_u8_free,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_free".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__vec_i32_new".to_string(),
+        FnInfo {
+            sig: vec_new.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_new".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__vec_i32_free".to_string(),
+        FnInfo {
+            sig: vec_i32_free,
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_free".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__vec_string_new".to_string(),
+        FnInfo {
+            sig: vec_new,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_new".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Alloc__vec_string_free".to_string(),
+        FnInfo {
+            sig: vec_string_free,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_free".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__len".to_string(),
+        FnInfo {
+            sig: vec_u8_len,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_len".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__get".to_string(),
+        FnInfo {
+            sig: vec_u8_get,
+            abi_sig: Some(vec_u8_get_abi),
+            symbol: "capable_rt_vec_u8_get".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__set".to_string(),
+        FnInfo {
+            sig: vec_u8_set,
+            abi_sig: Some(vec_u8_set_abi),
+            symbol: "capable_rt_vec_u8_set".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__push".to_string(),
+        FnInfo {
+            sig: vec_u8_push,
+            abi_sig: Some(vec_u8_push_abi),
+            symbol: "capable_rt_vec_u8_push".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__pop".to_string(),
+        FnInfo {
+            sig: vec_u8_pop,
+            abi_sig: Some(vec_u8_pop_abi),
+            symbol: "capable_rt_vec_u8_pop".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__as_slice".to_string(),
+        FnInfo {
+            sig: vec_u8_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_as_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__len".to_string(),
+        FnInfo {
+            sig: vec_i32_len,
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_len".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__get".to_string(),
+        FnInfo {
+            sig: vec_i32_get,
+            abi_sig: Some(vec_i32_get_abi),
+            symbol: "capable_rt_vec_i32_get".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__set".to_string(),
+        FnInfo {
+            sig: vec_i32_set,
+            abi_sig: Some(vec_i32_set_abi),
+            symbol: "capable_rt_vec_i32_set".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__push".to_string(),
+        FnInfo {
+            sig: vec_i32_push,
+            abi_sig: Some(vec_i32_push_abi),
+            symbol: "capable_rt_vec_i32_push".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__pop".to_string(),
+        FnInfo {
+            sig: vec_i32_pop,
+            abi_sig: Some(vec_i32_pop_abi),
+            symbol: "capable_rt_vec_i32_pop".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecString__len".to_string(),
+        FnInfo {
+            sig: vec_string_len,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_len".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecString__get".to_string(),
+        FnInfo {
+            sig: vec_string_get,
+            abi_sig: Some(vec_string_get_abi),
+            symbol: "capable_rt_vec_string_get".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecString__push".to_string(),
+        FnInfo {
+            sig: vec_string_push,
+            abi_sig: Some(vec_string_push_abi),
+            symbol: "capable_rt_vec_string_push".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecString__pop".to_string(),
+        FnInfo {
+            sig: vec_string_pop,
+            abi_sig: Some(vec_string_pop_abi),
+            symbol: "capable_rt_vec_string_pop".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === String ===
+    map.insert(
+        "sys.string.string__len".to_string(),
+        FnInfo {
+            sig: string_len,
+            abi_sig: None,
+            symbol: "capable_rt_string_len".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__byte_at".to_string(),
+        FnInfo {
+            sig: string_byte_at,
+            abi_sig: None,
+            symbol: "capable_rt_string_byte_at".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__as_slice".to_string(),
+        FnInfo {
+            sig: string_as_slice.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_string_as_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__bytes".to_string(),
+        FnInfo {
+            // bytes() is an alias for as_slice(); both map to the same runtime symbol.
+            sig: string_as_slice,
+            abi_sig: None,
+            symbol: "capable_rt_string_as_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__split_whitespace".to_string(),
+        FnInfo {
+            sig: string_split,
+            abi_sig: None,
+            symbol: "capable_rt_string_split_whitespace".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__lines".to_string(),
+        FnInfo {
+            sig: string_lines,
+            abi_sig: None,
+            symbol: "capable_rt_string_split_lines".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__split".to_string(),
+        FnInfo {
+            sig: string_split_delim,
+            abi_sig: None,
+            symbol: "capable_rt_string_split".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Bytes ===
+    map.insert(
+        "sys.bytes.u8__is_whitespace".to_string(),
+        FnInfo {
+            sig: FnSig {
+                params: vec![AbiType::U8],
+                ret: AbiType::Bool,
+            },
+            abi_sig: None,
+            symbol: "capable_rt_bytes_is_whitespace".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+
+    let _ = ptr_ty;
+    map
+}
