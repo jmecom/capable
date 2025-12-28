@@ -228,17 +228,7 @@ pub fn build_object(
             true,
         )?;
     }
-    let missing_intrinsics = runtime_intrinsics
-        .keys()
-        .filter(|key| !fn_map.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing_intrinsics.is_empty() {
-        return Err(CodegenError::Codegen(format!(
-            "runtime intrinsics missing stdlib wrappers: {}",
-            missing_intrinsics.join(", ")
-        )));
-    }
+    validate_intrinsics(&fn_map, &runtime_intrinsics)?;
     for module_ref in &program.user_modules {
         register_user_functions(
             module_ref,
@@ -537,6 +527,37 @@ fn register_extern_functions_from_hir(
                 is_runtime: true,
             },
         );
+    }
+    Ok(())
+}
+
+/// Validate stdlib/runtime intrinsic coverage in both directions.
+fn validate_intrinsics(
+    fn_map: &HashMap<String, FnInfo>,
+    runtime_intrinsics: &HashMap<String, FnInfo>,
+) -> Result<(), CodegenError> {
+    let missing_wrappers = runtime_intrinsics
+        .keys()
+        .filter(|key| !fn_map.contains_key(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_wrappers.is_empty() {
+        return Err(CodegenError::Codegen(format!(
+            "runtime intrinsics missing stdlib wrappers: {}",
+            missing_wrappers.join(", ")
+        )));
+    }
+
+    let unknown_wrappers = fn_map
+        .iter()
+        .filter(|(key, info)| info.runtime_symbol.is_some() && !runtime_intrinsics.contains_key(*key))
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    if !unknown_wrappers.is_empty() {
+        return Err(CodegenError::Codegen(format!(
+            "stdlib wrappers missing intrinsic registration: {}",
+            unknown_wrappers.join(", ")
+        )));
     }
     Ok(())
 }
