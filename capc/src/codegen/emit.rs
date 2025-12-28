@@ -63,7 +63,10 @@ fn emit_hir_stmt_inner(
             if matches!(let_stmt.ty.ty, crate::typeck::Ty::Ref(_)) {
                 if let crate::hir::HirExpr::Local(local) = &let_stmt.expr {
                     let Some(value) = locals.get(&local.local_id).cloned() else {
-                        return Err(CodegenError::UnknownVariable(local.name.clone()));
+                        return Err(CodegenError::UnknownVariable(format!(
+                            "local {}",
+                            local.local_id.0
+                        )));
                     };
                     locals.insert(let_stmt.local_id, value);
                     return Ok(Flow::Continues);
@@ -124,7 +127,10 @@ fn emit_hir_stmt_inner(
                 data_counter,
             )?;
             let Some(local) = locals.get_mut(&assign.local_id) else {
-                return Err(CodegenError::UnknownVariable(assign.name.clone()));
+                return Err(CodegenError::UnknownVariable(format!(
+                    "local {}",
+                    assign.local_id.0
+                )));
             };
             match local {
                 LocalValue::Slot(slot, _ty) => {
@@ -396,7 +402,10 @@ fn emit_hir_expr_inner(
             if let Some(value) = locals.get(&local.local_id) {
                 return Ok(load_local(builder, value, module.isa().pointer_type()));
             }
-            Err(CodegenError::UnknownVariable(local.name.clone()))
+            Err(CodegenError::UnknownVariable(format!(
+                "local {}",
+                local.local_id.0
+            )))
         }
         HirExpr::EnumVariant(variant) => {
             // Check if this is a Result type with payload (Ok/Err)
@@ -1889,7 +1898,7 @@ fn hir_match_pattern_cond(
     use crate::hir::HirPattern;
 
     match pattern {
-        HirPattern::Wildcard | HirPattern::Binding(_, _) => {
+        HirPattern::Wildcard | HirPattern::Binding(_) => {
             // Wildcard and binding patterns always match
             let one = builder.ins().iconst(ir::types::I32, 1);
             Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1))
@@ -1970,13 +1979,13 @@ fn hir_bind_match_pattern_value(
     match pattern {
         HirPattern::Wildcard => Ok(()),
         HirPattern::Literal(_) => Ok(()),
-        HirPattern::Binding(local_id, _name) => {
+        HirPattern::Binding(local_id) => {
             // Bind the entire value to the variable
             locals.insert(*local_id, store_local(builder, value.clone()));
             Ok(())
         }
         HirPattern::Variant { variant_name, binding, .. } => {
-            if let Some((local_id, _name)) = binding {
+            if let Some(local_id) = binding {
                 // Bind the inner value based on variant
                 let Some((ok_val, err_val)) = result else {
                     return Err(CodegenError::Unsupported(

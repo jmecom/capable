@@ -65,7 +65,6 @@ pub struct HirExternFunction {
 #[derive(Debug, Clone)]
 pub struct HirParam {
     pub local_id: LocalId,
-    pub name: String,
     pub ty: HirType,
 }
 
@@ -136,7 +135,6 @@ impl HirStmt {
 #[derive(Debug, Clone)]
 pub struct HirLetStmt {
     pub local_id: LocalId,
-    pub name: String,
     pub ty: HirType,
     pub expr: HirExpr,
     pub span: Span,
@@ -145,7 +143,6 @@ pub struct HirLetStmt {
 #[derive(Debug, Clone)]
 pub struct HirAssignStmt {
     pub local_id: LocalId,
-    pub name: String,
     pub expr: HirExpr,
     pub span: Span,
 }
@@ -219,7 +216,6 @@ pub struct HirLiteral {
 #[derive(Debug, Clone)]
 pub struct HirLocal {
     pub local_id: LocalId,
-    pub name: String,
     pub ty: HirType,
     pub span: Span,
 }
@@ -334,9 +330,9 @@ pub enum HirPattern {
     Variant {
         enum_ty: HirType,
         variant_name: String,
-        binding: Option<(LocalId, String)>,
+        binding: Option<LocalId>,
     },
     /// Binding introduces a new local variable
-    Binding(LocalId, String),
+    Binding(LocalId),
     Literal(Literal),
 }

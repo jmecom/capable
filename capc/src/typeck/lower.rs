@@ -141,7 +141,6 @@ pub(super) fn lower_module(
                         let lowered = lower_type(ty, use_map, stdlib)?;
                         Ok(HirParam {
                             local_id: LocalId(0),
-                            name: param.name.item.clone(),
                             ty: hir_type_for(lowered, &ctx, ty.span())?,
                         })
                     })
@@ -250,7 +249,6 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
             let local_id = ctx.fresh_local(p.name.item.clone(), ty);
             Ok(HirParam {
                 local_id,
-                name: p.name.item.clone(),
                 ty: hir_ty,
             })
         })
@@ -297,7 +295,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
 
             Ok(HirStmt::Let(HirLetStmt {
                 local_id,
-                name: let_stmt.name.item.clone(),
                 ty,
                 expr,
                 span: let_stmt.span,
@@ -311,7 +308,6 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
 
             Ok(HirStmt::Assign(HirAssignStmt {
                 local_id,
-                name: assign.name.item.clone(),
                 expr,
                 span: assign.span,
             }))
@@ -496,7 +492,6 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     let local_id = ctx.get_local(name).unwrap();
                     return Ok(HirExpr::Local(HirLocal {
                         local_id,
-                        name: name.clone(),
                         ty: hir_ty,
                         span: path.span,
                     }));
@@ -646,7 +641,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             let ok_pattern = HirPattern::Variant {
                                 enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 variant_name: "Ok".to_string(),
-                                binding: Some((ok_local_id, ok_name.clone())),
+                                binding: Some(ok_local_id),
                             };
                             let err_pattern = HirPattern::Variant {
                                 enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
@@ -655,7 +650,6 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             };
                             let ok_expr = HirExpr::Local(HirLocal {
                                 local_id: ok_local_id,
-                                name: ok_name,
                                 ty: hir_type_for(args[0].clone(), ctx, method_call.span)?,
                                 span: method_call.span,
                             });
@@ -702,11 +696,10 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             let err_pattern = HirPattern::Variant {
                                 enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 variant_name: "Err".to_string(),
-                                binding: Some((err_local_id, err_name.clone())),
+                                binding: Some(err_local_id),
                             };
                             let err_expr = HirExpr::Local(HirLocal {
                                 local_id: err_local_id,
-                                name: err_name,
                                 ty: hir_type_for(args[1].clone(), ctx, method_call.span)?,
                                 span: method_call.span,
                             });
@@ -986,7 +979,7 @@ fn lower_pattern(
 
         Pattern::Binding(ident) => {
             let local_id = ctx.fresh_local(ident.item.clone(), match_ty.ty.clone());
-            Ok(HirPattern::Binding(local_id, ident.item.clone()))
+            Ok(HirPattern::Binding(local_id))
         }
 
         Pattern::Path(path) => {
@@ -1022,7 +1015,7 @@ fn lower_pattern(
                                     args[1].clone()
                                 };
                                 let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
-                                Some((local_id, bind_ident.item.clone()))
+                                Some(local_id)
                             } else {
                                 None
                             };
@@ -1045,7 +1038,7 @@ fn lower_pattern(
                 let binding_info = if let Some(bind_ident) = binding {
                     let bind_ty = match_ty.ty.clone();
                     let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
-                    Some((local_id, bind_ident.item.clone()))
+                    Some(local_id)
                 } else {
                     None
                 };
