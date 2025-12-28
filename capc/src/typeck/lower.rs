@@ -632,12 +632,10 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             let ok_name = format!("__unwrap_ok_{}", ctx.local_counter);
                             let ok_local_id = ctx.fresh_local(ok_name.clone(), args[0].clone());
                             let ok_pattern = HirPattern::Variant {
-                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 variant_name: "Ok".to_string(),
                                 binding: Some(ok_local_id),
                             };
                             let err_pattern = HirPattern::Variant {
-                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 variant_name: "Err".to_string(),
                                 binding: None,
                             };
@@ -679,12 +677,10 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             let err_name = format!("__unwrap_err_{}", ctx.local_counter);
                             let err_local_id = ctx.fresh_local(err_name.clone(), args[1].clone());
                             let ok_pattern = HirPattern::Variant {
-                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 variant_name: "Ok".to_string(),
                                 binding: None,
                             };
                             let err_pattern = HirPattern::Variant {
-                                enum_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 variant_name: "Err".to_string(),
                                 binding: Some(err_local_id),
                             };
@@ -965,12 +961,11 @@ fn lower_pattern(
         }
 
         Pattern::Path(path) => {
-            if let Some(enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
+            if let Some(_enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
                 let variant_name = path.segments.last()
                     .map(|s| s.item.clone())
                     .unwrap_or_else(|| "unknown".to_string());
                 Ok(HirPattern::Variant {
-                    enum_ty: hir_type_for(enum_ty, ctx, path.span)?,
                     variant_name,
                     binding: None,
                 })
@@ -1003,7 +998,6 @@ fn lower_pattern(
                             };
 
                             return Ok(HirPattern::Variant {
-                                enum_ty: match_ty.clone(),
                                 variant_name,
                                 binding: binding_info,
                             });
@@ -1012,7 +1006,7 @@ fn lower_pattern(
                 }
             }
 
-            if let Some(enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
+            if let Some(_enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
                 let variant_name = path.segments.last()
                     .map(|s| s.item.clone())
                     .unwrap_or_else(|| "unknown".to_string());
@@ -1026,7 +1020,6 @@ fn lower_pattern(
                 };
 
                 Ok(HirPattern::Variant {
-                    enum_ty: hir_type_for(enum_ty, ctx, *span)?,
                     variant_name,
                     binding: binding_info,
                 })

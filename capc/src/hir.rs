@@ -336,7 +336,6 @@ pub enum HirPattern {
     Wildcard,
     /// Path to an enum variant (fully resolved)
     Variant {
-        enum_ty: HirType,
         variant_name: String,
         binding: Option<LocalId>,
     },

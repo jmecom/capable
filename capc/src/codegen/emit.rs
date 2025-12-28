@@ -1638,7 +1638,13 @@ fn emit_hir_match_stmt(
         if idx > 0 {
             builder.switch_to_block(current_block);
         }
-        let cond = hir_match_pattern_cond(builder, &arm.pattern, match_val, enum_index)?;
+        let cond = hir_match_pattern_cond(
+            builder,
+            &arm.pattern,
+            match_val,
+            match_expr.expr.ty(),
+            enum_index,
+        )?;
         builder.ins().brif(cond, arm_block, &[], next_block, &[]);
 
         builder.switch_to_block(arm_block);
@@ -1746,7 +1752,13 @@ fn emit_hir_match_expr(
         if idx > 0 {
             builder.switch_to_block(current_block);
         }
-        let cond = hir_match_pattern_cond(builder, &arm.pattern, match_val, enum_index)?;
+        let cond = hir_match_pattern_cond(
+            builder,
+            &arm.pattern,
+            match_val,
+            match_expr.expr.ty(),
+            enum_index,
+        )?;
         builder.ins().brif(cond, arm_block, &[], next_block, &[]);
 
         builder.switch_to_block(arm_block);
@@ -1893,6 +1905,7 @@ fn hir_match_pattern_cond(
     builder: &mut FunctionBuilder,
     pattern: &crate::hir::HirPattern,
     match_val: ir::Value,
+    match_ty: &crate::hir::HirType,
     enum_index: &EnumIndex,
 ) -> Result<ir::Value, CodegenError> {
     use crate::hir::HirPattern;
@@ -1925,13 +1938,13 @@ fn hir_match_pattern_cond(
                 "string pattern matching".to_string(),
             )),
         },
-        HirPattern::Variant { enum_ty, variant_name, .. } => {
+        HirPattern::Variant { variant_name, .. } => {
             // Get the discriminant value for this variant
-            let qualified = match &enum_ty.ty {
+            let qualified = match &match_ty.ty {
                 crate::typeck::Ty::Path(path, _) => path.clone(),
                 _ => return Err(CodegenError::Codegen(format!(
                     "enum variant pattern has non-path type: {:?}",
-                    enum_ty.ty
+                    match_ty.ty
                 ))),
             };
 
