@@ -1126,12 +1126,12 @@ fn emit_hir_field_access(
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
+    let object_ty = field_access.object.ty();
     let layout =
-        resolve_struct_layout(&field_access.object_ty.ty, "", &struct_layouts.layouts)
-        .ok_or_else(|| {
+        resolve_struct_layout(&object_ty.ty, "", &struct_layouts.layouts).ok_or_else(|| {
             CodegenError::Unsupported(format!(
                 "struct layout missing for {:?}",
-                field_access.object_ty.ty
+                object_ty.ty
             ))
         })?;
     let Some(field_layout) = layout.fields.get(&field_access.field_name) else {

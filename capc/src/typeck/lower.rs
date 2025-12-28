@@ -290,7 +290,7 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
     match stmt {
         Stmt::Let(let_stmt) => {
             let expr = lower_expr(&let_stmt.expr, ctx, ret_ty)?;
-            let ty = expr_type(&expr);
+            let ty = expr.ty().clone();
             let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.ty.clone());
 
             Ok(HirStmt::Let(HirLetStmt {
@@ -669,7 +669,6 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             };
                             return Ok(HirExpr::Match(HirMatch {
                                 expr: Box::new(receiver),
-                                expr_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 arms: vec![
                                     HirMatchArm {
                                         pattern: ok_pattern,
@@ -719,7 +718,6 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             };
                             return Ok(HirExpr::Match(HirMatch {
                                 expr: Box::new(receiver),
-                                expr_ty: hir_type_for(receiver_ty.clone(), ctx, method_call.span)?,
                                 arms: vec![
                                     HirMatchArm {
                                         pattern: ok_pattern,
@@ -822,12 +820,9 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             }
 
             let object = lower_expr(&field_access.object, ctx, ret_ty)?;
-            let object_ty = type_of_ast_expr(&field_access.object, ctx, ret_ty)?;
-            let object_hir_ty = hir_type_for(object_ty, ctx, field_access.object.span())?;
 
             Ok(HirExpr::FieldAccess(HirFieldAccess {
                 object: Box::new(object),
-                object_ty: object_hir_ty,
                 field_name: field_access.field.item.clone(),
                 field_ty: hir_ty,
                 span: field_access.span,
@@ -879,7 +874,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
         }
         Expr::Match(match_expr) => {
             let scrutinee = lower_expr(&match_expr.expr, ctx, ret_ty)?;
-            let scrutinee_ty = expr_type(&scrutinee);
+            let scrutinee_ty = scrutinee.ty().clone();
 
             let mut hir_arms = Vec::new();
             for arm in &match_expr.arms {
@@ -899,7 +894,6 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             Ok(HirExpr::Match(HirMatch {
                 expr: Box::new(scrutinee),
-                expr_ty: scrutinee_ty,
                 arms: hir_arms,
                 result_ty: hir_ty,
                 span: match_expr.span,
@@ -907,7 +901,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
         }
         Expr::Try(try_expr) => {
             let scrutinee = lower_expr(&try_expr.expr, ctx, ret_ty)?;
-            let scrutinee_ty = expr_type(&scrutinee);
+            let scrutinee_ty = scrutinee.ty().clone();
             let ok_ty = match &scrutinee_ty.ty {
                 Ty::Path(name, args) if name == "Result" && args.len() == 2 => args[0].clone(),
                 _ => {
@@ -935,7 +929,7 @@ fn lower_match_stmt(
     ret_ty: &Ty,
 ) -> Result<HirExpr, TypeError> {
     let scrutinee = lower_expr(&match_expr.expr, ctx, ret_ty)?;
-    let scrutinee_ty = expr_type(&scrutinee);
+    let scrutinee_ty = scrutinee.ty().clone();
 
     let mut hir_arms = Vec::new();
     for arm in &match_expr.arms {
@@ -955,7 +949,6 @@ fn lower_match_stmt(
 
     Ok(HirExpr::Match(HirMatch {
         expr: Box::new(scrutinee),
-        expr_ty: scrutinee_ty,
         arms: hir_arms,
         result_ty: hir_type_for(
             Ty::Builtin(super::BuiltinType::Unit),
@@ -1055,22 +1048,6 @@ fn lower_pattern(
                 ))
             }
         }
-    }
-}
-
-/// Extract the type from an HIR expression.
-fn expr_type(expr: &HirExpr) -> HirType {
-    match expr {
-        HirExpr::Literal(lit) => lit.ty.clone(),
-        HirExpr::Local(local) => local.ty.clone(),
-        HirExpr::EnumVariant(variant) => variant.enum_ty.clone(),
-        HirExpr::Call(call) => call.ret_ty.clone(),
-        HirExpr::FieldAccess(fa) => fa.field_ty.clone(),
-        HirExpr::StructLiteral(sl) => sl.struct_ty.clone(),
-        HirExpr::Binary(bin) => bin.ty.clone(),
-        HirExpr::Unary(un) => un.ty.clone(),
-        HirExpr::Match(m) => m.result_ty.clone(),
-        HirExpr::Try(t) => t.ok_ty.clone(),
     }
 }
 
