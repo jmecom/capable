@@ -2,6 +2,17 @@
 
 This plan keeps Capable aligned with Austral’s goals while staying pragmatic about implementation order. Each phase ends with real examples and tests.
 
+## Completed (Recently)
+
+- Borrow‑lite locals with non‑escaping rules and error coverage.
+- Capability hardening: root normalization, symlink escape guard, and tests.
+- Linear control‑flow checks with attenuation/untrusted tests.
+- Match exhaustiveness for `bool`, `Result`, and enums.
+- Safe arithmetic with trap‑on‑overflow and modular helpers.
+- Result helpers (`unwrap_or`, `unwrap_err_or`) with tests.
+- Explicitness policy: shadowing rejected, unsigned ordering enforced.
+- Docs and workflow: architecture/policy/samples, justfile tasks, tutorial updates.
+
 ## Priority 1: Backend Cleanup (Highest)
 
 Goal: keep the compiler/backend simple and trustworthy so future features don’t compound complexity.
@@ -56,6 +67,14 @@ Goal: add power without hidden control flow or inference.
 Deliverables:
 - Typeclass MVP with a small stdlib surface (e.g., `Eq`, `Show`).
 - Revised sample programs that feel “natural” without macros or inference.
+
+## Next Horizon
+
+- Borrow‑lite polish: allow `&T` forwarding through helpers; tighten diagnostics.
+- Capability ergonomics: `&self` methods where attenuation should not consume parents.
+- Resource lifecycle: decide whether `drop()` stays a sink or add explicit close/free APIs.
+- Runtime error clarity: structured error codes/messages for FS/alloc paths.
+- Sample apps: config loader with validation, a log tailer, and a dir walker.
 
 ## Ongoing Non‑Goals
 
