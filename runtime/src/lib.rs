@@ -76,6 +76,25 @@ fn new_handle() -> Handle {
     }
 }
 
+fn insert_handle<T>(
+    table: &LazyLock<Mutex<HashMap<Handle, T>>>,
+    handle: Handle,
+    value: T,
+    label: &'static str,
+) {
+    let mut table = table.lock().expect(label);
+    table.insert(handle, value);
+}
+
+fn take_handle<T>(
+    table: &LazyLock<Mutex<HashMap<Handle, T>>>,
+    handle: Handle,
+    label: &'static str,
+) -> Option<T> {
+    let mut table = table.lock().expect(label);
+    table.remove(&handle)
+}
+
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     new_handle()
@@ -106,8 +125,7 @@ pub extern "C" fn capable_rt_mint_readfs(
         return 0;
     };
     let handle = new_handle();
-    let mut table = READ_FS.lock().expect("readfs table");
-    table.insert(handle, ReadFsState { root: root_path });
+    insert_handle(&READ_FS, handle, ReadFsState { root: root_path }, "readfs table");
     handle
 }
 
@@ -126,28 +144,30 @@ pub extern "C" fn capable_rt_mint_filesystem(
         return 0;
     };
     let handle = new_handle();
-    let mut table = FILESYSTEMS.lock().expect("filesystem table");
-    table.insert(handle, FilesystemState { root: root_path });
+    insert_handle(
+        &FILESYSTEMS,
+        handle,
+        FilesystemState { root: root_path },
+        "filesystem table",
+    );
     handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_root_dir(fs: Handle) -> Handle {
-    let state = {
-        let mut table = FILESYSTEMS.lock().expect("filesystem table");
-        table.remove(&fs)
-    };
+    let state = take_handle(&FILESYSTEMS, fs, "filesystem table");
     let Some(state) = state else {
         return 0;
     };
     let handle = new_handle();
-    let mut table = DIRS.lock().expect("dir table");
-    table.insert(
+    insert_handle(
+        &DIRS,
         handle,
         DirState {
             root: state.root,
             rel: PathBuf::new(),
         },
+        "dir table",
     );
     handle
 }
@@ -159,10 +179,7 @@ pub extern "C" fn capable_rt_fs_subdir(
     name_len: usize,
 ) -> Handle {
     let name = unsafe { read_str(name_ptr, name_len) };
-    let state = {
-        let mut table = DIRS.lock().expect("dir table");
-        table.remove(&dir)
-    };
+    let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
     };
@@ -174,13 +191,14 @@ pub extern "C" fn capable_rt_fs_subdir(
         return 0;
     };
     let handle = new_handle();
-    let mut table = DIRS.lock().expect("dir table");
-    table.insert(
+    insert_handle(
+        &DIRS,
         handle,
         DirState {
             root: state.root,
             rel,
         },
+        "dir table",
     );
     handle
 }
@@ -192,10 +210,7 @@ pub extern "C" fn capable_rt_fs_open_read(
     name_len: usize,
 ) -> Handle {
     let name = unsafe { read_str(name_ptr, name_len) };
-    let state = {
-        let mut table = DIRS.lock().expect("dir table");
-        table.remove(&dir)
-    };
+    let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
     };
@@ -207,13 +222,14 @@ pub extern "C" fn capable_rt_fs_open_read(
         return 0;
     };
     let handle = new_handle();
-    let mut table = FILE_READS.lock().expect("file read table");
-    table.insert(
+    insert_handle(
+        &FILE_READS,
         handle,
         FileReadState {
             root: state.root,
             rel,
         },
+        "file read table",
     );
     handle
 }
@@ -305,10 +321,7 @@ pub extern "C" fn capable_rt_fs_read_to_string(
     out_err: *mut i32,
 ) -> u8 {
     let path = unsafe { read_str(path_ptr, path_len) };
-    let state = {
-        let mut table = READ_FS.lock().expect("readfs table");
-        table.remove(&fs)
-    };
+    let state = take_handle(&READ_FS, fs, "readfs table");
 
     let Some(state) = state else {
         return write_result(out_ptr, out_len, out_err, Err(FsErr::PermissionDenied));
@@ -342,10 +355,7 @@ pub extern "C" fn capable_rt_fs_file_read_to_string(
     out_len: *mut u64,
     out_err: *mut i32,
 ) -> u8 {
-    let state = {
-        let mut table = FILE_READS.lock().expect("file read table");
-        table.remove(&file)
-    };
+    let state = take_handle(&FILE_READS, file, "file read table");
 
     let Some(state) = state else {
         return write_result(out_ptr, out_len, out_err, Err(FsErr::PermissionDenied));
