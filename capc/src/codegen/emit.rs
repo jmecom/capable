@@ -2444,12 +2444,13 @@ fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
     if abi_sig == &info.sig {
         return Ok(());
     }
-    match abi_sig.ret {
-        _ if abi_quirks::is_result_lowering(&abi_sig.ret) => Ok(()),
-        _ => Err(CodegenError::Codegen(format!(
+    if abi_quirks::abi_sig_requires_lowering(abi_sig, &info.sig) {
+        Ok(())
+    } else {
+        Err(CodegenError::Codegen(format!(
             "abi signature mismatch for {} without ResultString/ResultOut lowering",
             info.symbol
-        ))),
+        )))
     }
 }
 

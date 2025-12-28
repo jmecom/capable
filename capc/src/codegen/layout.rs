@@ -265,8 +265,8 @@ pub(super) fn type_layout_for_abi(
             let size = align_to(offset, align);
             Ok(TypeLayout { size, align })
         }
-        ty if abi_quirks::is_result_lowering(ty) => Err(CodegenError::Unsupported(
-            "layout for result out params".to_string(),
+        AbiType::ResultOut(_, _) | AbiType::ResultString => Err(CodegenError::Unsupported(
+            abi_quirks::result_lowering_layout_error().to_string(),
         )),
     }
 }

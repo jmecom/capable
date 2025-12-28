@@ -31,3 +31,8 @@ pub fn is_result_lowering(ty: &AbiType) -> bool {
 pub fn abi_sig_requires_lowering(abi_sig: &FnSig, sig: &FnSig) -> bool {
     abi_sig != sig && is_result_lowering(&abi_sig.ret)
 }
+
+/// Error message used when a layout is requested for a lowered Result ABI.
+pub fn result_lowering_layout_error() -> &'static str {
+    "layout for result out params"
+}
