@@ -2314,6 +2314,7 @@ fn value_from_results(
     }
 }
 
+// --- Runtime call emission ---
 /// Emit a call to a runtime intrinsic with ABI adaptation when needed.
 pub(super) fn emit_runtime_wrapper_call(
     builder: &mut FunctionBuilder,
