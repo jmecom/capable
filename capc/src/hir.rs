@@ -105,7 +105,6 @@ pub struct HirEnumVariant {
 #[derive(Debug, Clone)]
 pub struct HirBlock {
     pub stmts: Vec<HirStmt>,
-    pub span: Span,
 }
 
 /// A statement in HIR

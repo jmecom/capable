@@ -279,10 +279,7 @@ fn lower_block(block: &Block, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirB
         .collect();
     ctx.pop_scope();
 
-    Ok(HirBlock {
-        stmts: stmts?,
-        span: block.span,
-    })
+    Ok(HirBlock { stmts: stmts? })
 }
 
 /// Lower a statement into HIR.
@@ -658,14 +655,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                                     expr: ok_expr,
                                     span: method_call.span,
                                 })],
-                                span: method_call.span,
                             };
                             let err_block = HirBlock {
                                 stmts: vec![HirStmt::Expr(HirExprStmt {
                                     expr: default_expr,
                                     span: method_call.span,
                                 })],
-                                span: method_call.span,
                             };
                             return Ok(HirExpr::Match(HirMatch {
                                 expr: Box::new(receiver),
@@ -707,14 +702,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                                     expr: default_expr,
                                     span: method_call.span,
                                 })],
-                                span: method_call.span,
                             };
                             let err_block = HirBlock {
                                 stmts: vec![HirStmt::Expr(HirExprStmt {
                                     expr: err_expr,
                                     span: method_call.span,
                                 })],
-                                span: method_call.span,
                             };
                             return Ok(HirExpr::Match(HirMatch {
                                 expr: Box::new(receiver),
