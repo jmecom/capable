@@ -23,6 +23,7 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 mod emit;
+mod abi_quirks;
 mod intrinsics;
 mod layout;
 

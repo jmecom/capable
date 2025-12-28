@@ -18,6 +18,7 @@ use super::{
     CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape, StructLayoutIndex,
     TypeLayout, ValueRepr,
 };
+use super::abi_quirks;
 use super::layout::{align_to, resolve_struct_layout, type_layout_for_abi};
 use super::sig_to_clif;
 
@@ -621,7 +622,7 @@ fn emit_hir_expr_inner(
             let mut result_out = None;
             let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
 
-            if abi_sig.ret == AbiType::ResultString {
+            if abi_quirks::is_result_string(&abi_sig.ret) {
                 let ptr_ty = module.isa().pointer_type();
                 let slots = result_string_slots(builder, ptr_ty);
                 push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
@@ -680,7 +681,7 @@ fn emit_hir_expr_inner(
             let results = builder.inst_results(call_inst).to_vec();
 
             // Handle result unpacking (same logic as AST version)
-            if abi_sig.ret == AbiType::ResultString {
+            if abi_quirks::is_result_string(&abi_sig.ret) {
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -701,7 +702,7 @@ fn emit_hir_expr_inner(
                     }
                     _ => Err(CodegenError::Unsupported("result out params".to_string())),
                 }
-            } else if let AbiType::ResultOut(_, _) = &abi_sig.ret {
+            } else if abi_quirks::is_result_out(&abi_sig.ret) {
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -1461,14 +1462,9 @@ fn aligned_slot_size(size: u32, align: u32) -> u32 {
     size.max(1).saturating_add(align.saturating_sub(1))
 }
 
-/// ResultString ABI uses a u64 length slot across targets.
-fn result_string_len_bytes() -> u32 {
-    8
-}
-
 fn result_string_slots(builder: &mut FunctionBuilder, ptr_ty: Type) -> ResultStringSlots {
     let ptr_align = ptr_ty.bytes() as u32;
-    let len_bytes = result_string_len_bytes();
+    let len_bytes = abi_quirks::result_string_len_bytes();
     let len_align = len_bytes;
     let err_align = 4u32;
     let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
@@ -2327,7 +2323,7 @@ pub(super) fn emit_runtime_wrapper_call(
     let mut out_slots: Option<ResultStringSlots> = None;
     let mut result_out = None;
 
-    if abi_sig.ret == AbiType::ResultString {
+    if abi_quirks::is_result_string(&abi_sig.ret) {
         let ptr_ty = module.isa().pointer_type();
         let slots = result_string_slots(builder, ptr_ty);
         push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
@@ -2379,7 +2375,7 @@ pub(super) fn emit_runtime_wrapper_call(
     let call_inst = builder.ins().call(local, &args);
     let results = builder.inst_results(call_inst).to_vec();
 
-    if abi_sig.ret == AbiType::ResultString {
+    if abi_quirks::is_result_string(&abi_sig.ret) {
         let tag = results
             .get(0)
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -2401,7 +2397,7 @@ pub(super) fn emit_runtime_wrapper_call(
         }
     }
 
-    if let AbiType::ResultOut(_, _) = &abi_sig.ret {
+    if abi_quirks::is_result_out(&abi_sig.ret) {
         let tag = results
             .get(0)
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -2449,7 +2445,7 @@ fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
         return Ok(());
     }
     match abi_sig.ret {
-        AbiType::ResultString | AbiType::ResultOut(_, _) => Ok(()),
+        _ if abi_quirks::is_result_lowering(&abi_sig.ret) => Ok(()),
         _ => Err(CodegenError::Codegen(format!(
             "abi signature mismatch for {} without ResultString/ResultOut lowering",
             info.symbol
@@ -2470,7 +2466,7 @@ mod tests {
 
     #[test]
     fn result_string_len_is_u64() {
-        assert_eq!(result_string_len_bytes(), 8);
+        assert_eq!(abi_quirks::result_string_len_bytes(), 8);
     }
 
     #[test]
