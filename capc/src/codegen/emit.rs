@@ -18,6 +18,7 @@ use super::{
     CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape, StructLayoutIndex,
     TypeLayout, ValueRepr,
 };
+use super::abi_quirks;
 use super::layout::{align_to, resolve_struct_layout, type_layout_for_abi};
 use super::sig_to_clif;
 
@@ -422,7 +423,9 @@ fn emit_hir_expr_inner(
             if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty.ty {
                 if ty_name == "Result" && args.len() == 2 {
                     let AbiType::Result(ok_abi, err_abi) = &variant.enum_ty.abi else {
-                        return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                        return Err(CodegenError::Unsupported(
+                            abi_quirks::result_abi_mismatch_error().to_string(),
+                        ));
                     };
                     let ok_ty = crate::hir::HirType {
                         ty: args[0].clone(),
@@ -538,7 +541,9 @@ fn emit_hir_expr_inner(
             let ret_value = match &try_expr.ret_ty.ty {
                 crate::typeck::Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
                     let AbiType::Result(ok_abi, _err_abi) = &try_expr.ret_ty.abi else {
-                        return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                        return Err(CodegenError::Unsupported(
+                            abi_quirks::result_abi_mismatch_error().to_string(),
+                        ));
                     };
                     let ok_ty = crate::hir::HirType {
                         ty: args[0].clone(),
@@ -621,7 +626,7 @@ fn emit_hir_expr_inner(
             let mut result_out = None;
             let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
 
-            if abi_sig.ret == AbiType::ResultString {
+            if abi_quirks::is_result_string(&abi_sig.ret) {
                 let ptr_ty = module.isa().pointer_type();
                 let slots = result_string_slots(builder, ptr_ty);
                 push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
@@ -680,7 +685,7 @@ fn emit_hir_expr_inner(
             let results = builder.inst_results(call_inst).to_vec();
 
             // Handle result unpacking (same logic as AST version)
-            if abi_sig.ret == AbiType::ResultString {
+            if abi_quirks::is_result_string(&abi_sig.ret) {
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -691,7 +696,9 @@ fn emit_hir_expr_inner(
                 match &info.sig.ret {
                     AbiType::Result(ok_ty, err_ty) => {
                         if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
-                            return Err(CodegenError::Unsupported("result out params".to_string()));
+                            return Err(CodegenError::Unsupported(
+                                abi_quirks::result_out_params_error().to_string(),
+                            ));
                         }
                         Ok(ValueRepr::Result {
                             tag: *tag,
@@ -699,9 +706,11 @@ fn emit_hir_expr_inner(
                             err: Box::new(ValueRepr::Single(err)),
                         })
                     }
-                    _ => Err(CodegenError::Unsupported("result out params".to_string())),
+                    _ => Err(CodegenError::Unsupported(
+                        abi_quirks::result_out_params_error().to_string(),
+                    )),
                 }
-            } else if let AbiType::ResultOut(_, _) = &abi_sig.ret {
+            } else if abi_quirks::is_result_out(&abi_sig.ret) {
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -1213,7 +1222,9 @@ fn store_value_by_ty(
                     return Err(CodegenError::Unsupported("store result".to_string()));
                 };
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
-                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_abi_mismatch_error().to_string(),
+                    ));
                 };
                 let ok_ty = crate::hir::HirType {
                     ty: args[0].clone(),
@@ -1360,7 +1371,9 @@ fn load_value_by_ty(
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
-                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_abi_mismatch_error().to_string(),
+                    ));
                 };
                 let ok_ty = crate::hir::HirType {
                     ty: args[0].clone(),
@@ -1461,14 +1474,9 @@ fn aligned_slot_size(size: u32, align: u32) -> u32 {
     size.max(1).saturating_add(align.saturating_sub(1))
 }
 
-/// ResultString ABI uses a u64 length slot across targets.
-fn result_string_len_bytes() -> u32 {
-    8
-}
-
 fn result_string_slots(builder: &mut FunctionBuilder, ptr_ty: Type) -> ResultStringSlots {
     let ptr_align = ptr_ty.bytes() as u32;
-    let len_bytes = result_string_len_bytes();
+    let len_bytes = abi_quirks::result_string_len_bytes();
     let len_align = len_bytes;
     let err_align = 4u32;
     let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
@@ -2144,7 +2152,9 @@ fn value_type_for_result_out(ty: &AbiType, ptr_ty: Type) -> Result<ir::Type, Cod
         AbiType::Handle => Ok(ir::types::I64),
         AbiType::Ptr => Ok(ptr_ty),
         AbiType::Unit => Err(CodegenError::Unsupported("result out unit".to_string())),
-        _ => Err(CodegenError::Unsupported("result out params".to_string())),
+        _ => Err(CodegenError::Unsupported(
+            abi_quirks::result_out_params_error().to_string(),
+        )),
     }
 }
 
@@ -2175,8 +2185,12 @@ fn zero_value_for_tykind(
                 err: Box::new(err_val),
             })
         }
-        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
-        AbiType::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported(
+            abi_quirks::result_out_params_error().to_string(),
+        )),
+        AbiType::ResultString => Err(CodegenError::Unsupported(
+            abi_quirks::result_string_params_error().to_string(),
+        )),
     }
 }
 
@@ -2201,7 +2215,9 @@ fn zero_value_for_ty(
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
-                    return Err(CodegenError::Unsupported("result abi mismatch".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_abi_mismatch_error().to_string(),
+                    ));
                 };
                 let ok_ty = crate::hir::HirType {
                     ty: args[0].clone(),
@@ -2309,11 +2325,16 @@ fn value_from_results(
                 err: Box::new(err_val),
             })
         }
-        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported("result out params".to_string())),
-        AbiType::ResultString => Err(CodegenError::Unsupported("result abi".to_string())),
+        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported(
+            abi_quirks::result_out_params_error().to_string(),
+        )),
+        AbiType::ResultString => Err(CodegenError::Unsupported(
+            abi_quirks::result_string_params_error().to_string(),
+        )),
     }
 }
 
+// --- Runtime call emission ---
 /// Emit a call to a runtime intrinsic with ABI adaptation when needed.
 pub(super) fn emit_runtime_wrapper_call(
     builder: &mut FunctionBuilder,
@@ -2326,7 +2347,7 @@ pub(super) fn emit_runtime_wrapper_call(
     let mut out_slots: Option<ResultStringSlots> = None;
     let mut result_out = None;
 
-    if abi_sig.ret == AbiType::ResultString {
+    if abi_quirks::is_result_string(&abi_sig.ret) {
         let ptr_ty = module.isa().pointer_type();
         let slots = result_string_slots(builder, ptr_ty);
         push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
@@ -2378,7 +2399,7 @@ pub(super) fn emit_runtime_wrapper_call(
     let call_inst = builder.ins().call(local, &args);
     let results = builder.inst_results(call_inst).to_vec();
 
-    if abi_sig.ret == AbiType::ResultString {
+    if abi_quirks::is_result_string(&abi_sig.ret) {
         let tag = results
             .get(0)
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -2388,7 +2409,9 @@ pub(super) fn emit_runtime_wrapper_call(
         match &info.sig.ret {
             AbiType::Result(ok_ty, err_ty) => {
                 if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
-                    return Err(CodegenError::Unsupported("result out params".to_string()));
+                    return Err(CodegenError::Unsupported(
+                        abi_quirks::result_out_params_error().to_string(),
+                    ));
                 }
                 return Ok(ValueRepr::Result {
                     tag: *tag,
@@ -2396,11 +2419,13 @@ pub(super) fn emit_runtime_wrapper_call(
                     err: Box::new(ValueRepr::Single(err)),
                 });
             }
-            _ => return Err(CodegenError::Unsupported("result out params".to_string())),
+            _ => return Err(CodegenError::Unsupported(
+                abi_quirks::result_out_params_error().to_string(),
+            )),
         }
     }
 
-    if let AbiType::ResultOut(_, _) = &abi_sig.ret {
+    if abi_quirks::is_result_out(&abi_sig.ret) {
         let tag = results
             .get(0)
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
@@ -2447,12 +2472,13 @@ fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
     if abi_sig == &info.sig {
         return Ok(());
     }
-    match abi_sig.ret {
-        AbiType::ResultString | AbiType::ResultOut(_, _) => Ok(()),
-        _ => Err(CodegenError::Codegen(format!(
+    if abi_quirks::abi_sig_requires_lowering(abi_sig, &info.sig) {
+        Ok(())
+    } else {
+        Err(CodegenError::Codegen(format!(
             "abi signature mismatch for {} without ResultString/ResultOut lowering",
             info.symbol
-        ))),
+        )))
     }
 }
 
@@ -2469,7 +2495,7 @@ mod tests {
 
     #[test]
     fn result_string_len_is_u64() {
-        assert_eq!(result_string_len_bytes(), 8);
+        assert_eq!(abi_quirks::result_string_len_bytes(), 8);
     }
 
     #[test]

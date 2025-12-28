@@ -7,7 +7,8 @@ use std::collections::{HashMap, HashSet};
 use cranelift_codegen::ir::Type;
 
 use super::{
-    CodegenError, EnumIndex, StructFieldLayout, StructLayout, StructLayoutIndex, TypeLayout,
+    abi_quirks, CodegenError, EnumIndex, StructFieldLayout, StructLayout, StructLayoutIndex,
+    TypeLayout,
 };
 use crate::abi::AbiType;
 
@@ -178,9 +179,10 @@ fn type_layout_for_hir_type(
     match &ty.ty {
         Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
             let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
-                return Err(CodegenError::Unsupported(
-                    "result abi mismatch in layout".to_string(),
-                ));
+                return Err(CodegenError::Unsupported(format!(
+                    "{} in layout",
+                    abi_quirks::result_abi_mismatch_error()
+                )));
             };
             let tag = TypeLayout { size: 1, align: 1 };
             let ok = type_layout_for_abi(ok_abi, ptr_ty)?;
@@ -265,7 +267,7 @@ pub(super) fn type_layout_for_abi(
             Ok(TypeLayout { size, align })
         }
         AbiType::ResultOut(_, _) | AbiType::ResultString => Err(CodegenError::Unsupported(
-            "layout for result out params".to_string(),
+            abi_quirks::result_lowering_layout_error().to_string(),
         )),
     }
 }

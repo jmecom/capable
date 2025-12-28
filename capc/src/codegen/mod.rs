@@ -12,6 +12,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::abi::AbiType;
+use crate::error::format_with_context;
 use cranelift_codegen::ir::{self, AbiParam, Function, InstBuilder, Signature, Type};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{Configurable, Flags};
@@ -23,6 +24,7 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 mod emit;
+mod abi_quirks;
 mod intrinsics;
 mod layout;
 
@@ -68,6 +70,21 @@ impl CodegenError {
         match self {
             CodegenError::Spanned { .. } => self,
             other => CodegenError::spanned(other.to_string(), span),
+        }
+    }
+
+    pub fn with_context(self, context: impl AsRef<str>) -> Self {
+        match self {
+            CodegenError::Spanned {
+                message,
+                span,
+                span_raw,
+            } => CodegenError::Spanned {
+                message: format_with_context(context, message),
+                span,
+                span_raw,
+            },
+            other => CodegenError::Codegen(format_with_context(context, other.to_string())),
         }
     }
 }
@@ -211,17 +228,7 @@ pub fn build_object(
             true,
         )?;
     }
-    let missing_intrinsics = runtime_intrinsics
-        .keys()
-        .filter(|key| !fn_map.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing_intrinsics.is_empty() {
-        return Err(CodegenError::Codegen(format!(
-            "runtime intrinsics missing stdlib wrappers: {}",
-            missing_intrinsics.join(", ")
-        )));
-    }
+    validate_intrinsics(&fn_map, &runtime_intrinsics)?;
     for module_ref in &program.user_modules {
         register_user_functions(
             module_ref,
@@ -363,6 +370,7 @@ pub fn build_object(
     Ok(())
 }
 
+/// Lower a codegen signature into a Cranelift signature.
 fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
     let mut signature = Signature::new(CallConv::SystemV);
     for param in &sig.params {
@@ -372,6 +380,7 @@ fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
     signature
 }
 
+/// Append the ABI parameters for a single type.
 fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
         AbiType::Unit => {}
@@ -406,6 +415,7 @@ fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     }
 }
 
+/// Append the ABI return values for a single type.
 fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
         AbiType::Unit => {}
@@ -433,10 +443,12 @@ fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     }
 }
 
+/// Register runtime-backed intrinsics for stdlib symbols.
 fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     intrinsics::register_runtime_intrinsics(ptr_ty)
 }
 
+/// Register Capable-defined functions (stdlib or user) into the codegen map.
 fn register_user_functions(
     module: &crate::hir::HirModule,
     entry: &crate::hir::HirModule,
@@ -489,6 +501,7 @@ fn register_user_functions(
     Ok(())
 }
 
+/// Register extern functions defined in HIR into the codegen map.
 fn register_extern_functions_from_hir(
     module: &crate::hir::HirModule,
     map: &mut HashMap<String, FnInfo>,
@@ -518,6 +531,38 @@ fn register_extern_functions_from_hir(
     Ok(())
 }
 
+/// Validate stdlib/runtime intrinsic coverage in both directions.
+fn validate_intrinsics(
+    fn_map: &HashMap<String, FnInfo>,
+    runtime_intrinsics: &HashMap<String, FnInfo>,
+) -> Result<(), CodegenError> {
+    let missing_wrappers = runtime_intrinsics
+        .keys()
+        .filter(|key| !fn_map.contains_key(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_wrappers.is_empty() {
+        return Err(CodegenError::Codegen(format!(
+            "runtime intrinsics missing stdlib wrappers: {}",
+            missing_wrappers.join(", ")
+        )));
+    }
+
+    let unknown_wrappers = fn_map
+        .iter()
+        .filter(|(key, info)| info.runtime_symbol.is_some() && !runtime_intrinsics.contains_key(*key))
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    if !unknown_wrappers.is_empty() {
+        return Err(CodegenError::Codegen(format!(
+            "stdlib wrappers missing intrinsic registration: {}",
+            unknown_wrappers.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// Build the stable, linkable symbol name for a function.
 fn mangle_symbol(module_name: &str, func_name: &str) -> String {
     let mut out = String::from("capable_");
     out.push_str(&module_name.replace('.', "_"));
