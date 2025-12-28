@@ -27,7 +27,8 @@ pub fn load_stdlib() -> Result<Vec<Module>, ParseError> {
     }
     entries.sort();
     for path in entries {
-        let module = load_module_from_path(&path)?;
+        let module = load_module_from_path(&path)
+            .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
         validate_module_path(&module, &path, &stdlib_root()).map_err(|err| {
             err.with_context(format!("while loading module `{}`", module.name))
         })?;
@@ -116,7 +117,8 @@ impl ModuleGraph {
         }
         entries.sort();
         for path in entries {
-            let module = self.load_cached(&path)?;
+            let module = self.load_cached(&path)
+                .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
             validate_module_path(&module, &path, &stdlib_root()).map_err(|err| {
                 err.with_context(format!("while loading module `{}`", module.name))
             })?;
@@ -152,7 +154,8 @@ impl ModuleGraph {
             if self.cache.contains_key(&path) {
                 continue;
             }
-            let module = self.load_cached(&path)?;
+            let module = self.load_cached(&path)
+                .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
             validate_module_path(&module, &path, &base_dir).map_err(|err| {
                 err.with_context(format!("while loading module `{}`", module.name))
             })?;
@@ -171,7 +174,8 @@ impl ModuleGraph {
         if let Some(module) = self.cache.get(path) {
             return Ok(module.clone());
         }
-        let module = load_module_from_path(path)?;
+        let module = load_module_from_path(path)
+            .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
         self.cache.insert(path.to_path_buf(), module.clone());
         Ok(module)
     }
@@ -211,7 +215,8 @@ pub fn load_user_modules_transitive(
         if cache.contains_key(&path) {
             continue;
         }
-        let module = load_module_from_path(&path)?;
+        let module = load_module_from_path(&path)
+            .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
         validate_module_path(&module, &path, &base_dir).map_err(|err| {
             err.with_context(format!("while loading module `{}`", module.name))
         })?;
