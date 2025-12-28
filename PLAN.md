@@ -2,7 +2,22 @@
 
 This plan keeps Capable aligned with Austral’s goals while staying pragmatic about implementation order. Each phase ends with real examples and tests.
 
-## Phase 1: Core Discipline (Now)
+## Priority 1: Backend Cleanup (Highest)
+
+Goal: keep the compiler/backend simple and trustworthy so future features don’t compound complexity.
+
+- Typed lowering bridge: codegen should consume typed HIR directly, no re‑inferring shapes.
+- Shared type utilities: centralize numeric/orderable/unsigned checks to avoid drift.
+- Clean error plumbing: consistent spans/messages across parse → typeck → lower → codegen.
+- HIR simplification: fully resolved, no spans, no unresolved paths.
+- Runtime handle conventions: unify tables + lifecycle patterns to prep for drop/close.
+
+Deliverables:
+- Typed lowering bridge complete; codegen does not re‑infer type shapes.
+- Error messages consistently point at user code spans.
+- Small cleanup PRs that reduce “special cases” in codegen.
+
+## Phase 2: Core Discipline
 
 Goal: make capability/linearity guarantees reliable without full borrow checking.
 
@@ -16,7 +31,7 @@ Deliverables:
 - Tests for borrow‑lite locals (read‑only, non‑escaping).
 - At least two sample programs that stress capabilities and linear resources.
 
-## Phase 2: Reliability and Predictability
+## Phase 3: Reliability and Predictability
 
 Goal: make the language predictable under failure and in large programs.
 
@@ -30,7 +45,7 @@ Deliverables:
 - Arithmetic tests covering overflow behavior.
 - Lint/error surfaces for disallowed implicitness.
 
-## Phase 3: Expressiveness Without Magic
+## Phase 4: Expressiveness Without Magic
 
 Goal: add power without hidden control flow or inference.
 
