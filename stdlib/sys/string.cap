@@ -6,14 +6,17 @@ use sys::bytes
 use sys::vec
 
 impl string {
+  /// Intrinsic; implemented by the runtime.
   pub fn len(self) -> i32 {
     return 0
   }
 
+  /// Intrinsic; implemented by the runtime.
   pub fn byte_at(self, index: i32) -> u8 {
     return 0u8
   }
 
+  /// Intrinsic; implemented by the runtime.
   pub fn as_slice(self) -> Slice[u8] {
     return ()
   }
@@ -23,19 +26,34 @@ impl string {
     return self.as_slice()
   }
 
+  /// Intrinsic; implemented by the runtime.
   pub fn split_whitespace(self) -> VecString {
     return ()
   }
 
+  /// Intrinsic; implemented by the runtime.
   pub fn lines(self) -> VecString {
     return ()
   }
 
+  /// Intrinsic; implemented by the runtime.
   pub fn split(self, delim: u8) -> VecString {
     return ()
   }
 
   pub fn starts_with(self, prefix: string) -> bool {
-    return false
+    let self_len = self.len()
+    let prefix_len = prefix.len()
+    if (prefix_len > self_len) {
+      return false
+    }
+    let i = 0
+    while (i < prefix_len) {
+      if self.byte_at(i) != prefix.byte_at(i) {
+        return false
+      }
+      i = i + 1
+    }
+    return true
   }
 }
