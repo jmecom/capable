@@ -27,8 +27,11 @@ pub fn load_stdlib() -> Result<Vec<Module>, ParseError> {
     }
     entries.sort();
     for path in entries {
-        let module = load_module_from_path(&path)?;
-        validate_module_path(&module, &path, &stdlib_root())?;
+        let module = load_module_from_path(&path)
+            .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
+        validate_module_path(&module, &path, &stdlib_root()).map_err(|err| {
+            err.with_context(format!("while loading module `{}`", module.name))
+        })?;
         modules.push(module);
     }
     Ok(modules)
@@ -114,8 +117,11 @@ impl ModuleGraph {
         }
         entries.sort();
         for path in entries {
-            let module = self.load_cached(&path)?;
-            validate_module_path(&module, &path, &stdlib_root())?;
+            let module = self.load_cached(&path)
+                .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
+            validate_module_path(&module, &path, &stdlib_root()).map_err(|err| {
+                err.with_context(format!("while loading module `{}`", module.name))
+            })?;
             modules.push(module);
         }
         Ok(modules)
@@ -148,8 +154,11 @@ impl ModuleGraph {
             if self.cache.contains_key(&path) {
                 continue;
             }
-            let module = self.load_cached(&path)?;
-            validate_module_path(&module, &path, &base_dir)?;
+            let module = self.load_cached(&path)
+                .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
+            validate_module_path(&module, &path, &base_dir).map_err(|err| {
+                err.with_context(format!("while loading module `{}`", module.name))
+            })?;
             for use_decl in &module.uses {
                 if let Some(dep_path) = resolve_use_path(&base_dir, use_decl)? {
                     queue.push_back((dep_path, base_dir.clone()));
@@ -165,7 +174,8 @@ impl ModuleGraph {
         if let Some(module) = self.cache.get(path) {
             return Ok(module.clone());
         }
-        let module = load_module_from_path(path)?;
+        let module = load_module_from_path(path)
+            .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
         self.cache.insert(path.to_path_buf(), module.clone());
         Ok(module)
     }
@@ -205,8 +215,11 @@ pub fn load_user_modules_transitive(
         if cache.contains_key(&path) {
             continue;
         }
-        let module = load_module_from_path(&path)?;
-        validate_module_path(&module, &path, &base_dir)?;
+        let module = load_module_from_path(&path)
+            .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
+        validate_module_path(&module, &path, &base_dir).map_err(|err| {
+            err.with_context(format!("while loading module `{}`", module.name))
+        })?;
         for use_decl in &module.uses {
             if let Some(dep_path) = resolve_use_path(&base_dir, use_decl)? {
                 queue.push_back((dep_path, base_dir.clone()));

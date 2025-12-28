@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -336,6 +336,7 @@ pub struct MatchExpr {
     pub expr: Box<Expr>,
     pub arms: Vec<MatchArm>,
     pub span: Span,
+    pub match_span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

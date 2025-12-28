@@ -43,6 +43,8 @@ pub fn main() -> i32 {
 - Expressions: literals, calls, binary ops, unary ops, method calls.
 - Modules + imports: `module ...` and `use ...` (aliases by last path segment).
 - If a function returns `unit`, you can omit the `-> unit` annotation.
+- Integer arithmetic traps on overflow.
+- Variable shadowing is not allowed.
 
 ## 3) Structs and enums
 
@@ -102,6 +104,22 @@ fn read_value() -> Result[i32, i32] {
 fn use_value() -> Result[i32, i32] {
   let v = read_value()?
   return Ok(v + 1)
+}
+```
+
+You can also unwrap with defaults:
+
+```cap
+let v = make().unwrap_or(0)
+let e = make().unwrap_err_or(0)
+```
+
+Matches must be exhaustive; use `_` to cover the rest:
+
+```cap
+match flag {
+  true => { }
+  false => { }
 }
 ```
 
@@ -179,7 +197,7 @@ Linear values must be consumed along every path. `drop(x)` is a built-in sink th
 
 ## 10) Borrow-lite: &T parameters
 
-There is a small borrow feature for read-only access in function parameters.
+There is a small borrow feature for read-only access in function parameters and locals.
 
 ```cap
 module borrow
@@ -199,8 +217,10 @@ pub fn twice(c: &Cap) -> i32 {
 
 Rules:
 
-- `&T` is only allowed on parameters.
-- References cannot be stored in locals, structs, enums, or returned.
+- `&T` is allowed on parameters and locals.
+- Reference locals must be initialized from another local value.
+- References cannot be stored in structs, enums, or returned.
+- References are read-only: they can only satisfy `&T` parameters.
 - Passing a value to `&T` implicitly borrows it.
 
 This avoids a full borrow checker while making non-consuming observers ergonomic.

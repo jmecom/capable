@@ -1,0 +1,19 @@
+package safe
+module should_fail_linear_match_merge
+
+linear opaque struct Token
+
+enum Choice { A, B }
+
+pub fn main() -> i32 {
+  let t = Token{}
+  let choice = Choice::A
+  match (choice) {
+    Choice::A => {
+      drop(t)
+    }
+    Choice::B => {
+    }
+  }
+  return 0
+}

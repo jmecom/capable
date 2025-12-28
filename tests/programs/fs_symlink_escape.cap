@@ -1,0 +1,17 @@
+module fs_symlink_escape
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let rfs = rc.mint_readfs("tests/fixtures/config")
+  match rfs.read_to_string("link.txt") {
+    Ok(_) => {
+      c.println("BUG: symlink escape")
+      return 2
+    }
+    Err(_) => {
+      c.println("denied")
+      return 0
+    }
+  }
+}

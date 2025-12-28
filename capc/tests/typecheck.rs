@@ -18,6 +18,17 @@ fn typecheck_ok() {
 }
 
 #[test]
+fn typecheck_shadowing_fails() {
+    let source = load_program("should_fail_shadowing.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("variable shadowing is not allowed"));
+}
+
+#[test]
 fn typecheck_fs_read_ok() {
     let source = load_program("fs_read.cap");
     let module = parse_module(&source).expect("parse module");
@@ -47,6 +58,68 @@ fn typecheck_match_bool_ok() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_match_bool_non_exhaustive_fails() {
+    let source = load_program("should_fail_match_bool_non_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("non-exhaustive match on bool"));
+}
+
+#[test]
+fn typecheck_match_enum_non_exhaustive_fails() {
+    let source = load_program("should_fail_match_enum_non_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("non-exhaustive match, missing variants"));
+}
+
+#[test]
+fn typecheck_match_enum_exhaustive_ok() {
+    let source = load_program("should_pass_match_enum_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_match_result_non_exhaustive_fails() {
+    let source = load_program("should_fail_match_result_non_exhaustive.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("non-exhaustive match on Result"));
+}
+
+#[test]
+fn typecheck_result_unwrap_or_ok() {
+    let source = load_program("should_pass_result_unwrap_or.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_result_unwrap_err_or_ok() {
+    let source = load_program("should_pass_result_unwrap_err_or.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_result_unwrap_or_mismatch_fails() {
+    let source = load_program("should_fail_result_unwrap_or_mismatch.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("unwrap_or type mismatch"));
 }
 
 #[test]
@@ -194,6 +267,28 @@ fn typecheck_try_question_err_mismatch_fails() {
 }
 
 #[test]
+fn typecheck_numeric_add_mismatch_fails() {
+    let source = load_program("should_fail_numeric_add_mismatch.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("implicit numeric conversions are not allowed"));
+}
+
+#[test]
+fn typecheck_numeric_cmp_mismatch_fails() {
+    let source = load_program("should_fail_numeric_cmp_mismatch.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("implicit numeric conversions are not allowed"));
+}
+
+#[test]
 fn typecheck_dup_affine_field_fails() {
     let source = load_program("should_fail_dup_affine_field.cap");
     let module = parse_module(&source).expect("parse module");
@@ -285,6 +380,28 @@ fn typecheck_linear_branch_merge_fails() {
 }
 
 #[test]
+fn typecheck_linear_match_merge_fails() {
+    let source = load_program("should_fail_linear_match_merge.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("linear value `t` must be consumed on all paths"));
+}
+
+#[test]
+fn typecheck_linear_loop_move_fails() {
+    let source = load_program("should_fail_linear_loop_move.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("move-only value `t` moved inside loop"));
+}
+
+#[test]
 fn typecheck_copy_struct_move_field_fails() {
     let source = load_program("should_fail_copy_struct_move_field.cap");
     let module = parse_module(&source).expect("parse module");
@@ -323,6 +440,29 @@ fn typecheck_attenuation_reuse_fileread_fails() {
 }
 
 #[test]
+fn typecheck_attenuation_untrusted_pass() {
+    let source = load_program("attenuation_untrusted_pass.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/attenuation_untrusted_pass.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    type_check_program(&module, &stdlib, &user_modules).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_attenuation_untrusted_fail() {
+    let source = load_program("attenuation_untrusted_fail.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/programs/attenuation_untrusted_fail.cap");
+    let user_modules = load_user_modules_transitive(&path, &module).expect("load user modules");
+    let err = type_check_program(&module, &stdlib, &user_modules).expect_err("expected type error");
+    assert!(err.to_string().contains("use of moved value `d`"));
+}
+
+#[test]
 fn typecheck_borrow_self_ok() {
     let source = load_program("should_pass_borrow_self.cap");
     let module = parse_module(&source).expect("parse module");
@@ -331,14 +471,11 @@ fn typecheck_borrow_self_ok() {
 }
 
 #[test]
-fn typecheck_borrow_local_fails() {
-    let source = load_program("should_fail_borrow_local.cap");
+fn typecheck_borrow_local_ok() {
+    let source = load_program("should_pass_borrow_local.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
-    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err
-        .to_string()
-        .contains("reference types cannot be stored in locals"));
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
 }
 
 #[test]
@@ -350,6 +487,39 @@ fn typecheck_borrow_return_fails() {
     assert!(err
         .to_string()
         .contains("reference types cannot be returned"));
+}
+
+#[test]
+fn typecheck_borrow_local_temp_fails() {
+    let source = load_program("should_fail_borrow_local_temp.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("reference locals must be initialized from a local value"));
+}
+
+#[test]
+fn typecheck_borrow_local_move_fails() {
+    let source = load_program("should_fail_borrow_local_move.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("cannot pass a reference to a value parameter"));
+}
+
+#[test]
+fn typecheck_borrow_local_assign_fails() {
+    let source = load_program("should_fail_borrow_local_assign.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("cannot assign to a reference local"));
 }
 
 #[test]

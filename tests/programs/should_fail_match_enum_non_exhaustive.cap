@@ -1,0 +1,12 @@
+module should_fail_match_enum_non_exhaustive
+
+enum Choice { A, B }
+
+pub fn main() -> i32 {
+  let c = Choice::A
+  match (c) {
+    Choice::A => {
+    }
+  }
+  return 0
+}

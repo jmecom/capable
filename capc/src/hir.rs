@@ -49,8 +49,6 @@ pub struct HirFunction {
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
     pub body: HirBlock,
-    pub is_pub: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -58,14 +56,11 @@ pub struct HirExternFunction {
     pub name: String,
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
-    pub is_pub: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct HirParam {
     pub local_id: LocalId,
-    pub name: String,
     pub ty: HirType,
 }
 
@@ -74,11 +69,7 @@ pub struct HirParam {
 pub struct HirStruct {
     pub name: String,
     pub fields: Vec<HirField>,
-    pub is_pub: bool,
     pub is_opaque: bool,
-    pub is_linear: bool,
-    pub is_copy: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -92,8 +83,6 @@ pub struct HirField {
 pub struct HirEnum {
     pub name: String,
     pub variants: Vec<HirEnumVariant>,
-    pub is_pub: bool,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +95,6 @@ pub struct HirEnumVariant {
 #[derive(Debug, Clone)]
 pub struct HirBlock {
     pub stmts: Vec<HirStmt>,
-    pub span: Span,
 }
 
 /// A statement in HIR
@@ -120,10 +108,22 @@ pub enum HirStmt {
     Expr(HirExprStmt),
 }
 
+impl HirStmt {
+    pub fn span(&self) -> Span {
+        match self {
+            HirStmt::Let(s) => s.span,
+            HirStmt::Assign(s) => s.span,
+            HirStmt::Return(s) => s.span,
+            HirStmt::If(s) => s.span,
+            HirStmt::While(s) => s.span,
+            HirStmt::Expr(s) => s.span,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HirLetStmt {
     pub local_id: LocalId,
-    pub name: String,
     pub ty: HirType,
     pub expr: HirExpr,
     pub span: Span,
@@ -132,7 +132,6 @@ pub struct HirLetStmt {
 #[derive(Debug, Clone)]
 pub struct HirAssignStmt {
     pub local_id: LocalId,
-    pub name: String,
     pub expr: HirExpr,
     pub span: Span,
 }
@@ -194,6 +193,21 @@ impl HirExpr {
             HirExpr::Try(e) => e.span,
         }
     }
+
+    pub fn ty(&self) -> &HirType {
+        match self {
+            HirExpr::Literal(e) => &e.ty,
+            HirExpr::Local(e) => &e.ty,
+            HirExpr::EnumVariant(e) => &e.enum_ty,
+            HirExpr::Call(e) => &e.ret_ty,
+            HirExpr::FieldAccess(e) => &e.field_ty,
+            HirExpr::StructLiteral(e) => &e.struct_ty,
+            HirExpr::Unary(e) => &e.ty,
+            HirExpr::Binary(e) => &e.ty,
+            HirExpr::Match(e) => &e.result_ty,
+            HirExpr::Try(e) => &e.ok_ty,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -206,7 +220,6 @@ pub struct HirLiteral {
 #[derive(Debug, Clone)]
 pub struct HirLocal {
     pub local_id: LocalId,
-    pub name: String,
     pub ty: HirType,
     pub span: Span,
 }
@@ -255,7 +268,6 @@ pub enum IntrinsicId {
 #[derive(Debug, Clone)]
 pub struct HirFieldAccess {
     pub object: Box<HirExpr>,
-    pub object_ty: HirType,
     pub field_name: String,
     pub field_ty: HirType,
     pub span: Span,
@@ -294,7 +306,6 @@ pub struct HirBinary {
 #[derive(Debug, Clone)]
 pub struct HirMatch {
     pub expr: Box<HirExpr>,
-    pub expr_ty: HirType,
     pub arms: Vec<HirMatchArm>,
     pub result_ty: HirType,
     pub span: Span,
@@ -319,11 +330,10 @@ pub enum HirPattern {
     Wildcard,
     /// Path to an enum variant (fully resolved)
     Variant {
-        enum_ty: HirType,
         variant_name: String,
-        binding: Option<(LocalId, String)>,
+        binding: Option<LocalId>,
     },
     /// Binding introduces a new local variable
-    Binding(LocalId, String),
+    Binding(LocalId),
     Literal(Literal),
 }

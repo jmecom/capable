@@ -1,0 +1,12 @@
+package safe
+module should_fail_linear_loop_move
+
+linear opaque struct Token
+
+pub fn main() -> i32 {
+  let t = Token{}
+  while true {
+    drop(t)
+  }
+  return 0
+}

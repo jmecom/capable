@@ -1,0 +1,13 @@
+package safe
+module should_fail_borrow_local_temp
+
+opaque struct Cap
+
+fn mk() -> Cap {
+  return Cap{}
+}
+
+pub fn main() -> i32 {
+  let r: &Cap = mk()
+  return 0
+}

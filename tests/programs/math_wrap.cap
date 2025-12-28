@@ -1,0 +1,11 @@
+module math_wrap
+use sys::system
+use sys::math
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let v = math::add_wrap_i32(2147483647, 1)
+  c.assert(v == -2147483648)
+  c.println("wrap ok")
+  return 0
+}

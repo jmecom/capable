@@ -5,6 +5,8 @@
 //! - `emit`: HIR -> Cranelift emission and ABI lowering helpers.
 //! - `layout`: type/struct layout computation and enum indexing.
 
+#![allow(unused_assignments)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -17,6 +19,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{Linkage, Module as ModuleTrait};
 use cranelift_native;
 use cranelift_object::{ObjectBuilder, ObjectModule};
+use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 mod emit;
@@ -25,8 +28,19 @@ mod layout;
 use emit::{emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local, value_from_params};
 use layout::{build_enum_index, build_struct_layout_index};
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
+#[allow(unused_assignments)]
 pub enum CodegenError {
+    #[error("{message}")]
+    #[diagnostic(code(codegen::spanned))]
+    Spanned {
+        #[allow(dead_code)]
+        message: String,
+        #[label]
+        span: SourceSpan,
+        #[allow(dead_code)]
+        span_raw: crate::ast::Span,
+    },
     #[error("unsupported {0}")]
     Unsupported(String),
     #[error("unknown function `{0}`")]
@@ -37,6 +51,24 @@ pub enum CodegenError {
     Io(String),
     #[error("codegen error: {0}")]
     Codegen(String),
+}
+
+impl CodegenError {
+    pub fn spanned(message: impl Into<String>, span: crate::ast::Span) -> Self {
+        let source_span: SourceSpan = (span.start, span.end.saturating_sub(span.start)).into();
+        CodegenError::Spanned {
+            message: message.into(),
+            span: source_span,
+            span_raw: span,
+        }
+    }
+
+    pub fn with_span(self, span: crate::ast::Span) -> Self {
+        match self {
+            CodegenError::Spanned { .. } => self,
+            other => CodegenError::spanned(other.to_string(), span),
+        }
+    }
 }
 
 /// Tracks control flow state during code emission.
@@ -275,14 +307,14 @@ pub fn build_object(
                 continue;
             }
 
-            let mut locals: HashMap<String, LocalValue> = HashMap::new();
+            let mut locals: HashMap<crate::hir::LocalId, LocalValue> = HashMap::new();
             let params = builder.block_params(block).to_vec();
             let mut param_index = 0;
             for param in &func.params {
                 let value =
                     value_from_params(&mut builder, &param.ty.abi, &params, &mut param_index)?;
                 let local = store_local(&mut builder, value);
-                locals.insert(param.name.clone(), local);
+                locals.insert(param.local_id, local);
             }
 
             let mut terminated = false;
@@ -453,6 +485,18 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     let console_print_i32 = FnSig {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Unit,
+    };
+    let math_i32 = FnSig {
+        params: vec![AbiType::I32, AbiType::I32],
+        ret: AbiType::I32,
+    };
+    let math_u32 = FnSig {
+        params: vec![AbiType::U32, AbiType::U32],
+        ret: AbiType::U32,
+    };
+    let math_u8 = FnSig {
+        params: vec![AbiType::U8, AbiType::U8],
+        ret: AbiType::U8,
     };
     let mem_malloc = FnSig {
         params: vec![AbiType::Handle, AbiType::I32],
@@ -867,6 +911,96 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: console_assert,
             abi_sig: None,
             symbol: "capable_rt_assert".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_i32".to_string(),
+        FnInfo {
+            sig: math_i32,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_i32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_u32".to_string(),
+        FnInfo {
+            sig: math_u32,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_u32".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.add_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_add_wrap_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.sub_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_math_sub_wrap_u8".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.math.mul_wrap_u8".to_string(),
+        FnInfo {
+            sig: math_u8,
+            abi_sig: None,
+            symbol: "capable_rt_math_mul_wrap_u8".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

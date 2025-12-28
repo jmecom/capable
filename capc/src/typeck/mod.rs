@@ -41,6 +41,53 @@ pub enum BuiltinType {
     Unit,
 }
 
+pub(super) fn function_key(module_name: &str, func_name: &str) -> String {
+    format!("{module_name}::{func_name}")
+}
+
+/// Return true if the type is a built-in numeric type.
+pub fn is_numeric_type(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Builtin(BuiltinType::I32)
+            | Ty::Builtin(BuiltinType::I64)
+            | Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U8)
+    )
+}
+
+/// Return true if the type can be ordered with <, <=, >, >=.
+pub fn is_orderable_type(ty: &Ty) -> bool {
+    is_numeric_type(ty)
+}
+
+/// Return true if the type is an unsigned integer.
+pub fn is_unsigned_type(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Builtin(BuiltinType::U32) | Ty::Builtin(BuiltinType::U8)
+    )
+}
+
+/// Collected type information for expressions within a single function.
+#[derive(Debug, Default, Clone)]
+struct TypeTable {
+    expr_types: HashMap<Span, Ty>,
+}
+
+impl TypeTable {
+    fn record(&mut self, span: Span, ty: Ty) {
+        self.expr_types.insert(span, ty);
+    }
+
+    fn get(&self, span: Span) -> Option<&Ty> {
+        self.expr_types.get(&span)
+    }
+}
+
+/// Type tables for all functions in a module, keyed by function name.
+type FunctionTypeTables = HashMap<String, TypeTable>;
+
 /// Resolved signature for a function.
 #[derive(Debug, Clone)]
 struct FunctionSig {
@@ -255,7 +302,11 @@ fn resolve_method_target(
     struct_map: &HashMap<String, StructInfo>,
     span: Span,
 ) -> Result<(String, String, Vec<Ty>), TypeError> {
-    let (receiver_name, receiver_args) = match receiver_ty {
+    let base_ty = match receiver_ty {
+        Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+        _ => receiver_ty,
+    };
+    let (receiver_name, receiver_args) = match base_ty {
         Ty::Path(name, args) => (name.as_str(), args),
         Ty::Builtin(BuiltinType::String) => {
             return Ok((
@@ -660,57 +711,93 @@ pub fn type_check_program(
         .chain(std::iter::once(module))
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();
-    check::validate_package_safety(module)?;
+    check::validate_package_safety(module)
+        .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
     for user_module in user_modules {
-        check::validate_package_safety(user_module)?;
+        check::validate_package_safety(user_module)
+            .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
     }
-    let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)?;
-    let enum_map = collect::collect_enums(&modules, &module_name, &stdlib_index)?;
-    collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)?;
-    let functions = collect::collect_functions(&modules, &module_name, &stdlib_index, &struct_map)?;
+    let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)
+        .map_err(|err| err.with_context("while collecting structs"))?;
+    let enum_map = collect::collect_enums(&modules, &module_name, &stdlib_index)
+        .map_err(|err| err.with_context("while collecting enums"))?;
+    collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)
+        .map_err(|err| err.with_context("while validating copy structs"))?;
+    let functions = collect::collect_functions(&modules, &module_name, &stdlib_index, &struct_map)
+        .map_err(|err| err.with_context("while collecting functions"))?;
 
-    for item in &module.items {
-        match item {
-            Item::Function(func) => {
-                check::check_function(
-                    func,
-                    &functions,
-                    &use_map,
-                    &struct_map,
-                    &enum_map,
-                    &stdlib_index,
-                    &module_name,
-                )?;
-            }
-            Item::Impl(impl_block) => {
-                let methods = desugar_impl_methods(
-                    impl_block,
-                    &module_name,
-                    &use_map,
-                    &stdlib_index,
-                    &struct_map,
-                )?;
-                for method in methods {
+    let mut type_tables: FunctionTypeTables = HashMap::new();
+
+    let mut check_module = |module: &Module| -> Result<(), TypeError> {
+        let module_name = module.name.to_string();
+        let module_use = UseMap::new(module);
+        for item in &module.items {
+            match item {
+                Item::Function(func) => {
+                    let mut table = TypeTable::default();
                     check::check_function(
-                        &method,
+                        func,
                         &functions,
-                        &use_map,
+                        &module_use,
                         &struct_map,
                         &enum_map,
                         &stdlib_index,
                         &module_name,
-                    )?;
+                        Some(&mut table),
+                    )
+                    .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
+                    type_tables.insert(function_key(&module_name, &func.name.item), table);
                 }
+                Item::Impl(impl_block) => {
+                    let methods = desugar_impl_methods(
+                        impl_block,
+                        &module_name,
+                        &module_use,
+                        &stdlib_index,
+                        &struct_map,
+                    )?;
+                    for method in methods {
+                        let mut table = TypeTable::default();
+                        check::check_function(
+                            &method,
+                            &functions,
+                            &module_use,
+                            &struct_map,
+                            &enum_map,
+                            &stdlib_index,
+                            &module_name,
+                            Some(&mut table),
+                        )
+                        .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
+                        type_tables.insert(function_key(&module_name, &method.name.item), table);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
+        Ok(())
+    };
+
+    for module in user_modules {
+        check_module(module)?;
     }
+    check_module(module)?;
 
     let hir_stdlib: Result<Vec<HirModule>, TypeError> = stdlib
         .iter()
         .map(|m| {
             let use_map = UseMap::new(m);
-            lower::lower_module(m, &functions, &struct_map, &enum_map, &use_map, &stdlib_index)
+            lower::lower_module(
+                m,
+                &functions,
+                &struct_map,
+                &enum_map,
+                &use_map,
+                &stdlib_index,
+                Some(&type_tables),
+                true,
+            )
+            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
@@ -718,7 +805,17 @@ pub fn type_check_program(
         .iter()
         .map(|m| {
             let use_map = UseMap::new(m);
-            lower::lower_module(m, &functions, &struct_map, &enum_map, &use_map, &stdlib_index)
+            lower::lower_module(
+                m,
+                &functions,
+                &struct_map,
+                &enum_map,
+                &use_map,
+                &stdlib_index,
+                Some(&type_tables),
+                false,
+            )
+            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
@@ -729,7 +826,10 @@ pub fn type_check_program(
         &enum_map,
         &use_map,
         &stdlib_index,
-    )?;
+        Some(&type_tables),
+        false,
+    )
+    .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
 
     Ok(crate::hir::HirProgram {
         entry: hir_entry,

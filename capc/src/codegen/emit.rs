@@ -26,7 +26,30 @@ use super::sig_to_clif;
 pub(super) fn emit_hir_stmt(
     builder: &mut FunctionBuilder,
     stmt: &crate::hir::HirStmt,
-    locals: &mut HashMap<String, LocalValue>,
+    locals: &mut HashMap<crate::hir::LocalId, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<Flow, CodegenError> {
+    emit_hir_stmt_inner(
+        builder,
+        stmt,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )
+    .map_err(|err| err.with_span(stmt.span()))
+}
+
+fn emit_hir_stmt_inner(
+    builder: &mut FunctionBuilder,
+    stmt: &crate::hir::HirStmt,
+    locals: &mut HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -37,6 +60,18 @@ pub(super) fn emit_hir_stmt(
 
     match stmt {
         HirStmt::Let(let_stmt) => {
+            if matches!(let_stmt.ty.ty, crate::typeck::Ty::Ref(_)) {
+                if let crate::hir::HirExpr::Local(local) = &let_stmt.expr {
+                    let Some(value) = locals.get(&local.local_id).cloned() else {
+                        return Err(CodegenError::UnknownVariable(format!(
+                            "local {}",
+                            local.local_id.0
+                        )));
+                    };
+                    locals.insert(let_stmt.local_id, value);
+                    return Ok(Flow::Continues);
+                }
+            }
             let value = emit_hir_expr(
                 builder,
                 &let_stmt.expr,
@@ -72,12 +107,12 @@ pub(super) fn emit_hir_stmt(
                     module,
                 )?;
                 locals.insert(
-                    let_stmt.name.clone(),
+                    let_stmt.local_id,
                     LocalValue::StructSlot(slot, let_stmt.ty.clone(), align),
                 );
             } else {
                 let local = store_local(builder, value);
-                locals.insert(let_stmt.name.clone(), local);
+                locals.insert(let_stmt.local_id, local);
             }
         }
         HirStmt::Assign(assign) => {
@@ -91,8 +126,11 @@ pub(super) fn emit_hir_stmt(
                 module,
                 data_counter,
             )?;
-            let Some(local) = locals.get_mut(&assign.name) else {
-                return Err(CodegenError::UnknownVariable(assign.name.clone()));
+            let Some(local) = locals.get_mut(&assign.local_id) else {
+                return Err(CodegenError::UnknownVariable(format!(
+                    "local {}",
+                    assign.local_id.0
+                )));
             };
             match local {
                 LocalValue::Slot(slot, _ty) => {
@@ -314,7 +352,30 @@ pub(super) fn emit_hir_stmt(
 fn emit_hir_expr(
     builder: &mut FunctionBuilder,
     expr: &crate::hir::HirExpr,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    emit_hir_expr_inner(
+        builder,
+        expr,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )
+    .map_err(|err| err.with_span(expr.span()))
+}
+
+fn emit_hir_expr_inner(
+    builder: &mut FunctionBuilder,
+    expr: &crate::hir::HirExpr,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -338,11 +399,13 @@ fn emit_hir_expr(
             Literal::Unit => Ok(ValueRepr::Unit),
         },
         HirExpr::Local(local) => {
-            // Look up the local by name (we still use String keys in the HashMap)
-            if let Some(value) = locals.get(&local.name) {
+            if let Some(value) = locals.get(&local.local_id) {
                 return Ok(load_local(builder, value, module.isa().pointer_type()));
             }
-            Err(CodegenError::UnknownVariable(local.name.clone()))
+            Err(CodegenError::UnknownVariable(format!(
+                "local {}",
+                local.local_id.0
+            )))
         }
         HirExpr::EnumVariant(variant) => {
             // Check if this is a Result type with payload (Ok/Err)
@@ -763,16 +826,16 @@ fn emit_hir_expr(
 
             match (&binary.op, lhs, rhs) {
                 (BinaryOp::Add, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().iadd(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_add(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Sub, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().isub(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_sub(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Mul, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().imul(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_mul(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Div, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    Ok(ValueRepr::Single(builder.ins().sdiv(a, b)))
+                    Ok(ValueRepr::Single(emit_checked_div(builder, a, b, &binary.ty)?))
                 }
                 (BinaryOp::Eq, ValueRepr::Single(a), ValueRepr::Single(b)) => {
                     let cmp = builder.ins().icmp(IntCC::Equal, a, b);
@@ -783,19 +846,35 @@ fn emit_hir_expr(
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Lt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedLessThan, a, b);
+                    let cmp = builder.ins().icmp(cmp_cc(&binary.left, IntCC::SignedLessThan, IntCC::UnsignedLessThan), a, b);
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Lte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedLessThanOrEqual, a, b);
+                    let cmp = builder.ins().icmp(
+                        cmp_cc(&binary.left, IntCC::SignedLessThanOrEqual, IntCC::UnsignedLessThanOrEqual),
+                        a,
+                        b,
+                    );
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Gt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, a, b);
+                    let cmp = builder.ins().icmp(
+                        cmp_cc(&binary.left, IntCC::SignedGreaterThan, IntCC::UnsignedGreaterThan),
+                        a,
+                        b,
+                    );
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 (BinaryOp::Gte, ValueRepr::Single(a), ValueRepr::Single(b)) => {
-                    let cmp = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, a, b);
+                    let cmp = builder.ins().icmp(
+                        cmp_cc(
+                            &binary.left,
+                            IntCC::SignedGreaterThanOrEqual,
+                            IntCC::UnsignedGreaterThanOrEqual,
+                        ),
+                        a,
+                        b,
+                    );
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
                 _ => Err(CodegenError::Unsupported("binary op".to_string())),
@@ -877,11 +956,112 @@ fn emit_hir_expr(
     }
 }
 
+fn emit_checked_add(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let (sum, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
+        builder.ins().uadd_overflow(a, b)
+    } else {
+        builder.ins().sadd_overflow(a, b)
+    };
+    trap_on_overflow(builder, overflow);
+    Ok(sum)
+}
+
+fn emit_checked_sub(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let (diff, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
+        builder.ins().usub_overflow(a, b)
+    } else {
+        builder.ins().ssub_overflow(a, b)
+    };
+    trap_on_overflow(builder, overflow);
+    Ok(diff)
+}
+
+fn emit_checked_mul(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let (prod, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
+        builder.ins().umul_overflow(a, b)
+    } else {
+        builder.ins().smul_overflow(a, b)
+    };
+    trap_on_overflow(builder, overflow);
+    Ok(prod)
+}
+
+fn emit_checked_div(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let b_ty = builder.func.dfg.value_type(b);
+    let zero = builder.ins().iconst(b_ty, 0);
+    let is_zero = builder.ins().icmp(IntCC::Equal, b, zero);
+    let ok_block = builder.create_block();
+    let trap_block = builder.create_block();
+    builder.ins().brif(is_zero, trap_block, &[], ok_block, &[]);
+    builder.switch_to_block(trap_block);
+    builder.ins().trap(ir::TrapCode::IntegerDivisionByZero);
+    builder.switch_to_block(ok_block);
+    builder.seal_block(trap_block);
+    builder.seal_block(ok_block);
+    let value = if crate::typeck::is_unsigned_type(&ty.ty) {
+        builder.ins().udiv(a, b)
+    } else {
+        builder.ins().sdiv(a, b)
+    };
+    Ok(value)
+}
+
+fn trap_on_overflow(builder: &mut FunctionBuilder, overflow: Value) {
+    let ok_block = builder.create_block();
+    let trap_block = builder.create_block();
+    builder.ins().brif(overflow, trap_block, &[], ok_block, &[]);
+    builder.switch_to_block(trap_block);
+    builder.ins().trap(ir::TrapCode::IntegerOverflow);
+    builder.switch_to_block(ok_block);
+    builder.seal_block(trap_block);
+    builder.seal_block(ok_block);
+}
+
+fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
+    let ty = match expr {
+        crate::hir::HirExpr::Literal(lit) => &lit.ty,
+        crate::hir::HirExpr::Local(local) => &local.ty,
+        crate::hir::HirExpr::EnumVariant(variant) => &variant.enum_ty,
+        crate::hir::HirExpr::Call(call) => &call.ret_ty,
+        crate::hir::HirExpr::FieldAccess(field) => &field.field_ty,
+        crate::hir::HirExpr::StructLiteral(lit) => &lit.struct_ty,
+        crate::hir::HirExpr::Unary(unary) => &unary.ty,
+        crate::hir::HirExpr::Binary(binary) => &binary.ty,
+        crate::hir::HirExpr::Match(m) => &m.result_ty,
+        crate::hir::HirExpr::Try(t) => &t.ok_ty,
+    };
+    if crate::typeck::is_unsigned_type(&ty.ty) {
+        unsigned
+    } else {
+        signed
+    }
+}
+
 /// Emit a struct literal into a stack slot and return its address value.
 fn emit_hir_struct_literal(
     builder: &mut FunctionBuilder,
     literal: &crate::hir::HirStructLiteral,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -939,19 +1119,19 @@ fn emit_hir_struct_literal(
 fn emit_hir_field_access(
     builder: &mut FunctionBuilder,
     field_access: &crate::hir::HirFieldAccess,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
+    let object_ty = field_access.object.ty();
     let layout =
-        resolve_struct_layout(&field_access.object_ty.ty, "", &struct_layouts.layouts)
-        .ok_or_else(|| {
+        resolve_struct_layout(&object_ty.ty, "", &struct_layouts.layouts).ok_or_else(|| {
             CodegenError::Unsupported(format!(
                 "struct layout missing for {:?}",
-                field_access.object_ty.ty
+                object_ty.ty
             ))
         })?;
     let Some(field_layout) = layout.fields.get(&field_access.field_name) else {
@@ -1351,7 +1531,7 @@ fn emit_hir_short_circuit_expr(
     lhs_val: ir::Value,
     rhs_expr: &crate::hir::HirExpr,
     is_and: bool,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1402,7 +1582,7 @@ fn emit_hir_short_circuit_expr(
 fn emit_hir_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1458,7 +1638,13 @@ fn emit_hir_match_stmt(
         if idx > 0 {
             builder.switch_to_block(current_block);
         }
-        let cond = hir_match_pattern_cond(builder, &arm.pattern, match_val, enum_index)?;
+        let cond = hir_match_pattern_cond(
+            builder,
+            &arm.pattern,
+            match_val,
+            match_expr.expr.ty(),
+            enum_index,
+        )?;
         builder.ins().brif(cond, arm_block, &[], next_block, &[]);
 
         builder.switch_to_block(arm_block);
@@ -1517,7 +1703,7 @@ fn emit_hir_match_stmt(
 fn emit_hir_match_expr(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
-    locals: &HashMap<String, LocalValue>,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
@@ -1566,7 +1752,13 @@ fn emit_hir_match_expr(
         if idx > 0 {
             builder.switch_to_block(current_block);
         }
-        let cond = hir_match_pattern_cond(builder, &arm.pattern, match_val, enum_index)?;
+        let cond = hir_match_pattern_cond(
+            builder,
+            &arm.pattern,
+            match_val,
+            match_expr.expr.ty(),
+            enum_index,
+        )?;
         builder.ins().brif(cond, arm_block, &[], next_block, &[]);
 
         builder.switch_to_block(arm_block);
@@ -1713,12 +1905,13 @@ fn hir_match_pattern_cond(
     builder: &mut FunctionBuilder,
     pattern: &crate::hir::HirPattern,
     match_val: ir::Value,
+    match_ty: &crate::hir::HirType,
     enum_index: &EnumIndex,
 ) -> Result<ir::Value, CodegenError> {
     use crate::hir::HirPattern;
 
     match pattern {
-        HirPattern::Wildcard | HirPattern::Binding(_, _) => {
+        HirPattern::Wildcard | HirPattern::Binding(_) => {
             // Wildcard and binding patterns always match
             let one = builder.ins().iconst(ir::types::I32, 1);
             Ok(builder.ins().icmp_imm(IntCC::Equal, one, 1))
@@ -1745,13 +1938,13 @@ fn hir_match_pattern_cond(
                 "string pattern matching".to_string(),
             )),
         },
-        HirPattern::Variant { enum_ty, variant_name, .. } => {
+        HirPattern::Variant { variant_name, .. } => {
             // Get the discriminant value for this variant
-            let qualified = match &enum_ty.ty {
+            let qualified = match &match_ty.ty {
                 crate::typeck::Ty::Path(path, _) => path.clone(),
                 _ => return Err(CodegenError::Codegen(format!(
                     "enum variant pattern has non-path type: {:?}",
-                    enum_ty.ty
+                    match_ty.ty
                 ))),
             };
 
@@ -1792,20 +1985,20 @@ fn hir_bind_match_pattern_value(
     pattern: &crate::hir::HirPattern,
     value: &ValueRepr,
     result: Option<&(ValueRepr, ValueRepr)>,
-    locals: &mut HashMap<String, LocalValue>,
+    locals: &mut HashMap<crate::hir::LocalId, LocalValue>,
 ) -> Result<(), CodegenError> {
     use crate::hir::HirPattern;
 
     match pattern {
         HirPattern::Wildcard => Ok(()),
         HirPattern::Literal(_) => Ok(()),
-        HirPattern::Binding(_id, name) => {
+        HirPattern::Binding(local_id) => {
             // Bind the entire value to the variable
-            locals.insert(name.clone(), store_local(builder, value.clone()));
+            locals.insert(*local_id, store_local(builder, value.clone()));
             Ok(())
         }
         HirPattern::Variant { variant_name, binding, .. } => {
-            if let Some((_local_id, name)) = binding {
+            if let Some(local_id) = binding {
                 // Bind the inner value based on variant
                 let Some((ok_val, err_val)) = result else {
                     return Err(CodegenError::Unsupported(
@@ -1813,9 +2006,9 @@ fn hir_bind_match_pattern_value(
                     ));
                 };
                 if variant_name == "Ok" {
-                    locals.insert(name.clone(), store_local(builder, ok_val.clone()));
+                    locals.insert(*local_id, store_local(builder, ok_val.clone()));
                 } else if variant_name == "Err" {
-                    locals.insert(name.clone(), store_local(builder, err_val.clone()));
+                    locals.insert(*local_id, store_local(builder, err_val.clone()));
                 }
             }
             Ok(())

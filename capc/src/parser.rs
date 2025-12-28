@@ -808,7 +808,8 @@ impl Parser {
     }
 
     fn parse_match(&mut self) -> Result<Expr, ParseError> {
-        let start = self.expect(TokenKind::Match)?.span.start;
+        let match_token = self.expect(TokenKind::Match)?;
+        let start = match_token.span.start;
         let expr = self.parse_expr()?;
         self.expect(TokenKind::LBrace)?;
         let mut arms = Vec::new();
@@ -834,6 +835,7 @@ impl Parser {
             expr: Box::new(expr),
             arms,
             span: Span::new(start, end),
+            match_span: match_token.span,
         }))
     }
 

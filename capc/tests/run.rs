@@ -48,6 +48,20 @@ fn run_fs_traversal_denied() {
 }
 
 #[test]
+fn run_fs_symlink_escape() {
+    let out_dir = make_out_dir("fs_symlink_escape");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/fs_symlink_escape.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("denied"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_fs_traversal_kind() {
     let out_dir = make_out_dir("fs_traversal_kind");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
@@ -104,6 +118,34 @@ fn run_struct_field_access() {
     ]);
     assert_eq!(code, 0);
     assert!(stdout.contains("7"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_math_wrap() {
+    let out_dir = make_out_dir("math_wrap");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/math_wrap.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("wrap ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_unsigned_compare() {
+    let out_dir = make_out_dir("unsigned_compare");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/unsigned_compare.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("unsigned compare ok"), "stdout was: {stdout:?}");
 }
 
 #[test]
@@ -217,6 +259,32 @@ fn run_config_loader() {
         "config ok",
     ];
     assert_eq!(lines, expected, "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_overflow_add_traps() {
+    let out_dir = make_out_dir("overflow_add");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, _stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/overflow_add.cap",
+    ]);
+    assert_ne!(code, 0);
+}
+
+#[test]
+fn run_div_zero_traps() {
+    let out_dir = make_out_dir("div_zero");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, _stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/div_zero.cap",
+    ]);
+    assert_ne!(code, 0);
 }
 
 #[test]

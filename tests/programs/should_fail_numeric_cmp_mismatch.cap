@@ -1,0 +1,8 @@
+module app
+
+fn main() -> unit {
+  let a = 1u8
+  let b: i32 = 2
+  if (a < b) {
+  }
+}

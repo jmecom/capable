@@ -1,13 +1,40 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    is_affine_type, lower_type, resolve_enum_variant, resolve_method_target, resolve_path,
-    resolve_type_name, type_contains_ref, type_kind, BuiltinType, EnumInfo, FunctionSig, MoveState,
-    Scopes, SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, UseMap, UseMode,
+    is_affine_type, is_numeric_type, is_orderable_type, lower_type, resolve_enum_variant,
+    resolve_method_target, resolve_path, resolve_type_name, type_contains_ref, type_kind,
+    BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo, Ty,
+    TypeKind, TypeTable, UseMap, UseMode,
 };
+
+/// Optional recorder for expression types during checking.
+pub(super) struct TypeRecorder<'a> {
+    table: Option<&'a mut TypeTable>,
+}
+
+impl<'a> TypeRecorder<'a> {
+    pub(super) fn new(table: Option<&'a mut TypeTable>) -> Self {
+        Self { table }
+    }
+
+    pub(super) fn record(&mut self, expr: &Expr, ty: &Ty) {
+        if let Some(table) = self.table.as_deref_mut() {
+            table.record(expr.span(), ty.clone());
+        }
+    }
+}
+
+fn record_expr_type(
+    recorder: &mut TypeRecorder,
+    expr: &Expr,
+    ty: Ty,
+) -> Result<Ty, TypeError> {
+    recorder.record(expr, &ty);
+    Ok(ty)
+}
 
 /// Safe packages cannot mention externs or raw pointer types anywhere.
 pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
@@ -195,6 +222,7 @@ pub(super) fn check_function(
     enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
+    type_table: Option<&mut TypeTable>,
 ) -> Result<(), TypeError> {
     let mut params_map = HashMap::new();
     for param in &func.params {
@@ -226,6 +254,7 @@ pub(super) fn check_function(
         params_map.insert(param.name.item.clone(), ty);
     }
     let mut scopes = Scopes::from_flat_map(params_map);
+    let mut recorder = TypeRecorder::new(type_table);
 
     let ret_ty = lower_type(&func.ret, use_map, stdlib)?;
     if let Some(span) = type_contains_ref(&func.ret) {
@@ -241,6 +270,7 @@ pub(super) fn check_function(
             &ret_ty,
             functions,
             &mut scopes,
+            &mut recorder,
             use_map,
             struct_map,
             enum_map,
@@ -276,6 +306,7 @@ fn check_stmt(
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -284,11 +315,27 @@ fn check_stmt(
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
+            if scopes.contains(&let_stmt.name.item) {
+                return Err(TypeError::new(
+                    format!("variable shadowing is not allowed: `{}`", let_stmt.name.item),
+                    let_stmt.name.span,
+                ));
+            }
+            let annot_ref = let_stmt
+                .ty
+                .as_ref()
+                .is_some_and(|ty| matches!(ty, Type::Ref { .. }));
+            let expr_use_mode = if annot_ref {
+                UseMode::Read
+            } else {
+                UseMode::Move
+            };
             let expr_ty = check_expr(
                 &let_stmt.expr,
                 functions,
                 scopes,
-                UseMode::Move,
+                expr_use_mode,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -298,20 +345,66 @@ fn check_stmt(
             )?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
                 if let Some(span) = type_contains_ref(annot) {
-                    return Err(TypeError::new(
-                        "reference types cannot be stored in locals".to_string(),
-                        span,
-                    ));
+                    match annot {
+                        Type::Ref { target, .. } => {
+                            if type_contains_ref(target).is_some() {
+                                return Err(TypeError::new(
+                                    "nested reference types are not allowed".to_string(),
+                                    span,
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(TypeError::new(
+                                "reference types are only allowed as direct local types"
+                                    .to_string(),
+                                span,
+                            ));
+                        }
+                    }
                 }
                 let annot_ty = lower_type(annot, use_map, stdlib)?;
-                if annot_ty != expr_ty {
+                let matches_ref = if let Ty::Ref(inner) = &annot_ty {
+                    &expr_ty == inner.as_ref() || &expr_ty == &annot_ty
+                } else {
+                    false
+                };
+                if annot_ty != expr_ty && !matches_ref {
                     return Err(TypeError::new(
                         format!("type mismatch: expected {annot_ty:?}, found {expr_ty:?}"),
                         let_stmt.span,
                     ));
                 }
+                if matches!(annot_ty, Ty::Ref(_)) {
+                    let Some((name, _span)) = leftmost_local_in_chain(&let_stmt.expr) else {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    };
+                    if !scopes.contains(name) {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    }
+                }
                 annot_ty
             } else {
+                if matches!(expr_ty, Ty::Ref(_)) {
+                    let Some((name, _span)) = leftmost_local_in_chain(&let_stmt.expr) else {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    };
+                    if !scopes.contains(name) {
+                        return Err(TypeError::new(
+                            "reference locals must be initialized from a local value".to_string(),
+                            let_stmt.expr.span(),
+                        ));
+                    }
+                }
                 expr_ty
             };
             scopes.insert_local(let_stmt.name.item.clone(), final_ty);
@@ -324,11 +417,18 @@ fn check_stmt(
                 ));
             };
             let existing = existing.ty.clone();
+            if matches!(existing, Ty::Ref(_)) {
+                return Err(TypeError::new(
+                    "cannot assign to a reference local".to_string(),
+                    assign.span,
+                ));
+            }
             let expr_ty = check_expr(
                 &assign.expr,
                 functions,
                 scopes,
                 UseMode::Move,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -353,6 +453,7 @@ fn check_stmt(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -377,6 +478,7 @@ fn check_stmt(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -396,6 +498,7 @@ fn check_stmt(
                 ret_ty,
                 functions,
                 &mut then_scopes,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -409,6 +512,7 @@ fn check_stmt(
                     ret_ty,
                     functions,
                     &mut else_scopes,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -431,6 +535,7 @@ fn check_stmt(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -450,6 +555,7 @@ fn check_stmt(
                 ret_ty,
                 functions,
                 &mut body_scopes,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -471,6 +577,7 @@ fn check_stmt(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -484,6 +591,7 @@ fn check_stmt(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -504,6 +612,7 @@ fn check_block(
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -517,6 +626,7 @@ fn check_block(
             ret_ty,
             functions,
             scopes,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -714,6 +824,7 @@ pub(super) fn check_expr(
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
     use_mode: UseMode,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -721,7 +832,7 @@ pub(super) fn check_expr(
     ret_ty: &Ty,
     module_name: &str,
 ) -> Result<Ty, TypeError> {
-    match expr {
+    let ty = match expr {
         Expr::Literal(lit) => match &lit.value {
             Literal::Int(_) => Ok(Ty::Builtin(BuiltinType::I32)),
             Literal::U8(_) => Ok(Ty::Builtin(BuiltinType::U8)),
@@ -743,11 +854,11 @@ pub(super) fn check_expr(
                     if use_mode == UseMode::Move && is_affine_type(&ty, struct_map, enum_map) {
                         scopes.mark_moved(name, path.segments[0].span)?;
                     }
-                    return Ok(ty);
+                    return record_expr_type(recorder, expr, ty);
                 }
             }
             if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
-                return Ok(ty);
+                return record_expr_type(recorder, expr, ty);
             }
             Err(TypeError::new(
                 format!("unknown value `{path}`"),
@@ -776,6 +887,7 @@ pub(super) fn check_expr(
                         functions,
                         scopes,
                         UseMode::Move,
+                        recorder,
                         use_map,
                         struct_map,
                         enum_map,
@@ -783,7 +895,7 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                     )?;
-                    return Ok(Ty::Builtin(BuiltinType::Unit));
+                    return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
                 }
                 if name == "Ok" || name == "Err" {
                     if call.args.len() != 1 {
@@ -797,6 +909,7 @@ pub(super) fn check_expr(
                         functions,
                         scopes,
                         UseMode::Move,
+                        recorder,
                         use_map,
                         struct_map,
                         enum_map,
@@ -813,17 +926,21 @@ pub(super) fn check_expr(
                                     call.args[0].span(),
                                 ));
                             }
-                            return Ok(ret_ty.clone());
+                            return record_expr_type(recorder, expr, ret_ty.clone());
                         }
                     }
-                    return Ok(Ty::Path(
+                    return record_expr_type(
+                        recorder,
+                        expr,
+                        Ty::Path(
                         "Result".to_string(),
                         if name == "Ok" {
                             vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
                         } else {
                             vec![Ty::Builtin(BuiltinType::Unit), arg_ty]
                         },
-                    ));
+                        ),
+                    );
                 }
             }
 
@@ -867,6 +984,7 @@ pub(super) fn check_expr(
                     functions,
                     scopes,
                     use_mode,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -874,8 +992,14 @@ pub(super) fn check_expr(
                     ret_ty,
                     module_name,
                 )?;
+                if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
+                    return Err(TypeError::new(
+                        "cannot pass a reference to a value parameter".to_string(),
+                        arg.span(),
+                    ));
+                }
                 let matches_ref = if let Ty::Ref(inner) = expected {
-                    &arg_ty == inner.as_ref()
+                    &arg_ty == inner.as_ref() || &arg_ty == expected
                 } else {
                     false
                 };
@@ -953,6 +1077,7 @@ pub(super) fn check_expr(
                         functions,
                         scopes,
                         use_mode,
+                        recorder,
                         use_map,
                         struct_map,
                         enum_map,
@@ -960,8 +1085,14 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                     )?;
+                    if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
+                        return Err(TypeError::new(
+                            "cannot pass a reference to a value parameter".to_string(),
+                            arg.span(),
+                        ));
+                    }
                     let matches_ref = if let Ty::Ref(inner) = expected {
-                        &arg_ty == inner.as_ref()
+                        &arg_ty == inner.as_ref() || &arg_ty == expected
                     } else {
                         false
                     };
@@ -974,7 +1105,7 @@ pub(super) fn check_expr(
                         ));
                     }
                 }
-                return Ok(sig.ret.clone());
+                return record_expr_type(recorder, expr, sig.ret.clone());
             }
 
             let receiver_ty = check_expr(
@@ -982,6 +1113,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -989,6 +1121,75 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
             )?;
+            if let Ty::Path(name, args) = &receiver_ty {
+                if name == "Result" && args.len() == 2 {
+                    let ok_ty = &args[0];
+                    let err_ty = &args[1];
+                    match method_call.method.item.as_str() {
+                        "unwrap_or" => {
+                            if method_call.args.len() != 1 {
+                                return Err(TypeError::new(
+                                    "unwrap_or expects one argument".to_string(),
+                                    method_call.span,
+                                ));
+                            }
+                            let arg_ty = check_expr(
+                                &method_call.args[0],
+                                functions,
+                                scopes,
+                                UseMode::Move,
+                                recorder,
+                                use_map,
+                                struct_map,
+                                enum_map,
+                                stdlib,
+                                ret_ty,
+                                module_name,
+                            )?;
+                            if &arg_ty != ok_ty {
+                                return Err(TypeError::new(
+                                    format!(
+                                        "unwrap_or type mismatch: expected {ok_ty:?}, found {arg_ty:?}"
+                                    ),
+                                    method_call.args[0].span(),
+                                ));
+                            }
+                            return record_expr_type(recorder, expr, ok_ty.clone());
+                        }
+                        "unwrap_err_or" => {
+                            if method_call.args.len() != 1 {
+                                return Err(TypeError::new(
+                                    "unwrap_err_or expects one argument".to_string(),
+                                    method_call.span,
+                                ));
+                            }
+                            let arg_ty = check_expr(
+                                &method_call.args[0],
+                                functions,
+                                scopes,
+                                UseMode::Move,
+                                recorder,
+                                use_map,
+                                struct_map,
+                                enum_map,
+                                stdlib,
+                                ret_ty,
+                                module_name,
+                            )?;
+                            if &arg_ty != err_ty {
+                                return Err(TypeError::new(
+                                    format!(
+                                        "unwrap_err_or type mismatch: expected {err_ty:?}, found {arg_ty:?}"
+                                    ),
+                                    method_call.args[0].span(),
+                                ));
+                            }
+                            return record_expr_type(recorder, expr, err_ty.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
             let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
                 module_name,
@@ -1026,17 +1227,38 @@ pub(super) fn check_expr(
                     method_call.span,
                 ));
             }
-            let receiver_ptr = Ty::Ptr(Box::new(receiver_ty.clone()));
+            let receiver_base = match &receiver_ty {
+                Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref().clone(),
+                _ => receiver_ty.clone(),
+            };
             let receiver_unqualified = Ty::Path(type_name.clone(), receiver_args);
-            let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
-            let receiver_ref = Ty::Ref(Box::new(receiver_ty.clone()));
+            let receiver_ref = Ty::Ref(Box::new(receiver_base.clone()));
             let receiver_ref_unqualified = Ty::Ref(Box::new(receiver_unqualified.clone()));
+            let receiver_ptr = Ty::Ptr(Box::new(receiver_base.clone()));
+            let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
+
+            let expects_ref = matches!(sig.params[0], Ty::Ref(_));
+            let expects_ptr = matches!(sig.params[0], Ty::Ptr(_));
+
+            if matches!(receiver_ty, Ty::Ref(_)) && !expects_ref {
+                return Err(TypeError::new(
+                    "cannot use a reference receiver where a value is expected".to_string(),
+                    method_call.receiver.span(),
+                ));
+            }
+            if matches!(receiver_ty, Ty::Ptr(_)) && !expects_ptr {
+                return Err(TypeError::new(
+                    "cannot use a pointer receiver where a value is expected".to_string(),
+                    method_call.receiver.span(),
+                ));
+            }
+
             if sig.params[0] != receiver_ty
-                && sig.params[0] != receiver_ptr
                 && sig.params[0] != receiver_unqualified
-                && sig.params[0] != receiver_ptr_unqualified
                 && sig.params[0] != receiver_ref
                 && sig.params[0] != receiver_ref_unqualified
+                && sig.params[0] != receiver_ptr
+                && sig.params[0] != receiver_ptr_unqualified
             {
                 return Err(TypeError::new(
                     format!(
@@ -1052,6 +1274,7 @@ pub(super) fn check_expr(
                     functions,
                     scopes,
                     UseMode::Move,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1071,6 +1294,7 @@ pub(super) fn check_expr(
                     functions,
                     scopes,
                     use_mode,
+                    recorder,
                     use_map,
                     struct_map,
                     enum_map,
@@ -1078,8 +1302,14 @@ pub(super) fn check_expr(
                     ret_ty,
                     module_name,
                 )?;
+                if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
+                    return Err(TypeError::new(
+                        "cannot pass a reference to a value parameter".to_string(),
+                        arg.span(),
+                    ));
+                }
                 let matches_ref = if let Ty::Ref(inner) = expected {
-                    &arg_ty == inner.as_ref()
+                    &arg_ty == inner.as_ref() || &arg_ty == expected
                 } else {
                     false
                 };
@@ -1096,6 +1326,7 @@ pub(super) fn check_expr(
             lit,
             functions,
             scopes,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1109,6 +1340,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1147,6 +1379,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1159,6 +1392,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Read,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1175,6 +1409,11 @@ pub(super) fn check_expr(
                         || left == Ty::Builtin(BuiltinType::I64))
                     {
                         Ok(left)
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
                     } else {
                         Err(TypeError::new(
                             "binary arithmetic expects matching integer types".to_string(),
@@ -1185,6 +1424,11 @@ pub(super) fn check_expr(
                 BinaryOp::Eq | BinaryOp::Neq => {
                     if left == right {
                         Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
                     } else {
                         Err(TypeError::new(
                             "comparison expects matching operand types".to_string(),
@@ -1195,6 +1439,11 @@ pub(super) fn check_expr(
                 BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
                     if left == right && is_orderable_type(&left) {
                         Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
                     } else {
                         Err(TypeError::new(
                             "ordering expects matching integer types".to_string(),
@@ -1221,6 +1470,7 @@ pub(super) fn check_expr(
             functions,
             scopes,
             use_mode,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1234,6 +1484,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Move,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1279,6 +1530,7 @@ pub(super) fn check_expr(
             functions,
             scopes,
             use_mode,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1306,7 +1558,7 @@ pub(super) fn check_expr(
             if !base_is_local {
                 if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
                     if let Some(ty) = resolve_enum_variant(&path, use_map, enum_map, module_name) {
-                        return Ok(ty);
+                        return record_expr_type(recorder, expr, ty);
                     }
                 }
             }
@@ -1316,6 +1568,7 @@ pub(super) fn check_expr(
                 functions,
                 scopes,
                 UseMode::Project,
+                recorder,
                 use_map,
                 struct_map,
                 enum_map,
@@ -1384,7 +1637,9 @@ pub(super) fn check_expr(
             }
             Ok(field_ty)
         }
-    }
+    }?;
+    recorder.record(expr, &ty);
+    Ok(ty)
 }
 
 /// Check a statement-form match (arms may return, no value required).
@@ -1393,6 +1648,7 @@ fn check_match_stmt(
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
     scrutinee_mode: UseMode,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1405,6 +1661,7 @@ fn check_match_stmt(
         functions,
         scopes,
         scrutinee_mode,
+        recorder,
         use_map,
         struct_map,
         enum_map,
@@ -1422,6 +1679,7 @@ fn check_match_stmt(
             ret_ty,
             functions,
             &mut arm_scope,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1431,6 +1689,14 @@ fn check_match_stmt(
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
     }
+    check_match_exhaustive(
+        &match_ty,
+        &match_expr.arms,
+        use_map,
+        enum_map,
+        module_name,
+        match_expr.match_span,
+    )?;
     merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(Ty::Builtin(BuiltinType::Unit))
 }
@@ -1441,6 +1707,7 @@ fn check_match_expr_value(
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
     scrutinee_mode: UseMode,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1453,6 +1720,7 @@ fn check_match_expr_value(
         functions,
         scopes,
         scrutinee_mode,
+        recorder,
         use_map,
         struct_map,
         enum_map,
@@ -1470,6 +1738,7 @@ fn check_match_expr_value(
             &arm.body,
             functions,
             &mut arm_scope,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1490,6 +1759,14 @@ fn check_match_expr_value(
             result_ty = Some(arm_ty);
         }
     }
+    check_match_exhaustive(
+        &match_ty,
+        &match_expr.arms,
+        use_map,
+        enum_map,
+        module_name,
+        match_expr.match_span,
+    )?;
     merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))
 }
@@ -1499,6 +1776,7 @@ fn check_match_arm_value(
     block: &Block,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1524,6 +1802,7 @@ fn check_match_arm_value(
             ret_ty,
             functions,
             scopes,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1537,6 +1816,7 @@ fn check_match_arm_value(
             functions,
             scopes,
             UseMode::Move,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1551,11 +1831,128 @@ fn check_match_arm_value(
     }
 }
 
+fn check_match_exhaustive(
+    match_ty: &Ty,
+    arms: &[MatchArm],
+    use_map: &UseMap,
+    enum_map: &HashMap<String, EnumInfo>,
+    module_name: &str,
+    span: Span,
+) -> Result<(), TypeError> {
+    if arms
+        .iter()
+        .any(|arm| matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Binding(_)))
+    {
+        return Ok(());
+    }
+
+    match match_ty {
+        Ty::Builtin(BuiltinType::Bool) => {
+            let mut seen_true = false;
+            let mut seen_false = false;
+            for arm in arms {
+                if let Pattern::Literal(Literal::Bool(value)) = arm.pattern {
+                    if value {
+                        seen_true = true;
+                    } else {
+                        seen_false = true;
+                    }
+                }
+            }
+            if seen_true && seen_false {
+                return Ok(());
+            }
+            let mut missing = Vec::new();
+            if !seen_true {
+                missing.push("true");
+            }
+            if !seen_false {
+                missing.push("false");
+            }
+            return Err(TypeError::new(
+                format!("non-exhaustive match on bool, missing: {}", missing.join(", ")),
+                span,
+            ));
+        }
+        Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+            let mut seen_ok = false;
+            let mut seen_err = false;
+            for arm in arms {
+                if let Pattern::Call { path, .. } = &arm.pattern {
+                    if path.segments.len() == 1 {
+                        let variant = path.segments[0].item.as_str();
+                        if variant == "Ok" {
+                            seen_ok = true;
+                        } else if variant == "Err" {
+                            seen_err = true;
+                        }
+                    }
+                }
+            }
+            if seen_ok && seen_err {
+                return Ok(());
+            }
+            let mut missing = Vec::new();
+            if !seen_ok {
+                missing.push("Ok");
+            }
+            if !seen_err {
+                missing.push("Err");
+            }
+            return Err(TypeError::new(
+                format!("non-exhaustive match on Result, missing: {}", missing.join(", ")),
+                span,
+            ));
+        }
+        Ty::Path(name, _) => {
+            let info = enum_map.get(name).or_else(|| {
+                if name.contains('.') {
+                    None
+                } else {
+                    enum_map.get(&format!("{module_name}.{name}"))
+                }
+            });
+            let Some(info) = info else {
+                return Ok(());
+            };
+            let mut seen = HashSet::new();
+            for arm in arms {
+                if let Pattern::Path(path) = &arm.pattern {
+                    if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
+                        if &ty == match_ty {
+                            if let Some(seg) = path.segments.last() {
+                                seen.insert(seg.item.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            if info.variants.iter().all(|v| seen.contains(v)) {
+                return Ok(());
+            }
+            let missing: Vec<String> = info
+                .variants
+                .iter()
+                .filter(|v| !seen.contains(*v))
+                .cloned()
+                .collect();
+            return Err(TypeError::new(
+                format!("non-exhaustive match, missing variants: {}", missing.join(", ")),
+                span,
+            ));
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
 /// Check a struct literal and ensure all fields are present and typed.
 fn check_struct_literal(
     lit: &StructLiteralExpr,
     functions: &HashMap<String, FunctionSig>,
     scopes: &mut Scopes,
+    recorder: &mut TypeRecorder,
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -1599,6 +1996,7 @@ fn check_struct_literal(
             functions,
             scopes,
             UseMode::Move,
+            recorder,
             use_map,
             struct_map,
             enum_map,
@@ -1678,16 +2076,6 @@ fn bind_pattern(
         }
         Pattern::Literal(_) | Pattern::Wildcard(_) => Ok(()),
     }
-}
-
-fn is_orderable_type(ty: &Ty) -> bool {
-    matches!(
-        ty,
-        Ty::Builtin(BuiltinType::I32)
-            | Ty::Builtin(BuiltinType::I64)
-            | Ty::Builtin(BuiltinType::U32)
-            | Ty::Builtin(BuiltinType::U8)
-    )
 }
 
 fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {

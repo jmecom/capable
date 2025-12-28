@@ -1,0 +1,10 @@
+module should_fail_result_unwrap_or_mismatch
+
+fn make() -> Result[i32, i32] {
+  return Ok(1)
+}
+
+pub fn main() -> i32 {
+  let v = make().unwrap_or(1u8)
+  return 0
+}
