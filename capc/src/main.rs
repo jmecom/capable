@@ -73,6 +73,7 @@ fn main() -> Result<()> {
                 miette!("entry path has no parent directory")
             })?;
             validate_module_path(&module, &path, root).map_err(|err| {
+                let err = err.with_context(format!("while loading module `{}`", module.name));
                 miette::Report::new(err)
             })?;
             let mut graph = ModuleGraph::new();
@@ -141,7 +142,10 @@ fn build_binary(
         miette::Report::new(err).with_source_code(named)
     })?;
     let root = path.parent().ok_or_else(|| miette!("entry path has no parent directory"))?;
-    validate_module_path(&module, path, root).map_err(|err| miette::Report::new(err))?;
+    validate_module_path(&module, path, root).map_err(|err| {
+        let err = err.with_context(format!("while loading module `{}`", module.name));
+        miette::Report::new(err)
+    })?;
     let mut graph = ModuleGraph::new();
     let stdlib = graph.load_stdlib().map_err(|err| miette::Report::new(err))?;
     let user_modules = graph
