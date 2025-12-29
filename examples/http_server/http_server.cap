@@ -1,4 +1,4 @@
-package unsafe
+package safe
 module http_server
 use sys::console
 use sys::net
