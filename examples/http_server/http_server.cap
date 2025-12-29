@@ -1,3 +1,5 @@
+// WIP! This is a sample serving to improve the language.
+
 package safe
 module http_server
 use sys::console
@@ -23,90 +25,101 @@ fn arg_or_default(args: Args, index: i32, default: string) -> string {
 fn strip_query(raw_path: string) -> string {
   let parts = raw_path.split(63u8)
   let res = parts.get(0)
-  match (res) {
+  return match (res) {
     Ok(path) => {
-      return path
+      path
     }
     Err(_) => {
+      ""
     }
   }
-  return ""
+}
+
+fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Result[string, unit] {
+  if (seg.len() == 0) {
+    return sanitize_parts(parts, i + 1, acc)
+  }
+  if (seg.eq(".")) {
+    return sanitize_parts(parts, i + 1, acc)
+  }
+  if (seg.eq("..")) {
+    return Err(())
+  }
+  if (acc.len() == 0) {
+    return sanitize_parts(parts, i + 1, seg)
+  }
+  let next = fs::join(acc, seg)
+  return sanitize_parts(parts, i + 1, next)
+}
+
+fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result[string, unit] {
+  if (i >= parts.len()) {
+    return Ok(acc)
+  }
+  let seg_res = parts.get(i)
+  return match (seg_res) {
+    Ok(seg) => {
+      sanitize_segment(parts, i, acc, seg)
+    }
+    Err(_) => {
+      Err(())
+    }
+  }
 }
 
 fn sanitize_path(raw_path: string) -> Result[string, unit] {
   let parts = raw_path.split(47u8)
-  let out = ""
-  let i = 0
-  while i < parts.len() {
-    let seg_res = parts.get(i)
-    match (seg_res) {
-      Ok(seg) => {
-        if (seg.len() == 0) {
-        } else {
-        if (seg.eq(".")) {
-        } else {
-          if (seg.eq("..")) {
-            return Err(())
-          } else {
-            if (out.len() == 0) {
-              out = seg
-            } else {
-                out = fs::join(out, seg)
-              }
-            }
-          }
-        }
+  let res = sanitize_parts(parts, 0, "")
+  match (res) {
+    Ok(path) => {
+      if (path.len() == 0) {
+        return Ok("index.html")
       }
-      Err(_) => {
+      return Ok(path)
+    }
+    Err(_) => {
+      return Err(())
+    }
+  }
+}
+
+fn parse_request_line(line: string) -> Result[string, unit] {
+  let trimmed = line.trim()
+  let parts = trimmed.split(32u8)
+  let method_res = parts.get(0)
+  match (method_res) {
+    Ok(method) => {
+      if (!method.eq("GET")) {
         return Err(())
       }
     }
-    i = i + 1
+    Err(_) => {
+      return Err(())
+    }
   }
-  if (out.len() == 0) {
-    return Ok("index.html")
+  let path_res = parts.get(1)
+  match (path_res) {
+    Ok(raw_path) => {
+      let cleaned = strip_query(raw_path)
+      return sanitize_path(cleaned)
+    }
+    Err(_) => {
+      return Err(())
+    }
   }
-  return Ok(out)
 }
 
 fn parse_request_path(req: string) -> Result[string, unit] {
   let lines = req.lines()
   let line_res = lines.get(0)
-  let line = ""
-  match (line_res) {
-    Ok(value) => {
-      line = value.trim()
+  return match (line_res) {
+    Ok(line) => {
+      parse_request_line(line)
     }
     Err(_) => {
-      return Err(())
+      Err(())
     }
   }
-  let parts = line.split(32u8)
-  let method_res = parts.get(0)
-  let method = ""
-  match (method_res) {
-    Ok(value) => {
-      method = value
-    }
-    Err(_) => {
-      return Err(())
-    }
-  }
-  if (!method.eq("GET")) {
-    return Err(())
-  }
-  let path_res = parts.get(1)
-  let raw_path = ""
-  match (path_res) {
-    Ok(value) => {
-      raw_path = value
-    }
-    Err(_) => {
-      return Err(())
-    }
-  }
-  let cleaned = strip_query(raw_path)
-  return sanitize_path(cleaned)
 }
 
 fn respond_ok(conn: &TcpConn, body: string) -> Result[unit, NetErr] {
