@@ -61,6 +61,28 @@ Attenuation is enforced by method shape:
 - Any method that returns a capability must take `self` by value.
 - Any method that takes `&self` cannot return a capability.
 
+Quick examples:
+
+```cap
+capability struct Dir
+capability struct FileRead
+
+impl Dir {
+  pub fn open(self, name: string) -> FileRead { return () }
+}
+```
+
+```cap
+capability struct Dir
+capability struct FileRead
+
+impl Dir {
+  pub fn open(self: &Dir, name: string) -> FileRead { return () } // error
+}
+```
+
+Not every opaque handle is a capability. Use `capability` for authority-bearing tokens (filesystem, console, stdin); use `opaque` for unforgeable data handles (buffers, slices, vectors).
+
 ### 3) Root authority comes from `RootCap`
 The entrypoint receives a root capability:
 

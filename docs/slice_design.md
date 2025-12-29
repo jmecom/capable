@@ -51,8 +51,8 @@ Implementation detail:
 Allocation is explicit (Zig-like). Functions that allocate accept an allocator value.
 
 ```cap
-capability struct Alloc
-capability struct Buffer    // move-only owner
+opaque struct Alloc
+opaque struct Buffer    // move-only owner
 
 fn buffer_new(a: Alloc, initial_len: usize) -> Result[Buffer, AllocErr]
 fn buffer_len(b: &Buffer) -> usize
@@ -63,8 +63,8 @@ fn buffer_free(a: Alloc, b: Buffer) -> unit         // consumes b
 ### 3.2 Views
 
 ```cap
-capability struct Slice[T]
-capability struct MutSlice[T]
+opaque struct Slice[T]
+opaque struct MutSlice[T]
 
 fn buffer_as_slice(b: &Buffer) -> Slice[u8]
 fn buffer_as_mut_slice(b: &mut Buffer) -> MutSlice[u8]

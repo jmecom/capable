@@ -170,7 +170,8 @@ Use `capability struct` for authority-bearing tokens. Use `opaque struct` for un
 
 In the current stdlib:
 
-- `copy capability`: `RootCap`, `Console`, `Alloc`, `Buffer`, `Slice`, `MutSlice`, `Args`, `VecU8`, `VecI32`, `VecString`
+- `copy capability`: `RootCap`, `Console`, `Args`
+- `copy opaque`: `Alloc`, `Buffer`, `Slice`, `MutSlice`, `VecU8`, `VecI32`, `VecString`
 - `capability` (affine): `ReadFS`, `Filesystem`, `Dir`, `Stdin`
 - `linear capability`: `FileRead`
 

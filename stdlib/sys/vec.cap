@@ -3,9 +3,9 @@ module sys::vec
 
 use sys::buffer
 
-pub copy capability struct VecU8
-pub copy capability struct VecI32
-pub copy capability struct VecString
+pub copy opaque struct VecU8
+pub copy opaque struct VecI32
+pub copy opaque struct VecString
 
 pub enum VecErr {
   OutOfRange,
