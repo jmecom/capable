@@ -30,6 +30,7 @@ Module {
                         end: 34,
                     },
                 },
+                type_params: [],
                 fields: [
                     Field {
                         name: Spanned {
@@ -115,6 +116,7 @@ Module {
                         end: 69,
                     },
                 },
+                type_params: [],
                 params: [],
                 ret: Path {
                     path: Path {
@@ -160,6 +162,7 @@ Module {
                                                     end: 95,
                                                 },
                                             },
+                                            type_args: [],
                                             fields: [
                                                 StructLiteralField {
                                                     name: Spanned {

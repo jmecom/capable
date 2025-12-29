@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::error::TypeError;
@@ -12,9 +12,9 @@ use crate::hir::{
 };
 
 use super::{
-    check, function_key, lower_type, resolve_enum_variant, resolve_method_target, resolve_type_name,
-    EnumInfo, FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo, Ty, TypeTable,
-    UseMap,
+    build_type_params, check, function_key, lower_type, resolve_enum_variant, resolve_method_target,
+    resolve_type_name, EnumInfo, FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo,
+    Ty, TypeTable, UseMap,
 };
 
 /// Context for HIR lowering (uses the type checker as source of truth).
@@ -33,6 +33,7 @@ struct LoweringCtx<'a> {
     /// Maps variable names to their types (needed for type checking during lowering)
     local_types: HashMap<String, Ty>,
     local_counter: usize,
+    type_params: HashSet<String>,
 }
 
 impl<'a> LoweringCtx<'a> {
@@ -59,6 +60,7 @@ impl<'a> LoweringCtx<'a> {
             local_map: HashMap::new(),
             local_types: HashMap::new(),
             local_counter: 0,
+            type_params: HashSet::new(),
         }
     }
 
@@ -129,6 +131,7 @@ pub(super) fn lower_module(
                 }
             }
             Item::ExternFunction(func) => {
+                let type_params = build_type_params(&func.type_params)?;
                 let params: Result<Vec<HirParam>, TypeError> = func
                     .params
                     .iter()
@@ -139,7 +142,7 @@ pub(super) fn lower_module(
                                 param.name.span,
                             ));
                         };
-                        let lowered = lower_type(ty, use_map, stdlib)?;
+                        let lowered = lower_type(ty, use_map, stdlib, &type_params)?;
                         Ok(HirParam {
                             local_id: LocalId(0),
                             ty: hir_type_for(lowered, &ctx, ty.span())?,
@@ -148,9 +151,10 @@ pub(super) fn lower_module(
                     .collect();
                 hir_extern_functions.push(HirExternFunction {
                     name: func.name.item.clone(),
+                    type_params: func.type_params.iter().map(|p| p.item.clone()).collect(),
                     params: params?,
                     ret_ty: {
-                        let lowered = lower_type(&func.ret, use_map, stdlib)?;
+                        let lowered = lower_type(&func.ret, use_map, stdlib, &type_params)?;
                         hir_type_for(lowered, &ctx, func.ret.span())?
                     },
                 });
@@ -162,11 +166,12 @@ pub(super) fn lower_module(
     let mut hir_structs = Vec::new();
     for item in &module.items {
         if let Item::Struct(decl) = item {
+            let type_params = build_type_params(&decl.type_params)?;
             let fields: Result<Vec<HirField>, TypeError> = decl
                 .fields
                 .iter()
                 .map(|f| {
-                    let lowered = lower_type(&f.ty, use_map, stdlib)?;
+                    let lowered = lower_type(&f.ty, use_map, stdlib, &type_params)?;
                     Ok(HirField {
                         name: f.name.item.clone(),
                         ty: hir_type_for(lowered, &ctx, f.ty.span())?,
@@ -175,6 +180,7 @@ pub(super) fn lower_module(
                 .collect();
             hir_structs.push(HirStruct {
                 name: decl.name.item.clone(),
+                type_params: decl.type_params.iter().map(|p| p.item.clone()).collect(),
                 fields: fields?,
                 is_opaque: decl.is_opaque || decl.is_capability,
             });
@@ -184,6 +190,7 @@ pub(super) fn lower_module(
     let mut hir_enums = Vec::new();
     for item in &module.items {
         if let Item::Enum(decl) = item {
+            let type_params = build_type_params(&decl.type_params)?;
             let variants: Result<Vec<HirEnumVariant>, TypeError> = decl
                 .variants
                 .iter()
@@ -192,7 +199,7 @@ pub(super) fn lower_module(
                         .payload
                         .as_ref()
                         .map(|ty| {
-                            let lowered = lower_type(ty, use_map, stdlib)?;
+                            let lowered = lower_type(ty, use_map, stdlib, &type_params)?;
                             hir_type_for(lowered, &ctx, ty.span())
                         })
                         .transpose()?;
@@ -204,6 +211,7 @@ pub(super) fn lower_module(
                 .collect();
             hir_enums.push(HirEnum {
                 name: decl.name.item.clone(),
+                type_params: decl.type_params.iter().map(|p| p.item.clone()).collect(),
                 variants: variants?,
             });
         }
@@ -226,6 +234,8 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     ctx.type_table = ctx
         .type_tables
         .and_then(|tables| tables.get(&function_key(ctx.module_name, &func.name.item)));
+    let type_params = build_type_params(&func.type_params)?;
+    ctx.type_params = type_params.clone();
 
     let params: Result<Vec<HirParam>, TypeError> = func
         .params
@@ -237,7 +247,7 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
                     p.name.span,
                 ));
             };
-            let ty = lower_type(ty, ctx.use_map, ctx.stdlib)?;
+            let ty = lower_type(ty, ctx.use_map, ctx.stdlib, &type_params)?;
             let hir_ty = hir_type_for(ty.clone(), ctx, p.ty.as_ref().unwrap().span())?;
             let local_id = ctx.fresh_local(p.name.item.clone(), ty);
             Ok(HirParam {
@@ -248,12 +258,13 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         .collect();
     let params = params?;
 
-    let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib)?;
+    let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib, &type_params)?;
     let hir_ret_ty = hir_type_for(ret_ty.clone(), ctx, func.ret.span())?;
     let body = lower_block(&func.body, ctx, &ret_ty)?;
 
     Ok(HirFunction {
         name: func.name.item.clone(),
+        type_params: func.type_params.iter().map(|p| p.item.clone()).collect(),
         params,
         ret_ty: hir_ret_ty,
         body,
@@ -385,6 +396,7 @@ fn type_of_ast_expr(
     }
     let mut scopes = super::Scopes::from_flat_map(ctx.local_types.clone());
     let mut recorder = super::check::TypeRecorder::new(None);
+    let type_params = HashSet::new();
     check::check_expr(
         expr,
         ctx.functions,
@@ -397,7 +409,14 @@ fn type_of_ast_expr(
         ctx.stdlib,
         ret_ty,
         ctx.module_name,
+        &type_params,
     )
+}
+
+fn lower_call_type_args(args: &[Type], ctx: &LoweringCtx) -> Result<Vec<Ty>, TypeError> {
+    args.iter()
+        .map(|arg| lower_type(arg, ctx.use_map, ctx.stdlib, &ctx.type_params))
+        .collect::<Result<Vec<_>, _>>()
 }
 
 fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeError> {
@@ -417,6 +436,7 @@ fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeE
         },
         Ty::Ptr(_) => Ok(AbiType::Ptr),
         Ty::Ref(inner) => abi_type_for(inner, ctx, span),
+        Ty::Param(_) => Ok(AbiType::Ptr),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let ok = abi_type_for(&args[0], ctx, span)?;
@@ -515,6 +535,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                         .collect();
                     return Ok(HirExpr::Call(HirCall {
                         callee: ResolvedCallee::Intrinsic(IntrinsicId::Drop),
+                        type_args: Vec::new(),
                         args: args?,
                         ret_ty: hir_ty,
                         span: call.span,
@@ -557,6 +578,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     name,
                     symbol,
                 },
+                type_args: lower_call_type_args(&call.type_args, ctx)?,
                 args: args?,
                 ret_ty: hir_ty,
                 span: call.span,
@@ -611,6 +633,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                         name,
                         symbol,
                     },
+                    type_args: lower_call_type_args(&method_call.type_args, ctx)?,
                     args: args?,
                     ret_ty: hir_ty,
                     span: method_call.span,
@@ -738,6 +761,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     name: method_fn,
                     symbol,
                 },
+                type_args: lower_call_type_args(&method_call.type_args, ctx)?,
                 args,
                 ret_ty: hir_ty,
                 span: method_call.span,
@@ -809,6 +833,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             }))
         }
         Expr::StructLiteral(lit) => {
+            let struct_ty = type_of_ast_expr(expr, ctx, ret_ty)?;
             let type_name = resolve_type_name(&lit.path, ctx.use_map, ctx.stdlib);
             let key = if lit.path.segments.len() == 1 {
                 if ctx.stdlib.types.contains_key(&lit.path.segments[0].item) {
@@ -843,7 +868,6 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 });
             }
 
-            let struct_ty = Ty::Path(type_name, vec![]);
             let hir_struct_ty = hir_type_for(struct_ty, ctx, lit.span)?;
 
             Ok(HirExpr::StructLiteral(HirStructLiteral {
@@ -1041,6 +1065,7 @@ mod tests {
         structs.insert(
             "foo.Pair".to_string(),
             StructInfo {
+                type_params: Vec::new(),
                 fields: HashMap::new(),
                 is_opaque: false,
                 is_capability: false,

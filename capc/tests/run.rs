@@ -488,6 +488,20 @@ fn run_net_helpers() {
 }
 
 #[test]
+fn run_generics_basic() {
+    let out_dir = make_out_dir("generics_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/generics_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("42"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_string_split() {
     let out_dir = make_out_dir("string_split");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

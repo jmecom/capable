@@ -4,10 +4,10 @@ use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    is_affine_type, is_numeric_type, is_orderable_type, lower_type, resolve_enum_variant,
-    resolve_method_target, resolve_path, resolve_type_name, type_contains_ref, type_kind,
-    BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo, Ty,
-    TypeKind, TypeTable, UseMap, UseMode,
+    build_type_params, is_affine_type, is_numeric_type, is_orderable_type, lower_type,
+    resolve_enum_variant, resolve_method_target, resolve_path, resolve_type_name, type_contains_ref,
+    type_kind, validate_type_args, BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes,
+    SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable, UseMap, UseMode,
 };
 
 /// Optional recorder for expression types during checking.
@@ -224,6 +224,7 @@ pub(super) fn check_function(
     module_name: &str,
     type_table: Option<&mut TypeTable>,
 ) -> Result<(), TypeError> {
+    let type_params = build_type_params(&func.type_params)?;
     let mut params_map = HashMap::new();
     for param in &func.params {
         let Some(ty) = &param.ty else {
@@ -250,13 +251,15 @@ pub(super) fn check_function(
                 }
             }
         }
-        let ty = lower_type(ty, use_map, stdlib)?;
+        let ty = lower_type(ty, use_map, stdlib, &type_params)?;
+        validate_type_args(&ty, struct_map, enum_map, param.ty.as_ref().unwrap().span())?;
         params_map.insert(param.name.item.clone(), ty);
     }
     let mut scopes = Scopes::from_flat_map(params_map);
     let mut recorder = TypeRecorder::new(type_table);
 
-    let ret_ty = lower_type(&func.ret, use_map, stdlib)?;
+    let ret_ty = lower_type(&func.ret, use_map, stdlib, &type_params)?;
+    validate_type_args(&ret_ty, struct_map, enum_map, func.ret.span())?;
     if let Some(span) = type_contains_ref(&func.ret) {
         return Err(TypeError::new(
             "reference types cannot be returned".to_string(),
@@ -276,6 +279,7 @@ pub(super) fn check_function(
             enum_map,
             stdlib,
             module_name,
+            &type_params,
         )?;
     }
 
@@ -312,6 +316,7 @@ fn check_stmt(
     enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
+    type_params: &HashSet<String>,
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
@@ -342,6 +347,7 @@ fn check_stmt(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
                 if let Some(span) = type_contains_ref(annot) {
@@ -363,7 +369,8 @@ fn check_stmt(
                         }
                     }
                 }
-                let annot_ty = lower_type(annot, use_map, stdlib)?;
+                let annot_ty = lower_type(annot, use_map, stdlib, type_params)?;
+                validate_type_args( &annot_ty, struct_map, enum_map, annot.span())?;
                 let matches_ref = if let Ty::Ref(inner) = &annot_ty {
                     &expr_ty == inner.as_ref() || &expr_ty == &annot_ty
                 } else {
@@ -435,6 +442,7 @@ fn check_stmt(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             if expr_ty != existing {
                 return Err(TypeError::new(
@@ -460,6 +468,7 @@ fn check_stmt(
                     stdlib,
                     ret_ty,
                     module_name,
+                    type_params,
                 )?
             } else {
                 Ty::Builtin(BuiltinType::Unit)
@@ -485,6 +494,7 @@ fn check_stmt(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
@@ -504,6 +514,7 @@ fn check_stmt(
                 enum_map,
                 stdlib,
                 module_name,
+                type_params,
             )?;
             let mut else_scopes = scopes.clone();
             if let Some(block) = &if_stmt.else_block {
@@ -518,6 +529,7 @@ fn check_stmt(
                     enum_map,
                     stdlib,
                     module_name,
+                    type_params,
                 )?;
             }
             merge_branch_states(
@@ -542,6 +554,7 @@ fn check_stmt(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
@@ -561,6 +574,7 @@ fn check_stmt(
                 enum_map,
                 stdlib,
                 module_name,
+                type_params,
             )?;
             ensure_affine_states_match(
                 scopes,
@@ -584,6 +598,7 @@ fn check_stmt(
                     stdlib,
                     ret_ty,
                     module_name,
+                    type_params,
                 )?;
             } else {
                 check_expr(
@@ -598,6 +613,7 @@ fn check_stmt(
                     stdlib,
                     ret_ty,
                     module_name,
+                    type_params,
                 )?;
             }
         }
@@ -618,6 +634,7 @@ fn check_block(
     enum_map: &HashMap<String, EnumInfo>,
     stdlib: &StdlibIndex,
     module_name: &str,
+    type_params: &HashSet<String>,
 ) -> Result<(), TypeError> {
     scopes.push_scope();
     for stmt in &block.stmts {
@@ -632,6 +649,7 @@ fn check_block(
             enum_map,
             stdlib,
             module_name,
+            type_params,
         )?;
     }
     ensure_linear_scope_consumed(scopes, struct_map, enum_map, block.span)?;
@@ -831,6 +849,7 @@ pub(super) fn check_expr(
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
+    type_params: &HashSet<String>,
 ) -> Result<Ty, TypeError> {
     let ty = match expr {
         Expr::Literal(lit) => match &lit.value {
@@ -894,6 +913,7 @@ pub(super) fn check_expr(
                         stdlib,
                         ret_ty,
                         module_name,
+                        type_params,
                     )?;
                     return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
                 }
@@ -916,6 +936,7 @@ pub(super) fn check_expr(
                         stdlib,
                         ret_ty,
                         module_name,
+                        type_params,
                     )?;
                     if let Ty::Path(ty_name, args) = ret_ty {
                         if ty_name == "Result" && args.len() == 2 {
@@ -963,17 +984,32 @@ pub(super) fn check_expr(
                     call.span,
                 ));
             }
-            if sig.params.len() != call.args.len() {
+            let explicit_type_args = lower_type_args(
+                &call.type_args,
+                use_map,
+                stdlib,
+                struct_map,
+                enum_map,
+                type_params,
+            )?;
+            let subs = build_call_substitution(sig, &explicit_type_args, HashMap::new(), call.span)?;
+            let instantiated_params: Vec<Ty> = sig
+                .params
+                .iter()
+                .map(|ty| substitute_type(ty, &subs))
+                .collect();
+            let instantiated_ret = substitute_type(&sig.ret, &subs);
+            if instantiated_params.len() != call.args.len() {
                 return Err(TypeError::new(
                     format!(
                         "argument count mismatch: expected {}, found {}",
-                        sig.params.len(),
+                        instantiated_params.len(),
                         call.args.len()
                     ),
                     call.span,
                 ));
             }
-            for (arg, expected) in call.args.iter().zip(&sig.params) {
+            for (arg, expected) in call.args.iter().zip(&instantiated_params) {
                 let (expected_inner, use_mode) = if let Ty::Ref(inner) = expected {
                     (inner.as_ref(), UseMode::Read)
                 } else {
@@ -991,6 +1027,7 @@ pub(super) fn check_expr(
                     stdlib,
                     ret_ty,
                     module_name,
+                    type_params,
                 )?;
                 if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
                     return Err(TypeError::new(
@@ -1010,7 +1047,7 @@ pub(super) fn check_expr(
                     ));
                 }
             }
-            Ok(sig.ret.clone())
+            Ok(instantiated_ret)
         }
         Expr::MethodCall(method_call) => {
             fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
@@ -1056,17 +1093,33 @@ pub(super) fn check_expr(
                         method_call.span,
                     ));
                 }
-                if sig.params.len() != method_call.args.len() {
+                let explicit_type_args = lower_type_args(
+                    &method_call.type_args,
+                    use_map,
+                    stdlib,
+                    struct_map,
+                    enum_map,
+                    type_params,
+                )?;
+                let subs =
+                    build_call_substitution(sig, &explicit_type_args, HashMap::new(), method_call.span)?;
+                let instantiated_params: Vec<Ty> = sig
+                    .params
+                    .iter()
+                    .map(|ty| substitute_type(ty, &subs))
+                    .collect();
+                let instantiated_ret = substitute_type(&sig.ret, &subs);
+                if instantiated_params.len() != method_call.args.len() {
                     return Err(TypeError::new(
                         format!(
                             "argument count mismatch: expected {}, found {}",
-                            sig.params.len(),
+                            instantiated_params.len(),
                             method_call.args.len()
                         ),
                         method_call.span,
                     ));
                 }
-                for (arg, expected) in method_call.args.iter().zip(&sig.params) {
+                for (arg, expected) in method_call.args.iter().zip(&instantiated_params) {
                     let (expected_inner, use_mode) = if let Ty::Ref(inner) = expected {
                         (inner.as_ref(), UseMode::Read)
                     } else {
@@ -1084,6 +1137,7 @@ pub(super) fn check_expr(
                         stdlib,
                         ret_ty,
                         module_name,
+                        type_params,
                     )?;
                     if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
                         return Err(TypeError::new(
@@ -1105,7 +1159,7 @@ pub(super) fn check_expr(
                         ));
                     }
                 }
-                return record_expr_type(recorder, expr, sig.ret.clone());
+                return record_expr_type(recorder, expr, instantiated_ret);
             }
 
             let receiver_ty = check_expr(
@@ -1120,6 +1174,7 @@ pub(super) fn check_expr(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             if let Ty::Path(name, args) = &receiver_ty {
                 if name == "Result" && args.len() == 2 {
@@ -1145,6 +1200,7 @@ pub(super) fn check_expr(
                                 stdlib,
                                 ret_ty,
                                 module_name,
+                                type_params,
                             )?;
                             if &arg_ty != ok_ty {
                                 return Err(TypeError::new(
@@ -1175,6 +1231,7 @@ pub(super) fn check_expr(
                                 stdlib,
                                 ret_ty,
                                 module_name,
+                                type_params,
                             )?;
                             if &arg_ty != err_ty {
                                 return Err(TypeError::new(
@@ -1217,11 +1274,53 @@ pub(super) fn check_expr(
                     method_call.span,
                 ));
             }
-            if sig.params.len() != method_call.args.len() + 1 {
+            let mut inferred = HashMap::new();
+            let expected_receiver = match &sig.params[0] {
+                Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+                other => other,
+            };
+            let actual_receiver = match &receiver_ty {
+                Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+                other => other,
+            };
+            let normalized_actual_receiver = match (expected_receiver, actual_receiver) {
+                (Ty::Path(expected_name, _), Ty::Path(actual_name, args))
+                    if !expected_name.contains('.')
+                        && actual_name
+                            .rsplit_once('.')
+                            .map(|(_, t)| t == expected_name)
+                            .unwrap_or(false) =>
+                {
+                    Ty::Path(expected_name.clone(), args.clone())
+                }
+                _ => actual_receiver.clone(),
+            };
+            match_type_params(
+                expected_receiver,
+                &normalized_actual_receiver,
+                &mut inferred,
+                method_call.receiver.span(),
+            )?;
+            let explicit_type_args = lower_type_args(
+                &method_call.type_args,
+                use_map,
+                stdlib,
+                struct_map,
+                enum_map,
+                type_params,
+            )?;
+            let subs = build_call_substitution(sig, &explicit_type_args, inferred, method_call.span)?;
+            let instantiated_params: Vec<Ty> = sig
+                .params
+                .iter()
+                .map(|ty| substitute_type(ty, &subs))
+                .collect();
+            let instantiated_ret = substitute_type(&sig.ret, &subs);
+            if instantiated_params.len() != method_call.args.len() + 1 {
                 return Err(TypeError::new(
                     format!(
                         "argument count mismatch: expected {}, found {}",
-                        sig.params.len() - 1,
+                        instantiated_params.len() - 1,
                         method_call.args.len()
                     ),
                     method_call.span,
@@ -1236,9 +1335,21 @@ pub(super) fn check_expr(
             let receiver_ref_unqualified = Ty::Ref(Box::new(receiver_unqualified.clone()));
             let receiver_ptr = Ty::Ptr(Box::new(receiver_base.clone()));
             let receiver_ptr_unqualified = Ty::Ptr(Box::new(receiver_unqualified.clone()));
+            let expected_qualified = match &instantiated_params[0] {
+                Ty::Path(name, args) if !name.contains('.') => {
+                    Some(Ty::Path(format!("{method_module}.{name}"), args.clone()))
+                }
+                _ => None,
+            };
+            let expected_ref_qualified = expected_qualified
+                .as_ref()
+                .map(|ty| Ty::Ref(Box::new(ty.clone())));
+            let expected_ptr_qualified = expected_qualified
+                .as_ref()
+                .map(|ty| Ty::Ptr(Box::new(ty.clone())));
 
-            let expects_ref = matches!(sig.params[0], Ty::Ref(_));
-            let expects_ptr = matches!(sig.params[0], Ty::Ptr(_));
+            let expects_ref = matches!(instantiated_params[0], Ty::Ref(_));
+            let expects_ptr = matches!(instantiated_params[0], Ty::Ptr(_));
 
             if matches!(receiver_ty, Ty::Ref(_)) && !expects_ref {
                 return Err(TypeError::new(
@@ -1253,22 +1364,25 @@ pub(super) fn check_expr(
                 ));
             }
 
-            if sig.params[0] != receiver_ty
-                && sig.params[0] != receiver_unqualified
-                && sig.params[0] != receiver_ref
-                && sig.params[0] != receiver_ref_unqualified
-                && sig.params[0] != receiver_ptr
-                && sig.params[0] != receiver_ptr_unqualified
+            if instantiated_params[0] != receiver_ty
+                && expected_qualified.as_ref() != Some(&receiver_ty)
+                && instantiated_params[0] != receiver_unqualified
+                && instantiated_params[0] != receiver_ref
+                && expected_ref_qualified.as_ref() != Some(&receiver_ref)
+                && instantiated_params[0] != receiver_ref_unqualified
+                && instantiated_params[0] != receiver_ptr
+                && expected_ptr_qualified.as_ref() != Some(&receiver_ptr)
+                && instantiated_params[0] != receiver_ptr_unqualified
             {
                 return Err(TypeError::new(
                     format!(
                         "method receiver type mismatch: expected {expected:?}, found {receiver_ty:?}",
-                        expected = sig.params[0]
+                        expected = instantiated_params[0]
                     ),
                     method_call.receiver.span(),
                 ));
             }
-            if sig.params[0] != receiver_ref && sig.params[0] != receiver_ref_unqualified {
+            if instantiated_params[0] != receiver_ref && instantiated_params[0] != receiver_ref_unqualified {
                 let _ = check_expr(
                     &method_call.receiver,
                     functions,
@@ -1281,9 +1395,10 @@ pub(super) fn check_expr(
                     stdlib,
                     ret_ty,
                     module_name,
+                    type_params,
                 )?;
             }
-            for (arg, expected) in method_call.args.iter().zip(&sig.params[1..]) {
+            for (arg, expected) in method_call.args.iter().zip(&instantiated_params[1..]) {
                 let (expected_inner, use_mode) = if let Ty::Ref(inner) = expected {
                     (inner.as_ref(), UseMode::Read)
                 } else {
@@ -1301,6 +1416,7 @@ pub(super) fn check_expr(
                     stdlib,
                     ret_ty,
                     module_name,
+                    type_params,
                 )?;
                 if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
                     return Err(TypeError::new(
@@ -1320,7 +1436,7 @@ pub(super) fn check_expr(
                     ));
                 }
             }
-            Ok(sig.ret.clone())
+            Ok(instantiated_ret)
         }
         Expr::StructLiteral(lit) => check_struct_literal(
             lit,
@@ -1333,6 +1449,7 @@ pub(super) fn check_expr(
             stdlib,
             ret_ty,
             module_name,
+            type_params,
         ),
         Expr::Unary(unary) => {
             let expr_ty = check_expr(
@@ -1347,6 +1464,7 @@ pub(super) fn check_expr(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             match unary.op {
                 UnaryOp::Neg => {
@@ -1386,6 +1504,7 @@ pub(super) fn check_expr(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             let right = check_expr(
                 &binary.right,
@@ -1399,6 +1518,7 @@ pub(super) fn check_expr(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             match binary.op {
                 BinaryOp::Add
@@ -1477,6 +1597,7 @@ pub(super) fn check_expr(
             stdlib,
             ret_ty,
             module_name,
+            type_params,
         ),
         Expr::Try(try_expr) => {
             let inner_ty = check_expr(
@@ -1491,6 +1612,7 @@ pub(super) fn check_expr(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
             let (ok_ty, err_ty) = match inner_ty {
                 Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
@@ -1537,6 +1659,7 @@ pub(super) fn check_expr(
             stdlib,
             ret_ty,
             module_name,
+            type_params,
         ),
         Expr::FieldAccess(field_access) => {
             fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
@@ -1575,8 +1698,9 @@ pub(super) fn check_expr(
                 stdlib,
                 ret_ty,
                 module_name,
+                type_params,
             )?;
-            let Ty::Path(struct_name, _) = object_ty else {
+            let Ty::Path(struct_name, struct_args) = object_ty else {
                 return Err(TypeError::new(
                     "field access requires a struct value".to_string(),
                     field_access.span,
@@ -1606,7 +1730,8 @@ pub(super) fn check_expr(
                     field_access.field.span,
                 )
             })?;
-            let field_ty = field_ty.clone();
+            let substitutions = build_type_substitution(&info.type_params, &struct_args, field_access.span)?;
+            let field_ty = substitute_type(field_ty, &substitutions);
             if is_affine_type(&field_ty, struct_map, enum_map) {
                 match use_mode {
                     UseMode::Read => {
@@ -1655,6 +1780,7 @@ fn check_match_stmt(
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
+    type_params: &HashSet<String>,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
@@ -1668,6 +1794,7 @@ fn check_match_stmt(
         stdlib,
         ret_ty,
         module_name,
+        type_params,
     )?;
     let mut arm_scopes = Vec::with_capacity(match_expr.arms.len());
     for arm in &match_expr.arms {
@@ -1685,6 +1812,7 @@ fn check_match_stmt(
             enum_map,
             stdlib,
             module_name,
+            type_params,
         )?;
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
@@ -1714,6 +1842,7 @@ fn check_match_expr_value(
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
+    type_params: &HashSet<String>,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
@@ -1727,6 +1856,7 @@ fn check_match_expr_value(
         stdlib,
         ret_ty,
         module_name,
+        type_params,
     )?;
     let mut result_ty: Option<Ty> = None;
     let mut arm_scopes = Vec::with_capacity(match_expr.arms.len());
@@ -1745,6 +1875,7 @@ fn check_match_expr_value(
             stdlib,
             ret_ty,
             module_name,
+            type_params,
         )?;
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
@@ -1783,6 +1914,7 @@ fn check_match_arm_value(
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
+    type_params: &HashSet<String>,
 ) -> Result<Ty, TypeError> {
     let Some((last, prefix)) = block.stmts.split_last() else {
         return Err(TypeError::new(
@@ -1808,6 +1940,7 @@ fn check_match_arm_value(
             enum_map,
             stdlib,
             module_name,
+            type_params,
         )?;
     }
     match last {
@@ -1823,6 +1956,7 @@ fn check_match_arm_value(
             stdlib,
             ret_ty,
             module_name,
+            type_params,
         ),
         _ => Err(TypeError::new(
             "match arm must end with expression".to_string(),
@@ -1919,7 +2053,7 @@ fn check_match_exhaustive(
             for arm in arms {
                 if let Pattern::Path(path) = &arm.pattern {
                     if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
-                        if &ty == match_ty {
+                        if same_type_constructor(&ty, match_ty) {
                             if let Some(seg) = path.segments.last() {
                                 seen.insert(seg.item.clone());
                             }
@@ -1947,6 +2081,13 @@ fn check_match_exhaustive(
     Ok(())
 }
 
+fn same_type_constructor(left: &Ty, right: &Ty) -> bool {
+    match (left, right) {
+        (Ty::Path(left_name, _), Ty::Path(right_name, _)) => left_name == right_name,
+        _ => left == right,
+    }
+}
+
 /// Check a struct literal and ensure all fields are present and typed.
 fn check_struct_literal(
     lit: &StructLiteralExpr,
@@ -1959,7 +2100,16 @@ fn check_struct_literal(
     stdlib: &StdlibIndex,
     ret_ty: &Ty,
     module_name: &str,
+    type_params: &HashSet<String>,
 ) -> Result<Ty, TypeError> {
+    let type_args = lower_type_args(
+        &lit.type_args,
+        use_map,
+        stdlib,
+        struct_map,
+        enum_map,
+        type_params,
+    )?;
     let type_name = resolve_type_name(&lit.path, use_map, stdlib);
     let key = if lit.path.segments.len() == 1 {
         if stdlib.types.contains_key(&lit.path.segments[0].item) {
@@ -1973,6 +2123,25 @@ fn check_struct_literal(
     let info = struct_map.get(&key).ok_or_else(|| {
         TypeError::new(format!("unknown struct `{}`", key), lit.span)
     })?;
+    if info.type_params.is_empty() {
+        if !type_args.is_empty() {
+            return Err(TypeError::new(
+                format!("type `{}` does not accept type arguments", key),
+                lit.span,
+            ));
+        }
+    } else if type_args.len() != info.type_params.len() {
+        return Err(TypeError::new(
+            format!(
+                "type `{}` expects {} type argument(s), found {}",
+                key,
+                info.type_params.len(),
+                type_args.len()
+            ),
+            lit.span,
+        ));
+    }
+    let substitutions = build_type_substitution(&info.type_params, &type_args, lit.span)?;
     if info.is_opaque && info.module != module_name {
         return Err(TypeError::new(
             format!(
@@ -1991,6 +2160,7 @@ fn check_struct_literal(
                 field.span,
             )
         })?;
+        let expected = substitute_type(&expected, &substitutions);
         let actual = check_expr(
             &field.expr,
             functions,
@@ -2003,6 +2173,7 @@ fn check_struct_literal(
             stdlib,
             ret_ty,
             module_name,
+            type_params,
         )?;
         if actual != expected {
             return Err(TypeError::new(
@@ -2018,7 +2189,168 @@ fn check_struct_literal(
         ));
     }
 
-    Ok(Ty::Path(type_name, Vec::new()))
+    Ok(Ty::Path(type_name, type_args))
+}
+
+fn lower_type_args(
+    args: &[Type],
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    type_params: &HashSet<String>,
+) -> Result<Vec<Ty>, TypeError> {
+    let mut out = Vec::with_capacity(args.len());
+    for arg in args {
+        let ty = lower_type(arg, use_map, stdlib, type_params)?;
+        validate_type_args(&ty, struct_map, enum_map, arg.span())?;
+        out.push(ty);
+    }
+    Ok(out)
+}
+
+fn build_type_substitution(
+    params: &[String],
+    args: &[Ty],
+    span: Span,
+) -> Result<HashMap<String, Ty>, TypeError> {
+    if params.len() != args.len() {
+        return Err(TypeError::new(
+            format!(
+                "expected {} type argument(s), found {}",
+                params.len(),
+                args.len()
+            ),
+            span,
+        ));
+    }
+    let mut map = HashMap::new();
+    for (param, arg) in params.iter().zip(args.iter()) {
+        map.insert(param.clone(), arg.clone());
+    }
+    Ok(map)
+}
+
+fn substitute_type(ty: &Ty, subs: &HashMap<String, Ty>) -> Ty {
+    match ty {
+        Ty::Param(name) => subs.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::Builtin(_) => ty.clone(),
+        Ty::Ptr(inner) => Ty::Ptr(Box::new(substitute_type(inner, subs))),
+        Ty::Ref(inner) => Ty::Ref(Box::new(substitute_type(inner, subs))),
+        Ty::Path(name, args) => Ty::Path(
+            name.clone(),
+            args.iter().map(|arg| substitute_type(arg, subs)).collect(),
+        ),
+    }
+}
+
+fn match_type_params(
+    expected: &Ty,
+    actual: &Ty,
+    subs: &mut HashMap<String, Ty>,
+    span: Span,
+) -> Result<(), TypeError> {
+    match expected {
+        Ty::Param(name) => {
+            if let Some(existing) = subs.get(name) {
+                if existing != actual {
+                    return Err(TypeError::new(
+                        format!(
+                            "conflicting type arguments for `{}`: {existing:?} vs {actual:?}",
+                            name
+                        ),
+                        span,
+                    ));
+                }
+            } else {
+                subs.insert(name.clone(), actual.clone());
+            }
+            Ok(())
+        }
+        Ty::Builtin(_) => {
+            if expected != actual {
+                return Err(TypeError::new(
+                    format!("type mismatch: expected {expected:?}, found {actual:?}"),
+                    span,
+                ));
+            }
+            Ok(())
+        }
+        Ty::Ptr(inner) => match actual {
+            Ty::Ptr(actual_inner) => match_type_params(inner, actual_inner, subs, span),
+            _ => Err(TypeError::new(
+                format!("type mismatch: expected {expected:?}, found {actual:?}"),
+                span,
+            )),
+        },
+        Ty::Ref(inner) => match actual {
+            Ty::Ref(actual_inner) => match_type_params(inner, actual_inner, subs, span),
+            _ => Err(TypeError::new(
+                format!("type mismatch: expected {expected:?}, found {actual:?}"),
+                span,
+            )),
+        },
+        Ty::Path(name, args) => match actual {
+            Ty::Path(actual_name, actual_args) => {
+                if name != actual_name || args.len() != actual_args.len() {
+                    return Err(TypeError::new(
+                        format!("type mismatch: expected {expected:?}, found {actual:?}"),
+                        span,
+                    ));
+                }
+                for (arg, actual_arg) in args.iter().zip(actual_args.iter()) {
+                    match_type_params(arg, actual_arg, subs, span)?;
+                }
+                Ok(())
+            }
+            _ => Err(TypeError::new(
+                format!("type mismatch: expected {expected:?}, found {actual:?}"),
+                span,
+            )),
+        },
+    }
+}
+
+fn build_call_substitution(
+    sig: &FunctionSig,
+    explicit_args: &[Ty],
+    inferred: HashMap<String, Ty>,
+    span: Span,
+) -> Result<HashMap<String, Ty>, TypeError> {
+    if sig.type_params.is_empty() {
+        if !explicit_args.is_empty() {
+            return Err(TypeError::new(
+                format!(
+                    "function does not accept type arguments (found {})",
+                    explicit_args.len()
+                ),
+                span,
+            ));
+        }
+        return Ok(inferred);
+    }
+
+    let mut subs = inferred;
+    let mut remaining = Vec::new();
+    for name in &sig.type_params {
+        if !subs.contains_key(name) {
+            remaining.push(name.clone());
+        }
+    }
+    if explicit_args.len() != remaining.len() {
+        return Err(TypeError::new(
+            format!(
+                "expected {} type argument(s), found {}",
+                remaining.len(),
+                explicit_args.len()
+            ),
+            span,
+        ));
+    }
+    for (name, arg) in remaining.into_iter().zip(explicit_args.iter()) {
+        subs.insert(name, arg.clone());
+    }
+    Ok(subs)
 }
 
 /// Bind locals introduced by a match pattern.
@@ -2065,7 +2397,7 @@ fn bind_pattern(
         }
         Pattern::Path(path) => {
             if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
-                if &ty != match_ty {
+                if !same_type_constructor(&ty, match_ty) {
                     return Err(TypeError::new(
                         format!("pattern type mismatch: expected {match_ty:?}, found {ty:?}"),
                         path.span,

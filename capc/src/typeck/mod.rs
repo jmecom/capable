@@ -11,12 +11,17 @@
 mod check;
 mod collect;
 mod lower;
+mod monomorphize;
 
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::error::TypeError;
 use crate::hir::HirModule;
+
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
+    "i32", "i64", "u32", "u8", "bool", "string", "unit", "Result",
+];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +32,52 @@ pub enum Ty {
     /// Borrow-lite reference: only valid as a direct parameter type.
     /// It is treated as a non-consuming read (no lifetime tracking).
     Ref(Box<Ty>),
+    /// Generic type parameter.
+    Param(String),
+}
+
+pub(super) fn build_type_params(params: &[Ident]) -> Result<HashSet<String>, TypeError> {
+    let mut set = HashSet::new();
+    for param in params {
+        let name = param.item.as_str();
+        if RESERVED_TYPE_PARAMS.contains(&name) {
+            return Err(TypeError::new(
+                format!("type parameter `{}` is reserved", param.item),
+                param.span,
+            ));
+        }
+        if !set.insert(param.item.clone()) {
+            return Err(TypeError::new(
+                format!("duplicate type parameter `{}`", param.item),
+                param.span,
+            ));
+        }
+    }
+    Ok(set)
+}
+
+fn merge_type_params(
+    base: &HashSet<String>,
+    params: &[Ident],
+) -> Result<HashSet<String>, TypeError> {
+    let mut set = base.clone();
+    for param in params {
+        let name = param.item.as_str();
+        if RESERVED_TYPE_PARAMS.contains(&name) {
+            return Err(TypeError::new(
+                format!("type parameter `{}` is reserved", param.item),
+                param.span,
+            ));
+        }
+        if set.contains(&param.item) {
+            return Err(TypeError::new(
+                format!("duplicate type parameter `{}`", param.item),
+                param.span,
+            ));
+        }
+        set.insert(param.item.clone());
+    }
+    Ok(set)
 }
 
 /// Built-in primitive types.
@@ -91,6 +142,7 @@ type FunctionTypeTables = HashMap<String, TypeTable>;
 /// Resolved signature for a function.
 #[derive(Debug, Clone)]
 struct FunctionSig {
+    type_params: Vec<String>,
     params: Vec<Ty>,
     ret: Ty,
     module: String,
@@ -100,6 +152,7 @@ struct FunctionSig {
 /// Metadata about a struct needed by the type checker.
 #[derive(Debug, Clone)]
 struct StructInfo {
+    type_params: Vec<String>,
     fields: HashMap<String, Ty>,
     is_opaque: bool,
     is_capability: bool,
@@ -110,6 +163,7 @@ struct StructInfo {
 /// Metadata about an enum needed by the type checker.
 #[derive(Debug, Clone)]
 struct EnumInfo {
+    type_params: Vec<String>,
     variants: Vec<String>,
     payloads: HashMap<String, Option<Ty>>,
 }
@@ -366,10 +420,11 @@ fn resolve_impl_target(
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
+    type_params: &HashSet<String>,
     module_name: &str,
     span: Span,
 ) -> Result<(String, String, Ty), TypeError> {
-    let target_ty = lower_type(target, use_map, stdlib)?;
+    let target_ty = lower_type(target, use_map, stdlib, type_params)?;
     let (impl_module, type_name) = match &target_ty {
         Ty::Path(target_name, _target_args) => {
             if let Some(info) = struct_map.get(target_name) {
@@ -421,6 +476,7 @@ fn validate_impl_method(
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
+    type_params: &HashSet<String>,
     _span: Span,
 ) -> Result<Vec<Param>, TypeError> {
     if method.name.item.contains("__") {
@@ -450,7 +506,7 @@ fn validate_impl_method(
     let mut receiver_is_ref = false;
 
     if let Some(ty) = &first_param.ty {
-        let lowered = lower_type(ty, use_map, stdlib)?;
+        let lowered = lower_type(ty, use_map, stdlib, type_params)?;
         if lowered != expected && lowered != expected_ptr && lowered != expected_ref {
             return Err(TypeError::new(
                 format!(
@@ -473,7 +529,7 @@ fn validate_impl_method(
         }
     }
 
-    let ret_ty = lower_type(&method.ret, use_map, stdlib)?;
+    let ret_ty = lower_type(&method.ret, use_map, stdlib, type_params)?;
     if receiver_is_ref && type_contains_capability(&ret_ty, struct_map, enum_map) {
         return Err(TypeError::new(
             "methods returning capabilities must take `self` by value".to_string(),
@@ -484,13 +540,19 @@ fn validate_impl_method(
     Ok(params)
 }
 
-fn desugar_impl_method(type_name: &str, method: &Function, params: Vec<Param>) -> Function {
+fn desugar_impl_method(
+    type_name: &str,
+    method: &Function,
+    params: Vec<Param>,
+    type_params: Vec<Ident>,
+) -> Function {
     let name = Spanned::new(
         format!("{type_name}__{}", method.name.item),
         method.name.span,
     );
     Function {
         name,
+        type_params,
         params,
         ret: method.ret.clone(),
         body: method.body.clone(),
@@ -508,11 +570,13 @@ fn desugar_impl_methods(
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
 ) -> Result<Vec<Function>, TypeError> {
+    let impl_type_params = build_type_params(&impl_block.type_params)?;
     let (_impl_module, type_name, target_ty) = resolve_impl_target(
         &impl_block.target,
         use_map,
         stdlib,
         struct_map,
+        &impl_type_params,
         module_name,
         impl_block.span,
     )?;
@@ -525,6 +589,9 @@ fn desugar_impl_methods(
                 method.name.span,
             ));
         }
+        let method_type_params = merge_type_params(&impl_type_params, &method.type_params)?;
+        let mut combined_type_params = impl_block.type_params.clone();
+        combined_type_params.extend(method.type_params.clone());
         let params = validate_impl_method(
             &type_name,
             &target_ty,
@@ -535,26 +602,56 @@ fn desugar_impl_methods(
             stdlib,
             struct_map,
             enum_map,
+            &method_type_params,
             method.span,
         )?;
-        methods.push(desugar_impl_method(&type_name, method, params));
+        methods.push(desugar_impl_method(
+            &type_name,
+            method,
+            params,
+            combined_type_params,
+        ));
     }
     Ok(methods)
 }
 
 /// Convert AST types into resolved Ty (builtins + fully qualified paths).
-fn lower_type(ty: &Type, use_map: &UseMap, stdlib: &StdlibIndex) -> Result<Ty, TypeError> {
+fn lower_type(
+    ty: &Type,
+    use_map: &UseMap,
+    stdlib: &StdlibIndex,
+    type_params: &HashSet<String>,
+) -> Result<Ty, TypeError> {
     match ty {
-        Type::Ptr { target, .. } => Ok(Ty::Ptr(Box::new(lower_type(target, use_map, stdlib)?))),
-        Type::Ref { target, .. } => Ok(Ty::Ref(Box::new(lower_type(target, use_map, stdlib)?))),
+        Type::Ptr { target, .. } => Ok(Ty::Ptr(Box::new(lower_type(
+            target,
+            use_map,
+            stdlib,
+            type_params,
+        )?))),
+        Type::Ref { target, .. } => Ok(Ty::Ref(Box::new(lower_type(
+            target,
+            use_map,
+            stdlib,
+            type_params,
+        )?))),
         Type::Path { path, args, .. } => {
             let resolved = resolve_path(path, use_map);
             let path_segments = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
-            let args = args
+            let args: Vec<Ty> = args
                 .iter()
-                .map(|arg| lower_type(arg, use_map, stdlib))
+                .map(|arg| lower_type(arg, use_map, stdlib, type_params))
                 .collect::<Result<_, _>>()?;
             if path_segments.len() == 1 {
+                if type_params.contains(path_segments[0]) {
+                    if !args.is_empty() {
+                        return Err(TypeError::new(
+                            format!("type parameter `{}` cannot take arguments", path_segments[0]),
+                            path.span,
+                        ));
+                    }
+                    return Ok(Ty::Param(path_segments[0].to_string()));
+                }
                 let builtin = match path_segments[0] {
                     "i32" => Some(BuiltinType::I32),
                     "i64" => Some(BuiltinType::I64),
@@ -655,6 +752,7 @@ fn type_contains_capability_inner(
 ) -> bool {
     match ty {
         Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => false,
+        Ty::Param(_) => true,
         Ty::Path(name, args) => {
             if name == "Result" {
                 return args
@@ -736,6 +834,7 @@ fn type_kind_inner(
 ) -> TypeKind {
     match ty {
         Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => TypeKind::Unrestricted,
+        Ty::Param(_) => TypeKind::Affine,
         Ty::Path(name, args) => {
             if name == "Result" {
                 return args.iter().fold(TypeKind::Unrestricted, |acc, arg| {
@@ -770,6 +869,56 @@ fn type_kind_inner(
     }
 }
 
+fn validate_type_args(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    match ty {
+        Ty::Builtin(_) | Ty::Param(_) => Ok(()),
+        Ty::Ptr(inner) | Ty::Ref(inner) => validate_type_args(inner, struct_map, enum_map, span),
+        Ty::Path(name, args) => {
+            if name == "Result" {
+                if args.len() != 2 {
+                    return Err(TypeError::new(
+                        format!("Result expects 2 type arguments, found {}", args.len()),
+                        span,
+                    ));
+                }
+            } else if let Some(info) = struct_map.get(name) {
+                if args.len() != info.type_params.len() {
+                    return Err(TypeError::new(
+                        format!(
+                            "type `{}` expects {} type argument(s), found {}",
+                            name,
+                            info.type_params.len(),
+                            args.len()
+                        ),
+                        span,
+                    ));
+                }
+            } else if let Some(info) = enum_map.get(name) {
+                if args.len() != info.type_params.len() {
+                    return Err(TypeError::new(
+                        format!(
+                            "type `{}` expects {} type argument(s), found {}",
+                            name,
+                            info.type_params.len(),
+                            args.len()
+                        ),
+                        span,
+                    ));
+                }
+            }
+            for arg in args {
+                validate_type_args(arg, struct_map, enum_map, span)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 pub fn type_check(module: &Module) -> Result<crate::hir::HirProgram, TypeError> {
     type_check_program(module, &[], &[])
 }
@@ -798,6 +947,8 @@ pub fn type_check_program(
         .map_err(|err| err.with_context("while collecting structs"))?;
     let enum_map = collect::collect_enums(&modules, &module_name, &stdlib_index)
         .map_err(|err| err.with_context("while collecting enums"))?;
+    collect::validate_type_defs(&modules, &stdlib_index, &struct_map, &enum_map)
+        .map_err(|err| err.with_context("while validating type arguments"))?;
     collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)
         .map_err(|err| err.with_context("while validating copy structs"))?;
     let functions = collect::collect_functions(
@@ -915,11 +1066,12 @@ pub fn type_check_program(
     )
     .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
 
-    Ok(crate::hir::HirProgram {
+    let hir_program = crate::hir::HirProgram {
         entry: hir_entry,
         user_modules: hir_user_modules?,
         stdlib: hir_stdlib?,
-    })
+    };
+    monomorphize::monomorphize_program(hir_program)
 }
 
 pub(super) trait SpanExt {

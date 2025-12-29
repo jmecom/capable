@@ -59,6 +59,7 @@ pub enum Item {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: Ident,
+    pub type_params: Vec<Ident>,
     pub params: Vec<Param>,
     pub ret: Type,
     pub body: Block,
@@ -70,6 +71,7 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternFunction {
     pub name: Ident,
+    pub type_params: Vec<Ident>,
     pub params: Vec<Param>,
     pub ret: Type,
     pub is_pub: bool,
@@ -79,6 +81,7 @@ pub struct ExternFunction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImplBlock {
+    pub type_params: Vec<Ident>,
     pub target: Type,
     pub methods: Vec<Function>,
     pub doc: Option<String>,
@@ -94,6 +97,7 @@ pub struct Param {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructDecl {
     pub name: Ident,
+    pub type_params: Vec<Ident>,
     pub fields: Vec<Field>,
     pub is_pub: bool,
     pub is_opaque: bool,
@@ -107,6 +111,7 @@ pub struct StructDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDecl {
     pub name: Ident,
+    pub type_params: Vec<Ident>,
     pub variants: Vec<EnumVariant>,
     pub is_pub: bool,
     pub doc: Option<String>,
@@ -215,6 +220,7 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLiteralExpr {
     pub path: Path,
+    pub type_args: Vec<Type>,
     pub fields: Vec<StructLiteralField>,
     pub span: Span,
 }
@@ -270,6 +276,7 @@ impl fmt::Display for Path {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallExpr {
     pub callee: Box<Expr>,
+    pub type_args: Vec<Type>,
     pub args: Vec<Expr>,
     pub span: Span,
 }
@@ -285,6 +292,7 @@ pub struct FieldAccessExpr {
 pub struct MethodCallExpr {
     pub receiver: Box<Expr>,
     pub method: Ident,
+    pub type_args: Vec<Type>,
     pub args: Vec<Expr>,
     pub span: Span,
 }

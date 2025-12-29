@@ -46,6 +46,7 @@ pub struct HirProgram {
 #[derive(Debug, Clone)]
 pub struct HirFunction {
     pub name: String,
+    pub type_params: Vec<String>,
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
     pub body: HirBlock,
@@ -54,6 +55,7 @@ pub struct HirFunction {
 #[derive(Debug, Clone)]
 pub struct HirExternFunction {
     pub name: String,
+    pub type_params: Vec<String>,
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
 }
@@ -68,6 +70,7 @@ pub struct HirParam {
 #[derive(Debug, Clone)]
 pub struct HirStruct {
     pub name: String,
+    pub type_params: Vec<String>,
     pub fields: Vec<HirField>,
     pub is_opaque: bool,
 }
@@ -82,6 +85,7 @@ pub struct HirField {
 #[derive(Debug, Clone)]
 pub struct HirEnum {
     pub name: String,
+    pub type_params: Vec<String>,
     pub variants: Vec<HirEnumVariant>,
 }
 
@@ -238,6 +242,7 @@ pub struct HirEnumVariantExpr {
 #[derive(Debug, Clone)]
 pub struct HirCall {
     pub callee: ResolvedCallee,
+    pub type_args: Vec<Ty>,
     pub args: Vec<HirExpr>,
     pub ret_ty: HirType,
     pub span: Span,

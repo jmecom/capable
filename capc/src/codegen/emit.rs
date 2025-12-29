@@ -1216,6 +1216,9 @@ fn store_value_by_ty(
                 module,
             )
         }
+        Ty::Param(_) => Err(CodegenError::Unsupported(
+            "generic type parameters must be monomorphized before codegen".to_string(),
+        )),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let ValueRepr::Result { tag, ok, err } = value else {
@@ -1368,6 +1371,9 @@ fn load_value_by_ty(
                 module,
             )
         }
+        Ty::Param(_) => Err(CodegenError::Unsupported(
+            "generic type parameters must be monomorphized before codegen".to_string(),
+        )),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
@@ -2212,6 +2218,9 @@ fn zero_value_for_ty(
             };
             zero_value_for_ty(builder, &inner_ty, ptr_ty, _struct_layouts)
         }
+        Ty::Param(_) => Err(CodegenError::Unsupported(
+            "generic type parameters must be monomorphized before codegen".to_string(),
+        )),
         Ty::Path(name, args) => {
             if name == "Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
