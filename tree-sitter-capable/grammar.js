@@ -67,7 +67,7 @@ module.exports = grammar({
 
     struct_decl: ($) =>
       seq(
-        repeat(choice("pub", "linear", "copy", "opaque")),
+        repeat(choice("pub", "linear", "copy", "opaque", "capability")),
         "struct",
         field("name", $.identifier),
         "{",

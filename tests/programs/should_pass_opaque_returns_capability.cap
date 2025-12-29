@@ -1,0 +1,18 @@
+package safe
+module should_pass_opaque_returns_capability
+
+opaque struct Token
+capability struct Cap
+
+impl Token {
+  pub fn mint(self) -> Cap {
+    return Cap{}
+  }
+}
+
+pub fn main() -> i32 {
+  let t = Token{}
+  let c = t.mint()
+  drop(c)
+  return 0
+}

@@ -1,7 +1,7 @@
 package safe
 module sys::args
 
-pub copy opaque struct Args
+pub copy capability struct Args
 
 pub enum ArgsErr {
   OutOfRange

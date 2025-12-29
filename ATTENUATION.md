@@ -4,12 +4,11 @@ Here’s a clean way to model the same thing in capc with what you’ve already 
 
 1) Make “caps” affine + non-forgeable
 
-Keep using opaque struct as “this is a capability/handle.” That gives you:
+Use `capability struct` as “this is a capability/handle.” That gives you:
 	•	cannot copy (your Token test)
-	•	cannot fabricate (opaque means no public fields / no user construction unless you allow Cap{} for opaques — you probably shouldn’t)
+	•	cannot fabricate (capability types are opaque: no public fields / no user construction outside the defining module)
 
-Also: your current is_affine_type doesn’t automatically make sys.* opaque types affine. If RootCap is supposed to be the “source of authority,” it should be affine too (Austral’s root capability is special and is threaded through main).  ￼
-So: add it to AFFINE_ROOTS (whatever its fully-qualified name is in your world, e.g. "sys.RootCap" or "rc.RootCap").
+Capability types default to affine unless marked `copy` or `linear`.
 
 2) Encode attenuation as “only downward constructors”
 
@@ -17,11 +16,11 @@ Design the stdlib so the only way to get a capability is from a stronger one, an
 
 A minimal pattern:
 
-opaque struct RootCap
-opaque struct Filesystem
-opaque struct Dir
-opaque struct FileRead
-opaque struct FileWrite
+capability struct RootCap
+capability struct Filesystem
+capability struct Dir
+capability struct FileRead
+capability struct FileWrite
 
 module fs {
   // mint broad cap from root (borrow root so you can mint others too)
@@ -49,7 +48,7 @@ Notes:
 
 For a capability/handle, this is exactly the point:
 
-opaque struct Token
+capability struct Token
 
 pub fn main() -> i32 {
   let t = Token{}
@@ -58,7 +57,7 @@ pub fn main() -> i32 {
   return 0
 }
 
-It’s only “too restrictive” if Token is meant to be data (copyable value). In that case, don’t make it opaque, or give it a non-affine representation (plain struct of copyable fields).
+It’s only “too restrictive” if Token is meant to be data (copyable value). In that case, don’t make it capability/opaque, or give it a non-affine representation (plain struct of copyable fields).
 
 4) The tests that actually prove “caps can’t be reused”
 

@@ -18,6 +18,7 @@
   "opaque"
   "linear"
   "copy"
+  "capability"
   "match"
   "true"
   "false"

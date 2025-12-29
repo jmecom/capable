@@ -17,7 +17,7 @@ We intentionally do **not** implement a full Rust-style borrow checker.
 ## 1. Why memory safety matters for capabilities
 
 The capability model relies on:
-- capability types being **unforgeable** in safe code (opaque, no constructors)
+- capability types being **unforgeable** in safe code (`capability struct`, no constructors)
 - privileged operations happening only through `sys.*`, which enforces attenuation checks
 
 If safe code can do out-of-bounds writes / UAF / double-free, it may:

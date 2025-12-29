@@ -1043,6 +1043,10 @@
     "named": false
   },
   {
+    "type": "capability",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true,
     "extra": true

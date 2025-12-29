@@ -1594,7 +1594,7 @@ pub(super) fn check_expr(
             if info.is_opaque && info.module != module_name {
                 return Err(TypeError::new(
                     format!(
-                        "cannot access fields of opaque type `{struct_name}` outside module `{}`",
+                        "cannot access fields of opaque/capability type `{struct_name}` outside module `{}`",
                         info.module
                     ),
                     field_access.span,
@@ -1976,7 +1976,7 @@ fn check_struct_literal(
     if info.is_opaque && info.module != module_name {
         return Err(TypeError::new(
             format!(
-                "cannot construct opaque type `{}` outside module `{}`",
+                "cannot construct opaque/capability type `{}` outside module `{}`",
                 key, info.module
             ),
             lit.span,

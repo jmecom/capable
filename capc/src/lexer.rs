@@ -49,6 +49,8 @@ pub enum TokenKind {
     Impl,
     #[token("opaque")]
     Opaque,
+    #[token("capability")]
+    Capability,
     #[token("copy")]
     Copy,
     #[token("linear")]

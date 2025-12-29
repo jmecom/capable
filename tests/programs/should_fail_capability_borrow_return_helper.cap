@@ -1,0 +1,18 @@
+package safe
+module should_fail_capability_borrow_return_helper
+
+capability struct Cap
+
+fn make_cap() -> Cap {
+  return Cap{}
+}
+
+impl Cap {
+  pub fn leak(self: &Cap) -> Cap {
+    return make_cap()
+  }
+}
+
+pub fn main() -> i32 {
+  return 0
+}

@@ -25,7 +25,7 @@ This is a compact policy reference for language invariants and safety boundaries
 
 ## Capabilities
 
-- Capabilities are opaque (`opaque struct`) and cannot be forged.
+- Capabilities are opaque (`capability struct`) and cannot be forged.
 - Attenuation APIs consume the stronger capability.
 - Runtime enforces root/relative path checks.
 

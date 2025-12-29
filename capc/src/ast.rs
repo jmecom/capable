@@ -99,6 +99,7 @@ pub struct StructDecl {
     pub is_opaque: bool,
     pub is_linear: bool,
     pub is_copy: bool,
+    pub is_capability: bool,
     pub doc: Option<String>,
     pub span: Span,
 }

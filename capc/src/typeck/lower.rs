@@ -121,6 +121,7 @@ pub(super) fn lower_module(
                     use_map,
                     stdlib,
                     structs,
+                    enums,
                 )?;
                 for method in methods {
                     let hir_func = lower_function(&method, &mut ctx)?;
@@ -175,7 +176,7 @@ pub(super) fn lower_module(
             hir_structs.push(HirStruct {
                 name: decl.name.item.clone(),
                 fields: fields?,
-                is_opaque: decl.is_opaque,
+                is_opaque: decl.is_opaque || decl.is_capability,
             });
         }
     }
@@ -826,7 +827,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             if info.is_opaque && info.module != ctx.module_name {
                 return Err(TypeError::new(
                     format!(
-                        "cannot construct opaque type `{}` outside module `{}`",
+                        "cannot construct opaque/capability type `{}` outside module `{}`",
                         key, info.module
                     ),
                     lit.span,
@@ -1042,6 +1043,7 @@ mod tests {
             StructInfo {
                 fields: HashMap::new(),
                 is_opaque: false,
+                is_capability: false,
                 kind: TypeKind::Unrestricted,
                 module: "foo".to_string(),
             },

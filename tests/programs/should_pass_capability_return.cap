@@ -1,0 +1,16 @@
+package safe
+module should_pass_capability_return
+
+capability struct Cap
+
+impl Cap {
+  pub fn rewrap(self) -> Cap {
+    return Cap{}
+  }
+}
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  let d = c.rewrap()
+  return 0
+}

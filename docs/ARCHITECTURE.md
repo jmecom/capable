@@ -67,7 +67,7 @@ lexer ──> parser ──> AST
 ## Invariants (Keep These True)
 
 - No implicit conversions or calls.
-- Capabilities are opaque; authority must flow through values.
+- Capabilities are declared with `capability struct` (opaque tokens); authority must flow through values.
 - Move/linear rules are enforced in `check.rs`.
 - HIR is fully typed and is the only input to codegen.
 

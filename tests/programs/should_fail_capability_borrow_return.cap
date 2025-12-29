@@ -1,0 +1,14 @@
+package safe
+module should_fail_capability_borrow_return
+
+capability struct Cap
+
+impl Cap {
+  pub fn dup(self: &Cap) -> Cap {
+    return Cap{}
+  }
+}
+
+pub fn main() -> i32 {
+  return 0
+}
