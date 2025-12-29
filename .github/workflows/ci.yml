@@ -13,6 +13,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
+      - name: Install just
+        uses: taiki-e/install-action@just
       - name: Run tests
         run: just test
       - name: Build extern demo
