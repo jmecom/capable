@@ -520,6 +520,17 @@ fn typecheck_capability_borrow_return_result_fails() {
 }
 
 #[test]
+fn typecheck_capability_borrow_return_helper_fails() {
+    let source = load_program("should_fail_capability_borrow_return_helper.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("methods returning capabilities must take `self` by value"));
+}
+
+#[test]
 fn typecheck_borrow_local_temp_fails() {
     let source = load_program("should_fail_borrow_local_temp.cap");
     let module = parse_module(&source).expect("parse module");

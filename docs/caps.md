@@ -48,7 +48,18 @@ All privileged operations live under `sys.*` as methods on capability types:
 
 So if you don’t have a `Console`, you cannot call `println`. The compiler will reject it.
 
-For one-way attenuation, any method that returns a capability must take `self` by value. Methods that take `&self` cannot return capabilities.
+### 3) Capability kinds and attenuation rules
+
+Capability types use the same move kinds as other structs:
+
+- `capability struct` defaults to **affine** (move-only, drop OK).
+- `linear capability struct` means **must be consumed** on all paths.
+- `copy capability struct` means **unrestricted** (only use this for caps you truly want to duplicate).
+
+Attenuation is enforced by method shape:
+
+- Any method that returns a capability must take `self` by value.
+- Any method that takes `&self` cannot return a capability.
 
 ### 3) Root authority comes from `RootCap`
 The entrypoint receives a root capability:

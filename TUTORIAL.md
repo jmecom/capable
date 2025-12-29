@@ -168,6 +168,12 @@ Kinds:
 
 Use `capability struct` for authority-bearing tokens. Use `opaque struct` for unforgeable data types that aren’t capabilities.
 
+In the current stdlib:
+
+- `copy capability`: `RootCap`, `Console`, `Alloc`, `Buffer`, `Slice`, `MutSlice`, `Args`, `VecU8`, `VecI32`, `VecString`
+- `capability` (affine): `ReadFS`, `Filesystem`, `Dir`, `Stdin`
+- `linear capability`: `FileRead`
+
 ## 8) Moves and use-after-move
 
 ```cap
