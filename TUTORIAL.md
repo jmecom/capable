@@ -229,7 +229,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Linear values must be consumed along every path. `drop(x)` is a built-in sink that consumes the value.
+Linear values must be consumed along every path. You can consume them with a terminal method (like `FileRead.close()` or `read_to_string()`), or with `drop(x)` as a last resort.
 
 ## 10) Borrow-lite: &T parameters
 

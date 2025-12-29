@@ -1,0 +1,50 @@
+package safe
+module fs_helpers
+
+use sys::system
+use sys::fs
+use sys::buffer
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+
+  let rfs = rc.mint_readfs("./config")
+  if !rfs.exists("app.txt") {
+    c.println("missing")
+    return 1
+  }
+
+  let rfs2 = rc.mint_readfs("./config")
+  match rfs2.read_bytes("app.txt") {
+    Ok(bytes) => {
+      c.assert(bytes.len() > 0)
+      alloc.vec_u8_free(bytes)
+    }
+    Err(_) => {
+      c.println("read_bytes failed")
+      return 1
+    }
+  }
+
+  let rfs3 = rc.mint_readfs("./config")
+  match rfs3.list_dir(".") {
+    Ok(entries) => {
+      c.assert(entries.len() > 0)
+      alloc.vec_string_free(entries)
+    }
+    Err(_) => {
+      c.println("list_dir failed")
+      return 1
+    }
+  }
+
+  let joined = fs::join("config", "app.txt")
+  if !joined.starts_with("config") {
+    c.println("join failed")
+    return 1
+  }
+
+  c.println("fs helpers ok")
+  return 0
+}

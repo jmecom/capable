@@ -37,6 +37,14 @@ fn typecheck_fs_read_ok() {
 }
 
 #[test]
+fn typecheck_fs_close_ok() {
+    let source = load_program("should_pass_fs_close.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_struct_literal_ok() {
     let source = load_program("struct_literal.cap");
     let module = parse_module(&source).expect("parse module");
@@ -345,6 +353,14 @@ fn typecheck_affine_fs_caps_fail() {
 #[test]
 fn typecheck_linear_drop_ok() {
     let source = load_program("should_pass_linear_drop.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_linear_close_ok() {
+    let source = load_program("should_pass_linear_close.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     type_check_program(&module, &stdlib, &[]).expect("typecheck module");

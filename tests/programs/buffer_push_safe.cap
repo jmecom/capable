@@ -15,13 +15,35 @@ pub fn main(rc: RootCap) -> i32 {
           return 1
         }
       }
+      let v = alloc.vec_u8_new()
+      match v.push(9u8) {
+        Ok(u) => { u }
+        Err(e) => {
+          c.println("vec err")
+          alloc.vec_u8_free(v)
+          alloc.buffer_free(b)
+          return 1
+        }
+      }
+      let slice = v.as_slice()
+      match b.extend(slice) {
+        Ok(u) => { u }
+        Err(e) => {
+          c.println("extend err")
+          alloc.vec_u8_free(v)
+          alloc.buffer_free(b)
+          return 1
+        }
+      }
       let len = b.len()
-      c.assert(len == 2)
-      if (len == 2) {
+      c.assert(len == 3)
+      c.assert(!b.is_empty())
+      if (len == 3) {
         c.println("push ok")
       } else {
         c.println("push bad")
       }
+      alloc.vec_u8_free(v)
       alloc.buffer_free(b)
       return 0
     }

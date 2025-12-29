@@ -49,6 +49,46 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::String, AbiType::ResultString],
         ret: AbiType::ResultString,
     };
+    let fs_read_bytes = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_read_bytes_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_list_dir = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_list_dir_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_exists = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Bool,
+    };
+    let fs_readfs_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let fs_filesystem_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let fs_dir_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
     let fs_file_read_to_string = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
@@ -56,6 +96,25 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     let fs_file_read_to_string_abi = FnSig {
         params: vec![AbiType::Handle, AbiType::ResultString],
         ret: AbiType::ResultString,
+    };
+    let fs_file_read_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let fs_dir_list_dir = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_dir_list_dir_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_join = FnSig {
+        params: vec![AbiType::String, AbiType::String],
+        ret: AbiType::String,
     };
     // Console.
     let console_println = FnSig {
@@ -108,6 +167,48 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
     };
+    let system_mint_net = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    // Net.
+    let net_connect = FnSig {
+        params: vec![AbiType::Handle, AbiType::String, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let net_connect_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let net_read_to_string = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let net_read_to_string_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
+    let net_write = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let net_write_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let net_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
     let args_at = FnSig {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
@@ -157,6 +258,22 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_is_empty = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Bool,
     };
     let mem_buffer_as_slice = FnSig {
         params: vec![AbiType::Handle],
@@ -210,6 +327,39 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_filter = FnSig {
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Handle,
+    };
+    let vec_u8_map_add = FnSig {
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Handle,
+    };
+    let vec_u8_slice = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let vec_u8_slice_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
     let vec_u8_pop = FnSig {
         params: vec![AbiType::Handle],
@@ -267,6 +417,26 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
+    let vec_i32_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_filter = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Handle,
+    };
+    let vec_i32_map_add = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Handle,
+    };
     let vec_i32_pop = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
@@ -302,6 +472,18 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![
             AbiType::Handle,
             AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_string_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_string_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
             AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
@@ -342,6 +524,18 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     let string_split_delim = FnSig {
         params: vec![AbiType::String, AbiType::U8],
         ret: AbiType::Handle,
+    };
+    let string_trim = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::String,
+    };
+    let string_trim_start = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::String,
+    };
+    let string_trim_end = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::String,
     };
     // Vec lengths.
     let vec_u8_len = FnSig {
@@ -405,6 +599,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.system.RootCap__mint_net".to_string(),
+        FnInfo {
+            sig: system_mint_net,
+            abi_sig: None,
+            symbol: "capable_rt_mint_net".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.args.Args__len".to_string(),
         FnInfo {
             sig: FnSig {
@@ -440,6 +644,47 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
                 ret: AbiType::ResultString,
             }),
             symbol: "capable_rt_read_stdin_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Net ===
+    map.insert(
+        "sys.net.Net__connect".to_string(),
+        FnInfo {
+            sig: net_connect,
+            abi_sig: Some(net_connect_abi),
+            symbol: "capable_rt_net_connect".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpConn__read_to_string".to_string(),
+        FnInfo {
+            sig: net_read_to_string,
+            abi_sig: Some(net_read_to_string_abi),
+            symbol: "capable_rt_net_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpConn__write".to_string(),
+        FnInfo {
+            sig: net_write,
+            abi_sig: Some(net_write_abi),
+            symbol: "capable_rt_net_write".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpConn__close".to_string(),
+        FnInfo {
+            sig: net_close,
+            abi_sig: None,
+            symbol: "capable_rt_net_close".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -612,11 +857,61 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.fs.ReadFS__read_bytes".to_string(),
+        FnInfo {
+            sig: fs_read_bytes.clone(),
+            abi_sig: Some(fs_read_bytes_abi.clone()),
+            symbol: "capable_rt_fs_read_bytes".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.ReadFS__list_dir".to_string(),
+        FnInfo {
+            sig: fs_list_dir,
+            abi_sig: Some(fs_list_dir_abi),
+            symbol: "capable_rt_fs_list_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.ReadFS__exists".to_string(),
+        FnInfo {
+            sig: fs_exists.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_fs_exists".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.ReadFS__close".to_string(),
+        FnInfo {
+            sig: fs_readfs_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_readfs_close".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.fs.Filesystem__root_dir".to_string(),
         FnInfo {
             sig: fs_root_dir,
             abi_sig: None,
             symbol: "capable_rt_fs_root_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Filesystem__close".to_string(),
+        FnInfo {
+            sig: fs_filesystem_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_filesystem_close".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -642,11 +937,71 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.fs.Dir__read_bytes".to_string(),
+        FnInfo {
+            sig: fs_read_bytes,
+            abi_sig: Some(fs_read_bytes_abi),
+            symbol: "capable_rt_fs_dir_read_bytes".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__list_dir".to_string(),
+        FnInfo {
+            sig: fs_dir_list_dir,
+            abi_sig: Some(fs_dir_list_dir_abi),
+            symbol: "capable_rt_fs_dir_list_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__exists".to_string(),
+        FnInfo {
+            sig: fs_exists,
+            abi_sig: None,
+            symbol: "capable_rt_fs_dir_exists".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__close".to_string(),
+        FnInfo {
+            sig: fs_dir_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_dir_close".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.fs.FileRead__read_to_string".to_string(),
         FnInfo {
             sig: fs_file_read_to_string,
             abi_sig: Some(fs_file_read_to_string_abi),
             symbol: "capable_rt_fs_file_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.FileRead__close".to_string(),
+        FnInfo {
+            sig: fs_file_read_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_file_read_close".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.join".to_string(),
+        FnInfo {
+            sig: fs_join,
+            abi_sig: None,
+            symbol: "capable_rt_fs_join".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -748,6 +1103,26 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: mem_buffer_push,
             abi_sig: Some(mem_buffer_push_abi),
             symbol: "capable_rt_buffer_push".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__extend".to_string(),
+        FnInfo {
+            sig: mem_buffer_extend,
+            abi_sig: Some(mem_buffer_extend_abi),
+            symbol: "capable_rt_buffer_extend".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__is_empty".to_string(),
+        FnInfo {
+            sig: mem_buffer_is_empty,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_is_empty".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -904,6 +1279,46 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.vec.VecU8__extend".to_string(),
+        FnInfo {
+            sig: vec_u8_extend,
+            abi_sig: Some(vec_u8_extend_abi),
+            symbol: "capable_rt_vec_u8_extend".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__filter".to_string(),
+        FnInfo {
+            sig: vec_u8_filter,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_filter".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__map_add".to_string(),
+        FnInfo {
+            sig: vec_u8_map_add,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_map_add".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__slice".to_string(),
+        FnInfo {
+            sig: vec_u8_slice,
+            abi_sig: Some(vec_u8_slice_abi),
+            symbol: "capable_rt_vec_u8_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.vec.VecU8__pop".to_string(),
         FnInfo {
             sig: vec_u8_pop,
@@ -964,6 +1379,36 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.vec.VecI32__extend".to_string(),
+        FnInfo {
+            sig: vec_i32_extend,
+            abi_sig: Some(vec_i32_extend_abi),
+            symbol: "capable_rt_vec_i32_extend".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__filter".to_string(),
+        FnInfo {
+            sig: vec_i32_filter,
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_filter".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__map_add".to_string(),
+        FnInfo {
+            sig: vec_i32_map_add,
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_map_add".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.vec.VecI32__pop".to_string(),
         FnInfo {
             sig: vec_i32_pop,
@@ -999,6 +1444,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: vec_string_push,
             abi_sig: Some(vec_string_push_abi),
             symbol: "capable_rt_vec_string_push".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecString__extend".to_string(),
+        FnInfo {
+            sig: vec_string_extend,
+            abi_sig: Some(vec_string_extend_abi),
+            symbol: "capable_rt_vec_string_extend".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -1081,6 +1536,36 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: string_split_delim,
             abi_sig: None,
             symbol: "capable_rt_string_split".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__trim".to_string(),
+        FnInfo {
+            sig: string_trim,
+            abi_sig: None,
+            symbol: "capable_rt_string_trim".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__trim_start".to_string(),
+        FnInfo {
+            sig: string_trim_start,
+            abi_sig: None,
+            symbol: "capable_rt_string_trim_start".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__trim_end".to_string(),
+        FnInfo {
+            sig: string_trim_end,
+            abi_sig: None,
+            symbol: "capable_rt_string_trim_end".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

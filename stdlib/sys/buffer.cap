@@ -78,6 +78,14 @@ impl Buffer {
     return Err(AllocErr::Oom)
   }
 
+  pub fn extend(self, data: Slice[u8]) -> Result[unit, AllocErr] {
+    return Err(AllocErr::Oom)
+  }
+
+  pub fn is_empty(self) -> bool {
+    return false
+  }
+
   pub fn as_slice(self) -> Slice[u8] {
     return ()
   }
