@@ -5,6 +5,7 @@ use sys::fs
 use sys::args
 use sys::stdin
 use sys::buffer
+use sys::net
 
 pub copy capability struct RootCap
 
@@ -30,6 +31,10 @@ impl RootCap {
   }
 
   pub fn mint_stdin(self) -> stdin::Stdin {
+    return ()
+  }
+
+  pub fn mint_net(self) -> net::Net {
     return ()
   }
 }

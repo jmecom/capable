@@ -1,0 +1,20 @@
+package safe
+module net_helpers
+use sys::console
+use sys::net
+use sys::system
+
+pub fn main(sys: system::RootCap) -> i32 {
+  let c = sys.mint_console()
+  let net = sys.mint_net()
+  match (net.connect("", 80)) {
+    Ok(conn) => {
+      conn.close()
+      c.println("net ok")
+    }
+    Err(_) => {
+      c.println("net err ok")
+    }
+  }
+  return 0
+}

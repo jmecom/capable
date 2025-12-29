@@ -1,0 +1,31 @@
+package unsafe
+module sys::net
+
+pub copy capability struct Net
+pub linear capability struct TcpConn
+
+pub enum NetErr {
+  InvalidAddress,
+  IoError,
+  InvalidData
+}
+
+impl Net {
+  pub fn connect(self, host: string, port: i32) -> Result[TcpConn, NetErr] {
+    return Err(NetErr::IoError)
+  }
+}
+
+impl TcpConn {
+  pub fn read_to_string(self: &TcpConn) -> Result[string, NetErr] {
+    return Err(NetErr::IoError)
+  }
+
+  pub fn write(self: &TcpConn, data: string) -> Result[unit, NetErr] {
+    return Err(NetErr::IoError)
+  }
+
+  pub fn close(self) -> unit {
+    return ()
+  }
+}

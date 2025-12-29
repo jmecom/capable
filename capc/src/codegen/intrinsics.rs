@@ -167,6 +167,48 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
     };
+    let system_mint_net = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    // Net.
+    let net_connect = FnSig {
+        params: vec![AbiType::Handle, AbiType::String, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let net_connect_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let net_read_to_string = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let net_read_to_string_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
+    let net_write = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let net_write_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let net_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
     let args_at = FnSig {
         params: vec![AbiType::Handle, AbiType::I32],
         ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
@@ -557,6 +599,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.system.RootCap__mint_net".to_string(),
+        FnInfo {
+            sig: system_mint_net,
+            abi_sig: None,
+            symbol: "capable_rt_mint_net".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.args.Args__len".to_string(),
         FnInfo {
             sig: FnSig {
@@ -592,6 +644,47 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
                 ret: AbiType::ResultString,
             }),
             symbol: "capable_rt_read_stdin_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    // === Net ===
+    map.insert(
+        "sys.net.Net__connect".to_string(),
+        FnInfo {
+            sig: net_connect,
+            abi_sig: Some(net_connect_abi),
+            symbol: "capable_rt_net_connect".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpConn__read_to_string".to_string(),
+        FnInfo {
+            sig: net_read_to_string,
+            abi_sig: Some(net_read_to_string_abi),
+            symbol: "capable_rt_net_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpConn__write".to_string(),
+        FnInfo {
+            sig: net_write,
+            abi_sig: Some(net_write_abi),
+            symbol: "capable_rt_net_write".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpConn__close".to_string(),
+        FnInfo {
+            sig: net_close,
+            abi_sig: None,
+            symbol: "capable_rt_net_close".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

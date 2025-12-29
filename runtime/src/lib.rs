@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::{self, Read, Write};
+use std::net::TcpStream;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -24,6 +25,10 @@ static CONSOLES: LazyLock<Mutex<HashMap<Handle, ()>>> =
 static ARGS_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static STDIN_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static NET_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static TCP_CONNS: LazyLock<Mutex<HashMap<Handle, TcpStream>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -166,6 +171,39 @@ fn write_handle_result(
     }
 }
 
+fn write_handle_result_code(
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+    result: Result<Handle, i32>,
+) -> u8 {
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(handle) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = handle;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
@@ -193,6 +231,16 @@ pub extern "C" fn capable_rt_mint_stdin(_sys: Handle) -> Handle {
     }
     let handle = new_handle();
     insert_handle(&STDIN_CAPS, handle, (), "stdin table");
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_mint_net(_sys: Handle) -> Handle {
+    if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
+        return 0;
+    }
+    let handle = new_handle();
+    insert_handle(&NET_CAPS, handle, (), "net table");
     handle
 }
 
@@ -693,6 +741,107 @@ pub extern "C" fn capable_rt_fs_file_read_to_string(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_file_read_close(file: Handle) {
     take_handle(&FILE_READS, file, "file read table");
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_net_connect(
+    net: Handle,
+    host_ptr: *const u8,
+    host_len: usize,
+    port: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    if !has_handle(&NET_CAPS, net, "net table") {
+        return write_handle_result_code(out_ok, out_err, Err(NetErr::IoError as i32));
+    }
+    let host = unsafe { read_str(host_ptr, host_len) };
+    let Some(host) = host else {
+        return write_handle_result_code(out_ok, out_err, Err(NetErr::InvalidAddress as i32));
+    };
+    if host.is_empty() || port <= 0 || port > u16::MAX as i32 {
+        return write_handle_result_code(out_ok, out_err, Err(NetErr::InvalidAddress as i32));
+    }
+    match TcpStream::connect((host.as_str(), port as u16)) {
+        Ok(stream) => {
+            let handle = new_handle();
+            insert_handle(&TCP_CONNS, handle, stream, "tcp conn table");
+            write_handle_result_code(out_ok, out_err, Ok(handle))
+        }
+        Err(err) => write_handle_result_code(out_ok, out_err, Err(map_net_err(err) as i32)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_net_read_to_string(
+    conn: Handle,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let result = with_table(&TCP_CONNS, "tcp conn table", |table| {
+        let Some(stream) = table.get_mut(&conn) else {
+            return Err(NetErr::IoError);
+        };
+        let mut buffer = String::new();
+        match stream.read_to_string(&mut buffer) {
+            Ok(_) => Ok(buffer),
+            Err(err) => Err(map_net_err(err)),
+        }
+    });
+    write_string_result(
+        out_ptr,
+        out_len,
+        out_err,
+        result.map_err(|err| err as i32),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_net_write(
+    conn: Handle,
+    data_ptr: *const u8,
+    data_len: usize,
+    out_err: *mut i32,
+) -> u8 {
+    let data = unsafe { read_str(data_ptr, data_len) };
+    let Some(data) = data else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = NetErr::InvalidData as i32;
+            }
+        }
+        return 1;
+    };
+    with_table(&TCP_CONNS, "tcp conn table", |table| {
+        if !out_err.is_null() {
+            unsafe {
+                *out_err = 0;
+            }
+        }
+        let Some(stream) = table.get_mut(&conn) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = NetErr::IoError as i32;
+                }
+            }
+            return 1;
+        };
+        if let Err(err) = stream.write_all(data.as_bytes()) {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = map_net_err(err) as i32;
+                }
+            }
+            return 1;
+        }
+        0
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_net_close(conn: Handle) {
+    take_handle(&TCP_CONNS, conn, "tcp conn table");
 }
 
 #[no_mangle]
@@ -1914,6 +2063,13 @@ enum FsErr {
     IoError = 3,
 }
 
+#[derive(Copy, Clone, Debug)]
+enum NetErr {
+    InvalidAddress = 0,
+    IoError = 1,
+    InvalidData = 2,
+}
+
 fn map_fs_err(err: std::io::Error) -> FsErr {
     use std::io::ErrorKind;
     match err.kind() {
@@ -1921,6 +2077,17 @@ fn map_fs_err(err: std::io::Error) -> FsErr {
         ErrorKind::PermissionDenied => FsErr::PermissionDenied,
         ErrorKind::InvalidInput => FsErr::InvalidPath,
         _ => FsErr::IoError,
+    }
+}
+
+fn map_net_err(err: std::io::Error) -> NetErr {
+    use std::io::ErrorKind;
+    match err.kind() {
+        ErrorKind::InvalidInput | ErrorKind::AddrNotAvailable | ErrorKind::AddrInUse => {
+            NetErr::InvalidAddress
+        }
+        ErrorKind::InvalidData => NetErr::InvalidData,
+        _ => NetErr::IoError,
     }
 }
 
