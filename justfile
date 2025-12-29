@@ -48,5 +48,8 @@ extern-demo-build:
 extern-demo-run:
   cargo run -p capc -- run --link-search examples/extern_demo --link-lib extern_demo examples/extern_demo/extern_demo.cap
 
+http-server:
+  cargo run -p capc -- run examples/http_server/http_server.cap
+
 lsp:
   cargo run -p caplsp
