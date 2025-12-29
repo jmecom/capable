@@ -43,14 +43,14 @@ fn sanitize_path(raw_path: string) -> Result[string, unit] {
       Ok(seg) => {
         if (seg.len() == 0) {
         } else {
-          if (seg == ".") {
+        if (seg.eq(".")) {
+        } else {
+          if (seg.eq("..")) {
+            return Err(())
           } else {
-            if (seg == "..") {
-              return Err(())
+            if (out.len() == 0) {
+              out = seg
             } else {
-              if (out.len() == 0) {
-                out = seg
-              } else {
                 out = fs::join(out, seg)
               }
             }
@@ -92,7 +92,7 @@ fn parse_request_path(req: string) -> Result[string, unit] {
       return Err(())
     }
   }
-  if (method != "GET") {
+  if (!method.eq("GET")) {
     return Err(())
   }
   let path_res = parts.get(1)

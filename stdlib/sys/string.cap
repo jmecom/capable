@@ -108,4 +108,20 @@ impl string {
     }
     return self.byte_at(len - 1) == suffix
   }
+
+  pub fn eq(self, other: string) -> bool {
+    let self_len = self.len()
+    let other_len = other.len()
+    if (self_len != other_len) {
+      return false
+    }
+    let i = 0
+    while (i < self_len) {
+      if self.byte_at(i) != other.byte_at(i) {
+        return false
+      }
+      i = i + 1
+    }
+    return true
+  }
 }
