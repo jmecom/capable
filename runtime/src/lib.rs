@@ -17,6 +17,14 @@ static DIRS: LazyLock<Mutex<HashMap<Handle, DirState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static FILE_READS: LazyLock<Mutex<HashMap<Handle, FileReadState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static ROOT_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static CONSOLES: LazyLock<Mutex<HashMap<Handle, ()>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static ARGS_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static STDIN_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static BUFFERS: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
@@ -95,6 +103,14 @@ fn take_handle<T>(
     table.remove(&handle)
 }
 
+fn has_handle<T>(
+    table: &LazyLock<Mutex<HashMap<Handle, T>>>,
+    handle: Handle,
+    label: &'static str,
+) -> bool {
+    with_table(table, label, |table| table.contains_key(&handle))
+}
+
 fn with_table<T, R>(
     table: &LazyLock<Mutex<HashMap<Handle, T>>>,
     label: &'static str,
@@ -106,17 +122,32 @@ fn with_table<T, R>(
 
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
-    new_handle()
+    if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
+        return 0;
+    }
+    let handle = new_handle();
+    insert_handle(&CONSOLES, handle, (), "console table");
+    handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_args(_sys: Handle) -> Handle {
-    new_handle()
+    if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
+        return 0;
+    }
+    let handle = new_handle();
+    insert_handle(&ARGS_CAPS, handle, (), "args table");
+    handle
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_stdin(_sys: Handle) -> Handle {
-    new_handle()
+    if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
+        return 0;
+    }
+    let handle = new_handle();
+    insert_handle(&STDIN_CAPS, handle, (), "stdin table");
+    handle
 }
 
 #[no_mangle]
@@ -125,6 +156,9 @@ pub extern "C" fn capable_rt_mint_readfs(
     root_ptr: *const u8,
     root_len: usize,
 ) -> Handle {
+    if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
+        return 0;
+    }
     let root = unsafe { read_str(root_ptr, root_len) };
     let root_path = match root {
         Some(path) => normalize_root(Path::new(&path)),
@@ -144,6 +178,9 @@ pub extern "C" fn capable_rt_mint_filesystem(
     root_ptr: *const u8,
     root_len: usize,
 ) -> Handle {
+    if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
+        return 0;
+    }
     let root = unsafe { read_str(root_ptr, root_len) };
     let root_path = match root {
         Some(path) => normalize_root(Path::new(&path)),
@@ -255,6 +292,9 @@ pub extern "C" fn capable_rt_fs_dir_close(dir: Handle) {
 
 #[no_mangle]
 pub extern "C" fn capable_rt_assert(_sys: Handle, cond: u8) {
+    if !has_handle(&CONSOLES, _sys, "console table") {
+        return;
+    }
     if cond == 0 {
         eprintln!("assertion failed");
         std::process::exit(1);
@@ -263,16 +303,25 @@ pub extern "C" fn capable_rt_assert(_sys: Handle, cond: u8) {
 
 #[no_mangle]
 pub extern "C" fn capable_rt_console_print(_console: Handle, ptr: *const u8, len: usize) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
     unsafe { write_bytes(ptr, len, false) };
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_console_println(_console: Handle, ptr: *const u8, len: usize) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
     unsafe { write_bytes(ptr, len, true) };
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_console_print_i32(_console: Handle, value: i32) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
     let mut stdout = io::stdout().lock();
     let _ = write!(stdout, "{value}");
     let _ = stdout.flush();
@@ -280,6 +329,9 @@ pub extern "C" fn capable_rt_console_print_i32(_console: Handle, value: i32) {
 
 #[no_mangle]
 pub extern "C" fn capable_rt_console_println_i32(_console: Handle, value: i32) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
     let mut stdout = io::stdout().lock();
     let _ = writeln!(stdout, "{value}");
     let _ = stdout.flush();
@@ -407,6 +459,7 @@ pub extern "C" fn capable_rt_fs_file_read_close(file: Handle) {
 #[no_mangle]
 pub extern "C" fn capable_rt_start() -> i32 {
     let sys = new_handle();
+    insert_handle(&ROOT_CAPS, sys, (), "root cap table");
     unsafe { capable_main(sys) }
 }
 
@@ -1184,6 +1237,9 @@ pub extern "C" fn capable_rt_string_starts_with(
 
 #[no_mangle]
 pub extern "C" fn capable_rt_args_len(_sys: Handle) -> i32 {
+    if !has_handle(&ARGS_CAPS, _sys, "args table") {
+        return 0;
+    }
     ARGS.len().min(i32::MAX as usize) as i32
 }
 
@@ -1195,6 +1251,14 @@ pub extern "C" fn capable_rt_args_at(
     out_len: *mut u64,
     out_err: *mut i32,
 ) -> u8 {
+    if !has_handle(&ARGS_CAPS, _sys, "args table") {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
     let idx = match usize::try_from(index) {
         Ok(idx) => idx,
         Err(_) => {
@@ -1232,6 +1296,9 @@ pub extern "C" fn capable_rt_read_stdin_to_string(
     out_len: *mut u64,
     out_err: *mut i32,
 ) -> u8 {
+    if !has_handle(&STDIN_CAPS, _sys, "stdin table") {
+        return write_string_result(out_ptr, out_len, out_err, Err(0));
+    }
     let mut input = String::new();
     let result = io::stdin().read_to_string(&mut input);
     match result {
