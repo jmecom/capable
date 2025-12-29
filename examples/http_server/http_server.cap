@@ -1,17 +1,151 @@
 package safe
 module http_server
 use sys::console
+use sys::fs
 use sys::net
+use sys::args
 use sys::system
 
-fn serve_once(c: Console, net: Net) -> Result[unit, NetErr] {
+fn arg_or_default(args: Args, index: i32, default: string) -> string {
+  if (args.len() > index) {
+    let res = args.at(index)
+    match (res) {
+      Ok(value) => {
+        return value
+      }
+      Err(_) => {
+      }
+    }
+  }
+  return default
+}
+
+fn strip_query(raw_path: string) -> string {
+  let parts = raw_path.split(63u8)
+  let res = parts.get(0)
+  match (res) {
+    Ok(path) => {
+      return path
+    }
+    Err(_) => {
+    }
+  }
+  return ""
+}
+
+fn sanitize_path(raw_path: string) -> Result[string, unit] {
+  let parts = raw_path.split(47u8)
+  let out = ""
+  let i = 0
+  while i < parts.len() {
+    let seg_res = parts.get(i)
+    match (seg_res) {
+      Ok(seg) => {
+        if (seg.len() == 0) {
+        } else {
+          if (seg == ".") {
+          } else {
+            if (seg == "..") {
+              return Err(())
+            } else {
+              if (out.len() == 0) {
+                out = seg
+              } else {
+                out = fs::join(out, seg)
+              }
+            }
+          }
+        }
+      }
+      Err(_) => {
+        return Err(())
+      }
+    }
+    i = i + 1
+  }
+  if (out.len() == 0) {
+    return Ok("index.html")
+  }
+  return Ok(out)
+}
+
+fn parse_request_path(req: string) -> Result[string, unit] {
+  let lines = req.lines()
+  let line_res = lines.get(0)
+  let line = ""
+  match (line_res) {
+    Ok(value) => {
+      line = value.trim()
+    }
+    Err(_) => {
+      return Err(())
+    }
+  }
+  let parts = line.split(32u8)
+  let method_res = parts.get(0)
+  let method = ""
+  match (method_res) {
+    Ok(value) => {
+      method = value
+    }
+    Err(_) => {
+      return Err(())
+    }
+  }
+  if (method != "GET") {
+    return Err(())
+  }
+  let path_res = parts.get(1)
+  let raw_path = ""
+  match (path_res) {
+    Ok(value) => {
+      raw_path = value
+    }
+    Err(_) => {
+      return Err(())
+    }
+  }
+  let cleaned = strip_query(raw_path)
+  return sanitize_path(cleaned)
+}
+
+fn respond_ok(conn: &TcpConn, body: string) -> Result[unit, NetErr] {
+  conn.write("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n")?
+  conn.write(body)?
+  return Ok(())
+}
+
+fn respond_not_found(conn: &TcpConn) -> Result[unit, NetErr] {
+  conn.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nnot found\n")?
+  return Ok(())
+}
+
+fn respond_bad_request(conn: &TcpConn) -> Result[unit, NetErr] {
+  conn.write("HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nbad request\n")?
+  return Ok(())
+}
+
+fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result[unit, NetErr] {
   let listener = net.listen("127.0.0.1", 8080)?
   let conn = listener.accept()?
   let req = conn.read_to_string()?
-  c.println("request:")
-  c.println(req)
-  let response = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nhello world\n"
-  conn.write(response)?
+  let path_res = parse_request_path(req)
+  match (path_res) {
+    Ok(path) => {
+      let file_res = readfs.read_to_string(path)
+      match (file_res) {
+        Ok(body) => {
+          respond_ok(conn, body)?
+        }
+        Err(_) => {
+          respond_not_found(conn)?
+        }
+      }
+    }
+    Err(_) => {
+      respond_bad_request(conn)?
+    }
+  }
   conn.close()
   return Ok(())
 }
@@ -19,8 +153,11 @@ fn serve_once(c: Console, net: Net) -> Result[unit, NetErr] {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let net = rc.mint_net()
+  let args = rc.mint_args()
+  let root = arg_or_default(args, 1, ".")
+  let readfs = rc.mint_readfs(root)
   c.println("listening on 127.0.0.1:8080")
-  let res = serve_once(c, net)
+  let res = serve_once(c, net, readfs)
   match (res) {
     Ok(_) => {
     }
