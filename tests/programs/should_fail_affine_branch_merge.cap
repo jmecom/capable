@@ -1,7 +1,7 @@
 package safe
 module should_fail_affine_branch_merge
 
-opaque struct Cap
+capability struct Cap
 
 pub fn main() -> i32 {
   let c = Cap{}

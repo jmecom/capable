@@ -31,8 +31,8 @@ No global “OS object” exists in safe code. Authority flows only via:
 
 ## The three moving parts
 
-### 1) Opaque capability types (unforgeable tokens)
-Capabilities are **opaque structs** defined in `sys.*`:
+### 1) Capability types (unforgeable tokens)
+Capabilities are declared with the `capability` keyword in `sys.*` (capability types are always opaque and declare no fields):
 
 - user code can hold/pass/store them
 - user code cannot construct them (`Console{}` is illegal outside `sys.console`)
@@ -47,6 +47,8 @@ All privileged operations live under `sys.*` as methods on capability types:
 - `ReadFS.read_to_string(path: string)`
 
 So if you don’t have a `Console`, you cannot call `println`. The compiler will reject it.
+
+For one-way attenuation, any method that returns a capability must take `self` by value. Methods that take `&self` cannot return capabilities.
 
 ### 3) Root authority comes from `RootCap`
 The entrypoint receives a root capability:
@@ -148,9 +150,9 @@ Examples:
 
 * calling `c.println(...)` without any `c` bound from `rc.mint_console()` should fail.
 
-2. Forging opaque cap:
+2. Forging a capability:
 
-* `let c = Console{}` should fail: “cannot construct opaque type.”
+* `let c = Console{}` should fail: “cannot construct opaque/capability type.”
 
 These tests validate the unforgeability + explicit passing model.
 

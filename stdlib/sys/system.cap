@@ -6,7 +6,7 @@ use sys::args
 use sys::stdin
 use sys::buffer
 
-pub copy opaque struct RootCap
+pub copy capability struct RootCap
 
 impl RootCap {
   pub fn mint_console(self) -> console::Console {

@@ -102,6 +102,7 @@ struct FunctionSig {
 struct StructInfo {
     fields: HashMap<String, Ty>,
     is_opaque: bool,
+    is_capability: bool,
     kind: TypeKind,
     module: String,
 }
@@ -418,6 +419,8 @@ fn validate_impl_method(
     method: &Function,
     use_map: &UseMap,
     stdlib: &StdlibIndex,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     _span: Span,
 ) -> Result<Vec<Param>, TypeError> {
     if method.name.item.contains("__") {
@@ -444,6 +447,7 @@ fn validate_impl_method(
     let expected = target_ty.clone();
     let expected_ptr = Ty::Ptr(Box::new(target_ty.clone()));
     let expected_ref = Ty::Ref(Box::new(target_ty.clone()));
+    let mut receiver_is_ref = false;
 
     if let Some(ty) = &first_param.ty {
         let lowered = lower_type(ty, use_map, stdlib)?;
@@ -455,6 +459,7 @@ fn validate_impl_method(
                 ty.span(),
             ));
         }
+        receiver_is_ref = lowered == expected_ref;
     } else {
         params[0].ty = Some(target_ast.clone());
     }
@@ -466,6 +471,14 @@ fn validate_impl_method(
                 param.name.span,
             ));
         }
+    }
+
+    let ret_ty = lower_type(&method.ret, use_map, stdlib)?;
+    if receiver_is_ref && type_contains_capability(&ret_ty, struct_map, enum_map) {
+        return Err(TypeError::new(
+            "methods returning capabilities must take `self` by value".to_string(),
+            method.ret.span(),
+        ));
     }
 
     Ok(params)
@@ -493,6 +506,7 @@ fn desugar_impl_methods(
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
 ) -> Result<Vec<Function>, TypeError> {
     let (_impl_module, type_name, target_ty) = resolve_impl_target(
         &impl_block.target,
@@ -519,6 +533,8 @@ fn desugar_impl_methods(
             method,
             use_map,
             stdlib,
+            struct_map,
+            enum_map,
             method.span,
         )?;
         methods.push(desugar_impl_method(&type_name, method, params));
@@ -618,6 +634,67 @@ fn type_contains_ref(ty: &Type) -> Option<Span> {
                 }
             }
             None
+        }
+    }
+}
+
+fn type_contains_capability(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+) -> bool {
+    let mut visiting = HashSet::new();
+    type_contains_capability_inner(ty, struct_map, enum_map, &mut visiting)
+}
+
+fn type_contains_capability_inner(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    visiting: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => false,
+        Ty::Path(name, args) => {
+            if name == "Result" {
+                return args
+                    .iter()
+                    .any(|arg| type_contains_capability_inner(arg, struct_map, enum_map, visiting));
+            }
+            if args
+                .iter()
+                .any(|arg| type_contains_capability_inner(arg, struct_map, enum_map, visiting))
+            {
+                return true;
+            }
+            if let Some(info) = struct_map.get(name) {
+                if info.is_capability {
+                    return true;
+                }
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let contains = info.fields.values().any(|field| {
+                    type_contains_capability_inner(field, struct_map, enum_map, visiting)
+                });
+                visiting.remove(name);
+                return contains;
+            }
+            if let Some(info) = enum_map.get(name) {
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let contains = info.payloads.values().any(|payload| {
+                    if let Some(payload_ty) = payload {
+                        type_contains_capability_inner(payload_ty, struct_map, enum_map, visiting)
+                    } else {
+                        false
+                    }
+                });
+                visiting.remove(name);
+                return contains;
+            }
+            false
         }
     }
 }
@@ -723,7 +800,13 @@ pub fn type_check_program(
         .map_err(|err| err.with_context("while collecting enums"))?;
     collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)
         .map_err(|err| err.with_context("while validating copy structs"))?;
-    let functions = collect::collect_functions(&modules, &module_name, &stdlib_index, &struct_map)
+    let functions = collect::collect_functions(
+        &modules,
+        &module_name,
+        &stdlib_index,
+        &struct_map,
+        &enum_map,
+    )
         .map_err(|err| err.with_context("while collecting functions"))?;
 
     let mut type_tables: FunctionTypeTables = HashMap::new();
@@ -755,6 +838,7 @@ pub fn type_check_program(
                         &module_use,
                         &stdlib_index,
                         &struct_map,
+                        &enum_map,
                     )?;
                     for method in methods {
                         let mut table = TypeTable::default();

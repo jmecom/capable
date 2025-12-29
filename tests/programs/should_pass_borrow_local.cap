@@ -1,7 +1,7 @@
 package safe
 module should_pass_borrow_local
 
-opaque struct Cap
+capability struct Cap
 
 impl Cap {
   pub fn ping(self: &Cap) -> i32 {

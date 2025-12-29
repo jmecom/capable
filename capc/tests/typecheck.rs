@@ -202,7 +202,7 @@ fn typecheck_opaque_console_constructor_fails() {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     assert!(
         err.to_string()
-            .contains("cannot construct opaque type `sys.console.Console` outside module `sys.console`")
+            .contains("cannot construct opaque/capability type `sys.console.Console` outside module `sys.console`")
     );
 }
 
@@ -479,6 +479,14 @@ fn typecheck_borrow_local_ok() {
 }
 
 #[test]
+fn typecheck_capability_return_ok() {
+    let source = load_program("should_pass_capability_return.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_borrow_return_fails() {
     let source = load_program("should_fail_borrow_return.cap");
     let module = parse_module(&source).expect("parse module");
@@ -487,6 +495,28 @@ fn typecheck_borrow_return_fails() {
     assert!(err
         .to_string()
         .contains("reference types cannot be returned"));
+}
+
+#[test]
+fn typecheck_capability_borrow_return_fails() {
+    let source = load_program("should_fail_capability_borrow_return.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("methods returning capabilities must take `self` by value"));
+}
+
+#[test]
+fn typecheck_capability_borrow_return_result_fails() {
+    let source = load_program("should_fail_capability_borrow_return_result.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("methods returning capabilities must take `self` by value"));
 }
 
 #[test]

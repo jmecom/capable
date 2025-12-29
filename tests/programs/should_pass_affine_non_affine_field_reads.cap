@@ -1,7 +1,7 @@
 package safe
 module should_pass_affine_non_affine_field_reads
 
-opaque struct Cap
+capability struct Cap
 
 struct Holder {
   cap: Cap,

@@ -1,7 +1,7 @@
 package safe
 module should_fail_copy_struct_move_field
 
-linear opaque struct Token
+linear capability struct Token
 
 copy struct Holder {
   cap: Token,

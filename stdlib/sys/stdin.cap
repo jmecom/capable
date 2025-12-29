@@ -3,7 +3,7 @@ module sys::stdin
 
 use sys::io
 
-pub opaque struct Stdin
+pub capability struct Stdin
 
 impl Stdin {
   pub fn read_to_string(self) -> Result[string, io::IoErr] {

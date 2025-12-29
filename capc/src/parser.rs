@@ -117,6 +117,7 @@ impl Parser {
         let mut is_linear = false;
         let mut is_copy = false;
         let mut is_opaque = false;
+        let mut is_capability = false;
         loop {
             match self.peek_kind() {
                 Some(TokenKind::Pub) => {
@@ -155,6 +156,15 @@ impl Parser {
                     self.bump();
                     is_opaque = true;
                 }
+                Some(TokenKind::Capability) => {
+                    if is_capability {
+                        return Err(self.error_current(
+                            "duplicate `capability` modifier".to_string(),
+                        ));
+                    }
+                    self.bump();
+                    is_capability = true;
+                }
                 _ => break,
             }
         }
@@ -164,18 +174,19 @@ impl Parser {
             ));
         }
         if self.peek_kind() == Some(TokenKind::Extern) {
-            if is_opaque || is_linear || is_copy {
+            if is_opaque || is_linear || is_copy || is_capability {
                 return Err(self.error_current(
-                    "linear/copy/opaque applies only to struct declarations".to_string(),
+                    "linear/copy/opaque/capability applies only to struct declarations".to_string(),
                 ));
             }
             return Ok(Item::ExternFunction(self.parse_extern_function(is_pub, doc)?));
         }
         match self.peek_kind() {
             Some(TokenKind::Fn) => {
-                if is_opaque || is_linear || is_copy {
+                if is_opaque || is_linear || is_copy || is_capability {
                     return Err(self.error_current(
-                        "linear/copy/opaque applies only to struct declarations".to_string(),
+                        "linear/copy/opaque/capability applies only to struct declarations"
+                            .to_string(),
                     ));
                 }
                 Ok(Item::Function(self.parse_function(is_pub, doc)?))
@@ -185,12 +196,14 @@ impl Parser {
                 is_opaque,
                 is_linear,
                 is_copy,
+                is_capability,
                 doc,
             )?)),
             Some(TokenKind::Enum) => {
-                if is_opaque || is_linear || is_copy {
+                if is_opaque || is_linear || is_copy || is_capability {
                     return Err(self.error_current(
-                        "linear/copy/opaque applies only to struct declarations".to_string(),
+                        "linear/copy/opaque/capability applies only to struct declarations"
+                            .to_string(),
                     ));
                 }
                 Ok(Item::Enum(self.parse_enum(is_pub, doc)?))
@@ -201,9 +214,10 @@ impl Parser {
                         "impl blocks cannot be marked pub".to_string(),
                     ));
                 }
-                if is_opaque || is_linear || is_copy {
+                if is_opaque || is_linear || is_copy || is_capability {
                     return Err(self.error_current(
-                        "linear/copy/opaque applies only to struct declarations".to_string(),
+                        "linear/copy/opaque/capability applies only to struct declarations"
+                            .to_string(),
                     ));
                 }
                 Ok(Item::Impl(self.parse_impl_block(doc)?))
@@ -330,6 +344,7 @@ impl Parser {
         is_opaque: bool,
         is_linear: bool,
         is_copy: bool,
+        is_capability: bool,
         doc: Option<String>,
     ) -> Result<StructDecl, ParseError> {
         let start = self.expect(TokenKind::Struct)?.span.start;
@@ -355,10 +370,10 @@ impl Parser {
                 }
             }
             let end = self.expect(TokenKind::RBrace)?.span.end;
-            if is_opaque && !fields.is_empty() {
+            if (is_opaque || is_capability) && !fields.is_empty() {
                 return Err(self.error_at(
                     Span::new(start, end),
-                    "opaque struct cannot declare fields".to_string(),
+                    "opaque/capability struct cannot declare fields".to_string(),
                 ));
             }
             end
@@ -372,6 +387,7 @@ impl Parser {
             is_opaque,
             is_linear,
             is_copy,
+            is_capability,
             doc,
             span: Span::new(start, end),
         })

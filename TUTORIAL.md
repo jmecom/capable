@@ -125,7 +125,7 @@ match flag {
 
 ## 6) Capabilities and attenuation
 
-Capabilities live in `sys.*` and are opaque. You can only get them from `RootCap`.
+Capabilities live in `sys.*` and are declared with the `capability` keyword (capability types are opaque). You can only get them from `RootCap`.
 
 ```cap
 module read_config
@@ -146,28 +146,34 @@ pub fn main(rc: RootCap) -> i32 {
 
 This is attenuation: each step narrows authority. There is no safe API to widen back.
 
-## 7) Opaque, copy, affine, linear
+To make attenuation one-way at compile time, any method that returns a capability must take `self` by value. Methods that take `&self` cannot return capabilities.
+
+## 7) Capability, opaque, copy, affine, linear
+
+`capability struct` is the explicit “this is an authority token” marker. Capability types are always opaque (no public fields, no user construction) and default to affine unless marked `copy` or `linear`. This exists so the capability surface is obvious in code and the compiler can enforce one‑way attenuation (methods returning capabilities must take `self` by value).
 
 Structs can declare their kind:
 
 ```cap
-opaque struct Token           // affine by default (move-only)
-copy opaque struct RootCap    // unrestricted (copyable)
-linear opaque struct FileRead // must be consumed
+capability struct Token           // affine by default (move-only)
+copy capability struct RootCap    // unrestricted (copyable)
+linear capability struct FileRead // must be consumed
 ```
 
 Kinds:
 
 - **Unrestricted** (copy): can be reused freely.
-- **Affine** (default for opaque): move-only, dropping is OK.
+- **Affine** (default for capability/opaque): move-only, dropping is OK.
 - **Linear**: move-only and must be consumed on all paths.
+
+Use `capability struct` for authority-bearing tokens. Use `opaque struct` for unforgeable data types that aren’t capabilities.
 
 ## 8) Moves and use-after-move
 
 ```cap
 module moves
 
-opaque struct Token
+capability struct Token
 
 pub fn main() -> i32 {
   let t = Token{}
@@ -184,7 +190,7 @@ Affine and linear values cannot be used after move. If you move in one branch, i
 ```cap
 module linear
 
-linear opaque struct Ticket
+linear capability struct Ticket
 
 pub fn main() -> i32 {
   let t = Ticket{}
@@ -202,7 +208,7 @@ There is a small borrow feature for read-only access in function parameters and 
 ```cap
 module borrow
 
-opaque struct Cap
+capability struct Cap
 
 impl Cap {
   pub fn ping(self: &Cap) -> i32 { return 1 }

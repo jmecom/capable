@@ -1,7 +1,7 @@
 package safe
 module should_fail_borrow_local_move
 
-opaque struct Cap
+capability struct Cap
 
 fn takes(c: Cap) -> i32 {
   return 1

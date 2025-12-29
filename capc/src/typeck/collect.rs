@@ -37,6 +37,7 @@ pub(super) fn collect_functions(
     entry_name: &str,
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
 ) -> Result<HashMap<String, FunctionSig>, TypeError> {
     let mut functions = HashMap::new();
     for module in modules {
@@ -118,6 +119,7 @@ pub(super) fn collect_functions(
                         &local_use,
                         stdlib,
                         struct_map,
+                        enum_map,
                     )?;
                     for method in methods {
                         if let Some((impl_ty, method_name)) = method.name.item.split_once("__") {
@@ -195,14 +197,15 @@ pub(super) fn collect_structs(
                     TypeKind::Linear
                 } else if decl.is_copy {
                     TypeKind::Unrestricted
-                } else if decl.is_opaque {
+                } else if decl.is_opaque || decl.is_capability {
                     TypeKind::Affine
                 } else {
                     TypeKind::Unrestricted
                 };
                 let info = StructInfo {
                     fields,
-                    is_opaque: decl.is_opaque,
+                    is_opaque: decl.is_opaque || decl.is_capability,
+                    is_capability: decl.is_capability,
                     kind: declared_kind,
                     module: module_name.clone(),
                 };
