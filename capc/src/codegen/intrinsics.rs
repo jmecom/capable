@@ -172,6 +172,19 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ret: AbiType::Handle,
     };
     // Net.
+    let net_listen = FnSig {
+        params: vec![AbiType::Handle, AbiType::String, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let net_listen_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
     let net_connect = FnSig {
         params: vec![AbiType::Handle, AbiType::String, AbiType::I32],
         ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
@@ -205,7 +218,22 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
+    let net_accept = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let net_accept_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
     let net_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let net_listener_close = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Unit,
     };
@@ -650,11 +678,41 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     );
     // === Net ===
     map.insert(
+        "sys.net.Net__listen".to_string(),
+        FnInfo {
+            sig: net_listen,
+            abi_sig: Some(net_listen_abi),
+            symbol: "capable_rt_net_listen".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.net.Net__connect".to_string(),
         FnInfo {
             sig: net_connect,
             abi_sig: Some(net_connect_abi),
             symbol: "capable_rt_net_connect".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpListener__accept".to_string(),
+        FnInfo {
+            sig: net_accept,
+            abi_sig: Some(net_accept_abi),
+            symbol: "capable_rt_net_accept".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpListener__close".to_string(),
+        FnInfo {
+            sig: net_listener_close,
+            abi_sig: None,
+            symbol: "capable_rt_net_listener_close".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
