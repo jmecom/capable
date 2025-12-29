@@ -37,3 +37,9 @@ fn snapshot_doc_comments() {
     insta::assert_debug_snapshot!(module);
 }
 
+#[test]
+fn snapshot_generics_basic() {
+    let source = load_program("generics_basic.cap");
+    let module = parse_module(&source).expect("parse module");
+    insta::assert_debug_snapshot!(module);
+}

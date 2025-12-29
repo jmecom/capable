@@ -37,6 +37,7 @@ Module {
                         end: 100,
                     },
                 },
+                type_params: [],
                 fields: [
                     Field {
                         name: Spanned {
@@ -91,6 +92,7 @@ Module {
                         end: 182,
                     },
                 },
+                type_params: [],
                 variants: [
                     EnumVariant {
                         name: Spanned {
@@ -138,6 +140,7 @@ Module {
                         end: 240,
                     },
                 },
+                type_params: [],
                 params: [
                     Param {
                         name: Spanned {
@@ -247,6 +250,7 @@ Module {
                         end: 326,
                     },
                 },
+                type_params: [],
                 params: [],
                 ret: Path {
                     path: Path {

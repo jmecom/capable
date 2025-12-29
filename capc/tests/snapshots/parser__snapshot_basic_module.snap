@@ -59,6 +59,7 @@ Module {
                         end: 41,
                     },
                 },
+                type_params: [],
                 params: [
                     Param {
                         name: Spanned {
@@ -154,6 +155,7 @@ Module {
                                                 end: 89,
                                             },
                                         },
+                                        type_args: [],
                                         args: [],
                                         span: Span {
                                             start: 74,
@@ -195,6 +197,7 @@ Module {
                                                 end: 103,
                                             },
                                         },
+                                        type_args: [],
                                         args: [
                                             Literal(
                                                 LiteralExpr {
