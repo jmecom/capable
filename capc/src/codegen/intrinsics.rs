@@ -402,6 +402,18 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::String, AbiType::U8],
         ret: AbiType::Handle,
     };
+    let string_trim = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::String,
+    };
+    let string_trim_start = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::String,
+    };
+    let string_trim_end = FnSig {
+        params: vec![AbiType::String],
+        ret: AbiType::String,
+    };
     // Vec lengths.
     let vec_u8_len = FnSig {
         params: vec![AbiType::Handle],
@@ -1250,6 +1262,36 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: string_split_delim,
             abi_sig: None,
             symbol: "capable_rt_string_split".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__trim".to_string(),
+        FnInfo {
+            sig: string_trim,
+            abi_sig: None,
+            symbol: "capable_rt_string_trim".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__trim_start".to_string(),
+        FnInfo {
+            sig: string_trim_start,
+            abi_sig: None,
+            symbol: "capable_rt_string_trim_start".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.string.string__trim_end".to_string(),
+        FnInfo {
+            sig: string_trim_end,
+            abi_sig: None,
+            symbol: "capable_rt_string_trim_end".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

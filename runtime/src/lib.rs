@@ -1460,6 +1460,27 @@ pub extern "C" fn capable_rt_string_split_lines(ptr: *const u8, len: usize) -> H
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_string_trim(ptr: *const u8, len: usize) -> RawString {
+    let value = unsafe { read_str(ptr, len) };
+    let trimmed = value.as_deref().unwrap_or("").trim().to_string();
+    to_raw_string(trimmed)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_trim_start(ptr: *const u8, len: usize) -> RawString {
+    let value = unsafe { read_str(ptr, len) };
+    let trimmed = value.as_deref().unwrap_or("").trim_start().to_string();
+    to_raw_string(trimmed)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_trim_end(ptr: *const u8, len: usize) -> RawString {
+    let value = unsafe { read_str(ptr, len) };
+    let trimmed = value.as_deref().unwrap_or("").trim_end().to_string();
+    to_raw_string(trimmed)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_string_starts_with(
     ptr: *const u8,
     len: usize,

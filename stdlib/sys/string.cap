@@ -41,6 +41,26 @@ impl string {
     return ()
   }
 
+  /// Intrinsic; implemented by the runtime.
+  pub fn trim(self) -> string {
+    return ""
+  }
+
+  /// Intrinsic; implemented by the runtime.
+  pub fn trim_start(self) -> string {
+    return ""
+  }
+
+  /// Intrinsic; implemented by the runtime.
+  pub fn trim_end(self) -> string {
+    return ""
+  }
+
+  /// split_lines() is an alias for lines().
+  pub fn split_lines(self) -> VecString {
+    return self.lines()
+  }
+
   pub fn starts_with(self, prefix: string) -> bool {
     let self_len = self.len()
     let prefix_len = prefix.len()
@@ -55,5 +75,37 @@ impl string {
       i = i + 1
     }
     return true
+  }
+
+  pub fn ends_with(self, suffix: string) -> bool {
+    let self_len = self.len()
+    let suffix_len = suffix.len()
+    if (suffix_len > self_len) {
+      return false
+    }
+    let i = 0
+    while (i < suffix_len) {
+      let idx = self_len - suffix_len + i
+      if self.byte_at(idx) != suffix.byte_at(i) {
+        return false
+      }
+      i = i + 1
+    }
+    return true
+  }
+
+  pub fn starts_with_byte(self, prefix: u8) -> bool {
+    if (self.len() == 0) {
+      return false
+    }
+    return self.byte_at(0) == prefix
+  }
+
+  pub fn ends_with_byte(self, suffix: u8) -> bool {
+    let len = self.len()
+    if (len == 0) {
+      return false
+    }
+    return self.byte_at(len - 1) == suffix
   }
 }
