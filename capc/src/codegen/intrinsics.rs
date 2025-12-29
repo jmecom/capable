@@ -217,6 +217,22 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
+    let mem_buffer_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_is_empty = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Bool,
+    };
     let mem_buffer_as_slice = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
@@ -269,6 +285,39 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_u8_filter = FnSig {
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Handle,
+    };
+    let vec_u8_map_add = FnSig {
+        params: vec![AbiType::Handle, AbiType::U8],
+        ret: AbiType::Handle,
+    };
+    let vec_u8_slice = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let vec_u8_slice_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
     let vec_u8_pop = FnSig {
         params: vec![AbiType::Handle],
@@ -326,6 +375,26 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
     };
+    let vec_i32_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_i32_filter = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Handle,
+    };
+    let vec_i32_map_add = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Handle,
+    };
     let vec_i32_pop = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
@@ -361,6 +430,18 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![
             AbiType::Handle,
             AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_string_extend = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+    };
+    let vec_string_extend_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
             AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
@@ -934,6 +1015,26 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.buffer.Buffer__extend".to_string(),
+        FnInfo {
+            sig: mem_buffer_extend,
+            abi_sig: Some(mem_buffer_extend_abi),
+            symbol: "capable_rt_buffer_extend".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.Buffer__is_empty".to_string(),
+        FnInfo {
+            sig: mem_buffer_is_empty,
+            abi_sig: None,
+            symbol: "capable_rt_buffer_is_empty".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.buffer.Buffer__as_slice".to_string(),
         FnInfo {
             sig: mem_buffer_as_slice,
@@ -1085,6 +1186,46 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.vec.VecU8__extend".to_string(),
+        FnInfo {
+            sig: vec_u8_extend,
+            abi_sig: Some(vec_u8_extend_abi),
+            symbol: "capable_rt_vec_u8_extend".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__filter".to_string(),
+        FnInfo {
+            sig: vec_u8_filter,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_filter".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__map_add".to_string(),
+        FnInfo {
+            sig: vec_u8_map_add,
+            abi_sig: None,
+            symbol: "capable_rt_vec_u8_map_add".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecU8__slice".to_string(),
+        FnInfo {
+            sig: vec_u8_slice,
+            abi_sig: Some(vec_u8_slice_abi),
+            symbol: "capable_rt_vec_u8_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.vec.VecU8__pop".to_string(),
         FnInfo {
             sig: vec_u8_pop,
@@ -1145,6 +1286,36 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.vec.VecI32__extend".to_string(),
+        FnInfo {
+            sig: vec_i32_extend,
+            abi_sig: Some(vec_i32_extend_abi),
+            symbol: "capable_rt_vec_i32_extend".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__filter".to_string(),
+        FnInfo {
+            sig: vec_i32_filter,
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_filter".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecI32__map_add".to_string(),
+        FnInfo {
+            sig: vec_i32_map_add,
+            abi_sig: None,
+            symbol: "capable_rt_vec_i32_map_add".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.vec.VecI32__pop".to_string(),
         FnInfo {
             sig: vec_i32_pop,
@@ -1180,6 +1351,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: vec_string_push,
             abi_sig: Some(vec_string_push_abi),
             symbol: "capable_rt_vec_string_push".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.vec.VecString__extend".to_string(),
+        FnInfo {
+            sig: vec_string_extend,
+            abi_sig: Some(vec_string_extend_abi),
+            symbol: "capable_rt_vec_string_extend".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

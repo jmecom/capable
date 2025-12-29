@@ -890,6 +890,51 @@ pub extern "C" fn capable_rt_buffer_push(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_buffer_extend(
+    buffer: Handle,
+    slice: Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let slice_state = with_table(&SLICES, "slice table", |table| table.get(&slice).copied());
+    let Some(slice_state) = slice_state else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(slice_state.ptr as *const u8, slice_state.len) };
+    with_table(&BUFFERS, "buffer table", |table| {
+        let Some(data) = table.get_mut(&buffer) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        if data.try_reserve(bytes.len()).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+        data.extend_from_slice(bytes);
+        0
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_is_empty(buffer: Handle) -> u8 {
+    with_table(&BUFFERS, "buffer table", |table| {
+        u8::from(table.get(&buffer).map(|data| data.is_empty()).unwrap_or(true))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_buffer_free(_alloc: Handle, buffer: Handle) {
     with_table(&BUFFERS, "buffer table", |table| {
         table.remove(&buffer);
@@ -1061,6 +1106,136 @@ pub extern "C" fn capable_rt_vec_u8_push(
         data.push(value);
         0
     })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_extend(
+    vec: Handle,
+    other: Handle,
+    out_err: *mut i32,
+) -> u8 {
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(other_data) = table.get(&other).cloned() else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        if data.try_reserve(other_data.len()).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+        data.extend_from_slice(&other_data);
+        0
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_filter(vec: Handle, value: u8) -> Handle {
+    let filtered = with_table(&VECS_U8, "vec u8 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.iter().copied().filter(|b| *b == value).collect::<Vec<_>>())
+    });
+    let Some(filtered) = filtered else {
+        return 0;
+    };
+    let handle = new_handle();
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        table.insert(handle, filtered);
+    });
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_map_add(vec: Handle, delta: u8) -> Handle {
+    let mapped = with_table(&VECS_U8, "vec u8 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.iter().map(|b| b.wrapping_add(delta)).collect::<Vec<_>>())
+    });
+    let Some(mapped) = mapped else {
+        return 0;
+    };
+    let handle = new_handle();
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        table.insert(handle, mapped);
+    });
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_slice(
+    vec: Handle,
+    start: i32,
+    len: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let start = match usize::try_from(start) {
+        Ok(start) => start,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        }
+    };
+    let len = match usize::try_from(len) {
+        Ok(len) => len,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = VecErr::OutOfRange as i32;
+                }
+            }
+            return 1;
+        }
+    };
+    let slice_state = with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(data) = table.get(&vec) else {
+            return None;
+        };
+        if start > data.len() || start.saturating_add(len) > data.len() {
+            return None;
+        }
+        let ptr = if len == 0 { 0 } else { unsafe { data.as_ptr().add(start) as usize } };
+        Some(SliceState { ptr, len })
+    });
+    let Some(slice_state) = slice_state else {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = VecErr::OutOfRange as i32;
+            }
+        }
+        return 1;
+    };
+    let handle = new_handle();
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(handle, slice_state);
+    });
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = handle;
+        }
+    }
+    0
 }
 
 #[no_mangle]
@@ -1252,6 +1427,76 @@ pub extern "C" fn capable_rt_vec_i32_push(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_extend(
+    vec: Handle,
+    other: Handle,
+    out_err: *mut i32,
+) -> u8 {
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        let Some(other_data) = table.get(&other).cloned() else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        if data.try_reserve(other_data.len()).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+        data.extend_from_slice(&other_data);
+        0
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_filter(vec: Handle, value: i32) -> Handle {
+    let filtered = with_table(&VECS_I32, "vec i32 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.iter().copied().filter(|b| *b == value).collect::<Vec<_>>())
+    });
+    let Some(filtered) = filtered else {
+        return 0;
+    };
+    let handle = new_handle();
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        table.insert(handle, filtered);
+    });
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_map_add(vec: Handle, delta: i32) -> Handle {
+    let mapped = with_table(&VECS_I32, "vec i32 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.iter().map(|b| b.wrapping_add(delta)).collect::<Vec<_>>())
+    });
+    let Some(mapped) = mapped else {
+        return 0;
+    };
+    let handle = new_handle();
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        table.insert(handle, mapped);
+    });
+    handle
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_i32_pop(
     vec: Handle,
     out_ok: *mut i32,
@@ -1368,6 +1613,42 @@ pub extern "C" fn capable_rt_vec_string_push(
             return 1;
         }
         data.push(value);
+        0
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_extend(
+    vec: Handle,
+    other: Handle,
+    out_err: *mut i32,
+) -> u8 {
+    with_table(&VECS_STRING, "vec string table", |table| {
+        let Some(other_data) = table.get(&other).cloned() else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        if data.try_reserve(other_data.len()).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+        data.extend(other_data);
         0
     })
 }

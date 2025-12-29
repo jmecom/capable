@@ -29,6 +29,22 @@ impl VecU8 {
     return Err(buffer::AllocErr::Oom)
   }
 
+  pub fn extend(self, other: VecU8) -> Result[unit, buffer::AllocErr] {
+    return Err(buffer::AllocErr::Oom)
+  }
+
+  pub fn filter(self, value: u8) -> VecU8 {
+    return ()
+  }
+
+  pub fn map_add(self, delta: u8) -> VecU8 {
+    return ()
+  }
+
+  pub fn slice(self, start: i32, len: i32) -> Result[Slice[u8], VecErr] {
+    return Err(VecErr::OutOfRange)
+  }
+
   pub fn pop(self) -> Result[u8, VecErr] {
     return Err(VecErr::Empty)
   }
@@ -55,6 +71,18 @@ impl VecI32 {
     return Err(buffer::AllocErr::Oom)
   }
 
+  pub fn extend(self, other: VecI32) -> Result[unit, buffer::AllocErr] {
+    return Err(buffer::AllocErr::Oom)
+  }
+
+  pub fn filter(self, value: i32) -> VecI32 {
+    return ()
+  }
+
+  pub fn map_add(self, delta: i32) -> VecI32 {
+    return ()
+  }
+
   pub fn pop(self) -> Result[i32, VecErr] {
     return Err(VecErr::Empty)
   }
@@ -70,6 +98,10 @@ impl VecString {
   }
 
   pub fn push(self, x: string) -> Result[unit, buffer::AllocErr] {
+    return Err(buffer::AllocErr::Oom)
+  }
+
+  pub fn extend(self, other: VecString) -> Result[unit, buffer::AllocErr] {
     return Err(buffer::AllocErr::Oom)
   }
 
