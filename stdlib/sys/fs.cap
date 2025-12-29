@@ -12,10 +12,18 @@ impl ReadFS {
   pub fn read_to_string(self, path: string) -> Result[string, FsErr] {
     return ()
   }
+
+  pub fn close(self) -> unit {
+    return ()
+  }
 }
 
 impl Filesystem {
   pub fn root_dir(self) -> Dir {
+    return ()
+  }
+
+  pub fn close(self) -> unit {
     return ()
   }
 }
@@ -32,6 +40,10 @@ impl Dir {
   pub fn read_to_string(self, name: string) -> Result[string, FsErr] {
     let file = self.open_read(name)
     return file.read_to_string()
+  }
+
+  pub fn close(self) -> unit {
+    return ()
   }
 }
 

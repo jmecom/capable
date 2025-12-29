@@ -182,6 +182,11 @@ pub extern "C" fn capable_rt_fs_root_dir(fs: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_fs_filesystem_close(fs: Handle) {
+    take_handle(&FILESYSTEMS, fs, "filesystem table");
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_fs_subdir(
     dir: Handle,
     name_ptr: *const u8,
@@ -241,6 +246,11 @@ pub extern "C" fn capable_rt_fs_open_read(
         "file read table",
     );
     handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_close(dir: Handle) {
+    take_handle(&DIRS, dir, "dir table");
 }
 
 #[no_mangle]
@@ -355,6 +365,11 @@ pub extern "C" fn capable_rt_fs_read_to_string(
         Ok(contents) => write_result(out_ptr, out_len, out_err, Ok(contents)),
         Err(err) => write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
     }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_readfs_close(fs: Handle) {
+    take_handle(&READ_FS, fs, "readfs table");
 }
 
 #[no_mangle]

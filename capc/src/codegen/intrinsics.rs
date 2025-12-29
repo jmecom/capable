@@ -49,6 +49,18 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::String, AbiType::ResultString],
         ret: AbiType::ResultString,
     };
+    let fs_readfs_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let fs_filesystem_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
+    let fs_dir_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
     let fs_file_read_to_string = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
@@ -616,11 +628,31 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.fs.ReadFS__close".to_string(),
+        FnInfo {
+            sig: fs_readfs_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_readfs_close".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.fs.Filesystem__root_dir".to_string(),
         FnInfo {
             sig: fs_root_dir,
             abi_sig: None,
             symbol: "capable_rt_fs_root_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Filesystem__close".to_string(),
+        FnInfo {
+            sig: fs_filesystem_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_filesystem_close".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -641,6 +673,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: fs_open_read,
             abi_sig: None,
             symbol: "capable_rt_fs_open_read".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__close".to_string(),
+        FnInfo {
+            sig: fs_dir_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_dir_close".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

@@ -1,0 +1,19 @@
+package safe
+module should_pass_fs_close
+
+use sys::system
+use sys::fs
+
+pub fn main(rc: RootCap) -> i32 {
+  let fs = rc.mint_filesystem("./config")
+  let dir = fs.root_dir()
+  dir.close()
+
+  let fs2 = rc.mint_filesystem("./config")
+  fs2.close()
+
+  let rfs = rc.mint_readfs("./config")
+  rfs.close()
+
+  return 0
+}
