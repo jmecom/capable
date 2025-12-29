@@ -1,0 +1,182 @@
+// WIP! This is a sample serving to improve the language.
+
+package safe
+module http_server
+use sys::console
+use sys::fs
+use sys::net
+use sys::args
+use sys::system
+
+fn arg_or_default(args: Args, index: i32, default: string) -> string {
+  if (args.len() > index) {
+    let res = args.at(index)
+    match (res) {
+      Ok(value) => {
+        return value
+      }
+      Err(_) => {
+      }
+    }
+  }
+  return default
+}
+
+fn strip_query(raw_path: string) -> string {
+  let parts = raw_path.split(63u8)
+  let res = parts.get(0)
+  return match (res) {
+    Ok(path) => {
+      path
+    }
+    Err(_) => {
+      ""
+    }
+  }
+}
+
+fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Result[string, unit] {
+  if (seg.len() == 0) {
+    return sanitize_parts(parts, i + 1, acc)
+  }
+  if (seg.eq(".")) {
+    return sanitize_parts(parts, i + 1, acc)
+  }
+  if (seg.eq("..")) {
+    return Err(())
+  }
+  if (acc.len() == 0) {
+    return sanitize_parts(parts, i + 1, seg)
+  }
+  let next = fs::join(acc, seg)
+  return sanitize_parts(parts, i + 1, next)
+}
+
+fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result[string, unit] {
+  if (i >= parts.len()) {
+    return Ok(acc)
+  }
+  let seg_res = parts.get(i)
+  return match (seg_res) {
+    Ok(seg) => {
+      sanitize_segment(parts, i, acc, seg)
+    }
+    Err(_) => {
+      Err(())
+    }
+  }
+}
+
+fn sanitize_path(raw_path: string) -> Result[string, unit] {
+  let parts = raw_path.split(47u8)
+  let res = sanitize_parts(parts, 0, "")
+  match (res) {
+    Ok(path) => {
+      if (path.len() == 0) {
+        return Ok("index.html")
+      }
+      return Ok(path)
+    }
+    Err(_) => {
+      return Err(())
+    }
+  }
+}
+
+fn parse_request_line(line: string) -> Result[string, unit] {
+  let trimmed = line.trim()
+  let parts = trimmed.split(32u8)
+  let method_res = parts.get(0)
+  match (method_res) {
+    Ok(method) => {
+      if (!method.eq("GET")) {
+        return Err(())
+      }
+    }
+    Err(_) => {
+      return Err(())
+    }
+  }
+  let path_res = parts.get(1)
+  match (path_res) {
+    Ok(raw_path) => {
+      let cleaned = strip_query(raw_path)
+      return sanitize_path(cleaned)
+    }
+    Err(_) => {
+      return Err(())
+    }
+  }
+}
+
+fn parse_request_path(req: string) -> Result[string, unit] {
+  let lines = req.lines()
+  let line_res = lines.get(0)
+  return match (line_res) {
+    Ok(line) => {
+      parse_request_line(line)
+    }
+    Err(_) => {
+      Err(())
+    }
+  }
+}
+
+fn respond_ok(conn: &TcpConn, body: string) -> Result[unit, NetErr] {
+  conn.write("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n")?
+  conn.write(body)?
+  return Ok(())
+}
+
+fn respond_not_found(conn: &TcpConn) -> Result[unit, NetErr] {
+  conn.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nnot found\n")?
+  return Ok(())
+}
+
+fn respond_bad_request(conn: &TcpConn) -> Result[unit, NetErr] {
+  conn.write("HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nbad request\n")?
+  return Ok(())
+}
+
+fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result[unit, NetErr] {
+  let listener = net.listen("127.0.0.1", 8080)?
+  let conn = listener.accept()?
+  let req = conn.read_to_string()?
+  let path_res = parse_request_path(req)
+  match (path_res) {
+    Ok(path) => {
+      let file_res = readfs.read_to_string(path)
+      match (file_res) {
+        Ok(body) => {
+          respond_ok(conn, body)?
+        }
+        Err(_) => {
+          respond_not_found(conn)?
+        }
+      }
+    }
+    Err(_) => {
+      respond_bad_request(conn)?
+    }
+  }
+  conn.close()
+  return Ok(())
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let net = rc.mint_net()
+  let args = rc.mint_args()
+  let root = arg_or_default(args, 1, ".")
+  let readfs = rc.mint_readfs(root)
+  c.println("listening on 127.0.0.1:8080")
+  let res = serve_once(c, net, readfs)
+  match (res) {
+    Ok(_) => {
+    }
+    Err(_) => {
+      c.println("server error")
+    }
+  }
+  return 0
+}

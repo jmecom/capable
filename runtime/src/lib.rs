@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::{self, Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -27,6 +27,8 @@ static ARGS_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
 static STDIN_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static NET_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static TCP_LISTENERS: LazyLock<Mutex<HashMap<Handle, TcpListener>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static TCP_CONNS: LazyLock<Mutex<HashMap<Handle, TcpStream>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -773,6 +775,55 @@ pub extern "C" fn capable_rt_net_connect(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_net_listen(
+    net: Handle,
+    host_ptr: *const u8,
+    host_len: usize,
+    port: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    if !has_handle(&NET_CAPS, net, "net table") {
+        return write_handle_result_code(out_ok, out_err, Err(NetErr::IoError as i32));
+    }
+    let host = unsafe { read_str(host_ptr, host_len) };
+    let Some(host) = host else {
+        return write_handle_result_code(out_ok, out_err, Err(NetErr::InvalidAddress as i32));
+    };
+    if host.is_empty() || port <= 0 || port > u16::MAX as i32 {
+        return write_handle_result_code(out_ok, out_err, Err(NetErr::InvalidAddress as i32));
+    }
+    match TcpListener::bind((host.as_str(), port as u16)) {
+        Ok(listener) => {
+            let handle = new_handle();
+            insert_handle(&TCP_LISTENERS, handle, listener, "tcp listener table");
+            write_handle_result_code(out_ok, out_err, Ok(handle))
+        }
+        Err(err) => write_handle_result_code(out_ok, out_err, Err(map_net_err(err) as i32)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_net_accept(
+    listener: Handle,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let listener = take_handle(&TCP_LISTENERS, listener, "tcp listener table");
+    let Some(listener) = listener else {
+        return write_handle_result_code(out_ok, out_err, Err(NetErr::IoError as i32));
+    };
+    match listener.accept() {
+        Ok((stream, _addr)) => {
+            let handle = new_handle();
+            insert_handle(&TCP_CONNS, handle, stream, "tcp conn table");
+            write_handle_result_code(out_ok, out_err, Ok(handle))
+        }
+        Err(err) => write_handle_result_code(out_ok, out_err, Err(map_net_err(err) as i32)),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_net_read_to_string(
     conn: Handle,
     out_ptr: *mut *const u8,
@@ -842,6 +893,11 @@ pub extern "C" fn capable_rt_net_write(
 #[no_mangle]
 pub extern "C" fn capable_rt_net_close(conn: Handle) {
     take_handle(&TCP_CONNS, conn, "tcp conn table");
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_net_listener_close(listener: Handle) {
+    take_handle(&TCP_LISTENERS, listener, "tcp listener table");
 }
 
 #[no_mangle]
