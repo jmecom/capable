@@ -1,0 +1,32 @@
+package unsafe
+module http_server
+use sys::console
+use sys::net
+use sys::system
+
+fn serve_once(c: Console, net: Net) -> Result[unit, NetErr] {
+  let listener = net.listen("127.0.0.1", 8080)?
+  let conn = listener.accept()?
+  let req = conn.read_to_string()?
+  c.println("request:")
+  c.println(req)
+  let response = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nhello world\n"
+  conn.write(response)?
+  conn.close()
+  return Ok(())
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let net = rc.mint_net()
+  c.println("listening on 127.0.0.1:8080")
+  let res = serve_once(c, net)
+  match (res) {
+    Ok(_) => {
+    }
+    Err(_) => {
+      c.println("server error")
+    }
+  }
+  return 0
+}
