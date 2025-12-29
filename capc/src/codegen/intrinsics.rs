@@ -57,6 +57,10 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::ResultString],
         ret: AbiType::ResultString,
     };
+    let fs_file_read_close = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Unit,
+    };
     // Console.
     let console_println = FnSig {
         params: vec![AbiType::Handle, AbiType::String],
@@ -647,6 +651,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: fs_file_read_to_string,
             abi_sig: Some(fs_file_read_to_string_abi),
             symbol: "capable_rt_fs_file_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.FileRead__close".to_string(),
+        FnInfo {
+            sig: fs_file_read_close,
+            abi_sig: None,
+            symbol: "capable_rt_fs_file_read_close".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

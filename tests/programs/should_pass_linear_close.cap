@@ -1,0 +1,13 @@
+package safe
+module should_pass_linear_close
+
+use sys::system
+use sys::fs
+
+pub fn main(rc: RootCap) -> i32 {
+  let fs = rc.mint_filesystem("./config")
+  let dir = fs.root_dir()
+  let file = dir.open_read("app.txt")
+  file.close()
+  return 0
+}

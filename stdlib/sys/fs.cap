@@ -39,4 +39,8 @@ impl FileRead {
   pub fn read_to_string(self) -> Result[string, FsErr] {
     return ()
   }
+
+  pub fn close(self) -> unit {
+    return ()
+  }
 }

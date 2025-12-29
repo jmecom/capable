@@ -351,6 +351,14 @@ fn typecheck_linear_drop_ok() {
 }
 
 #[test]
+fn typecheck_linear_close_ok() {
+    let source = load_program("should_pass_linear_close.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_linear_not_consumed_fails() {
     let source = load_program("should_fail_linear_not_consumed.cap");
     let module = parse_module(&source).expect("parse module");

@@ -385,6 +385,11 @@ pub extern "C" fn capable_rt_fs_file_read_to_string(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_fs_file_read_close(file: Handle) {
+    take_handle(&FILE_READS, file, "file read table");
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_start() -> i32 {
     let sys = new_handle();
     unsafe { capable_main(sys) }
