@@ -148,6 +148,29 @@ This is attenuation: each step narrows authority. There is no safe API to widen 
 
 To make attenuation one-way at compile time, any method that returns a capability must take `self` by value. Methods that take `&self` cannot return capabilities.
 
+Example of what is rejected (and why):
+
+```cap
+capability struct Dir
+capability struct FileRead
+
+impl Dir {
+  pub fn open(self: &Dir, name: string) -> FileRead {
+    let file = self.open_read(name)
+    return file
+  }
+}
+```
+
+Why this is rejected:
+
+- `Dir` can read many files (more power).
+- `FileRead` can read one file (less power).
+- The bad example lets you keep the more powerful `Dir` and also get a `FileRead`.
+- We want “one-way” attenuation: when you make something less powerful, you give up the more powerful one.
+
+So methods that return capabilities must take `self` by value, which consumes the old capability.
+
 ## 7) Capability, opaque, copy, affine, linear
 
 `capability struct` is the explicit “this is an authority token” marker. Capability types are always opaque (no public fields, no user construction) and default to affine unless marked `copy` or `linear`. This exists so the capability surface is obvious in code and the compiler can enforce one‑way attenuation (methods returning capabilities must take `self` by value).
