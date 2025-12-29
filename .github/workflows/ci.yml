@@ -13,11 +13,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
-      - name: Install just
-        uses: taiki-e/install-action@just
       - name: Run tests
-        run: just test
+        run: source bin/activate-hermit && just test
       - name: Build extern demo
-        run: just extern-demo-build
+        run: source bin/activate-hermit && just extern-demo-build
       - name: Run extern demo
-        run: just extern-demo-run
+        run: source bin/activate-hermit && just extern-demo-run
