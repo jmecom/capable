@@ -59,6 +59,12 @@ struct FileReadState {
     rel: PathBuf,
 }
 
+#[repr(C)]
+pub struct RawString {
+    ptr: *const u8,
+    len: u64,
+}
+
 #[derive(Copy, Clone, Debug)]
 struct SliceState {
     ptr: usize,
@@ -118,6 +124,46 @@ fn with_table<T, R>(
 ) -> R {
     let mut table = table.lock().expect(label);
     f(&mut table)
+}
+
+fn to_raw_string(value: String) -> RawString {
+    let bytes = value.into_bytes().into_boxed_slice();
+    let len = bytes.len() as u64;
+    let ptr = Box::into_raw(bytes) as *const u8;
+    RawString { ptr, len }
+}
+
+fn write_handle_result(
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+    result: Result<Handle, FsErr>,
+) -> u8 {
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(handle) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = handle;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err as i32;
+                }
+            }
+            1
+        }
+    }
 }
 
 #[no_mangle]
@@ -288,6 +334,199 @@ pub extern "C" fn capable_rt_fs_open_read(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_dir_close(dir: Handle) {
     take_handle(&DIRS, dir, "dir table");
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_exists(
+    fs: Handle,
+    path_ptr: *const u8,
+    path_len: usize,
+) -> u8 {
+    let path = unsafe { read_str(path_ptr, path_len) };
+    let state = take_handle(&READ_FS, fs, "readfs table");
+    let (Some(state), Some(path)) = (state, path) else {
+        return 0;
+    };
+    let Some(relative) = normalize_relative(Path::new(&path)) else {
+        return 0;
+    };
+    let full = state.root.join(relative);
+    match full.canonicalize() {
+        Ok(path) => u8::from(path.starts_with(&state.root) && path.exists()),
+        Err(_) => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_read_bytes(
+    fs: Handle,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let path = unsafe { read_str(path_ptr, path_len) };
+    let state = take_handle(&READ_FS, fs, "readfs table");
+    let (Some(state), Some(path)) = (state, path) else {
+        return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(relative) = normalize_relative(Path::new(&path)) else {
+        return write_handle_result(out_ok, out_err, Err(FsErr::InvalidPath));
+    };
+    let full = match resolve_rooted_path(&state.root, &relative) {
+        Ok(path) => path,
+        Err(err) => return write_handle_result(out_ok, out_err, Err(err)),
+    };
+    match std::fs::read(&full) {
+        Ok(bytes) => {
+            let handle = new_handle();
+            with_table(&VECS_U8, "vec u8 table", |table| {
+                table.insert(handle, bytes);
+            });
+            write_handle_result(out_ok, out_err, Ok(handle))
+        }
+        Err(err) => write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_list_dir(
+    fs: Handle,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let path = unsafe { read_str(path_ptr, path_len) };
+    let state = take_handle(&READ_FS, fs, "readfs table");
+    let (Some(state), Some(path)) = (state, path) else {
+        return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(relative) = normalize_relative(Path::new(&path)) else {
+        return write_handle_result(out_ok, out_err, Err(FsErr::InvalidPath));
+    };
+    let full = match resolve_rooted_path(&state.root, &relative) {
+        Ok(path) => path,
+        Err(err) => return write_handle_result(out_ok, out_err, Err(err)),
+    };
+    let entries = match std::fs::read_dir(&full) {
+        Ok(entries) => entries,
+        Err(err) => return write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => return write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
+        };
+        names.push(entry.file_name().to_string_lossy().to_string());
+    }
+    let handle = new_handle();
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.insert(handle, names);
+    });
+    write_handle_result(out_ok, out_err, Ok(handle))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_exists(
+    dir: Handle,
+    name_ptr: *const u8,
+    name_len: usize,
+) -> u8 {
+    let name = unsafe { read_str(name_ptr, name_len) };
+    let state = take_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(name)) = (state, name) else {
+        return 0;
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return 0;
+    };
+    let combined = state.rel.join(name_rel);
+    match resolve_rooted_path(&state.root, &combined) {
+        Ok(path) => u8::from(path.exists()),
+        Err(_) => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_read_bytes(
+    dir: Handle,
+    name_ptr: *const u8,
+    name_len: usize,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let name = unsafe { read_str(name_ptr, name_len) };
+    let state = take_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(name)) = (state, name) else {
+        return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return write_handle_result(out_ok, out_err, Err(FsErr::InvalidPath));
+    };
+    let combined = state.rel.join(name_rel);
+    let full = match resolve_rooted_path(&state.root, &combined) {
+        Ok(path) => path,
+        Err(err) => return write_handle_result(out_ok, out_err, Err(err)),
+    };
+    match std::fs::read(&full) {
+        Ok(bytes) => {
+            let handle = new_handle();
+            with_table(&VECS_U8, "vec u8 table", |table| {
+                table.insert(handle, bytes);
+            });
+            write_handle_result(out_ok, out_err, Ok(handle))
+        }
+        Err(err) => write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_list_dir(
+    dir: Handle,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let state = take_handle(&DIRS, dir, "dir table");
+    let Some(state) = state else {
+        return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
+    };
+    let full = match resolve_rooted_path(&state.root, &state.rel) {
+        Ok(path) => path,
+        Err(err) => return write_handle_result(out_ok, out_err, Err(err)),
+    };
+    let entries = match std::fs::read_dir(&full) {
+        Ok(entries) => entries,
+        Err(err) => return write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => return write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
+        };
+        names.push(entry.file_name().to_string_lossy().to_string());
+    }
+    let handle = new_handle();
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.insert(handle, names);
+    });
+    write_handle_result(out_ok, out_err, Ok(handle))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_join(
+    a_ptr: *const u8,
+    a_len: usize,
+    b_ptr: *const u8,
+    b_len: usize,
+) -> RawString {
+    let (Some(a), Some(b)) = (unsafe { read_str(a_ptr, a_len) }, unsafe { read_str(b_ptr, b_len) }) else {
+        return RawString { ptr: std::ptr::null(), len: 0 };
+    };
+    let joined = Path::new(&a).join(&b);
+    to_raw_string(joined.to_string_lossy().to_string())
 }
 
 #[no_mangle]
@@ -1381,6 +1620,15 @@ fn map_fs_err(err: std::io::Error) -> FsErr {
         ErrorKind::InvalidInput => FsErr::InvalidPath,
         _ => FsErr::IoError,
     }
+}
+
+fn resolve_rooted_path(root: &Path, rel: &Path) -> Result<PathBuf, FsErr> {
+    let full = root.join(rel);
+    let full = full.canonicalize().map_err(map_fs_err)?;
+    if !full.starts_with(root) {
+        return Err(FsErr::InvalidPath);
+    }
+    Ok(full)
 }
 
 fn write_result(

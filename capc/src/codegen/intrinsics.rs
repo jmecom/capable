@@ -49,6 +49,34 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::String, AbiType::ResultString],
         ret: AbiType::ResultString,
     };
+    let fs_read_bytes = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_read_bytes_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_list_dir = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_list_dir_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::String,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_exists = FnSig {
+        params: vec![AbiType::Handle, AbiType::String],
+        ret: AbiType::Bool,
+    };
     let fs_readfs_close = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Unit,
@@ -72,6 +100,21 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     let fs_file_read_close = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Unit,
+    };
+    let fs_dir_list_dir = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_dir_list_dir_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let fs_join = FnSig {
+        params: vec![AbiType::String, AbiType::String],
+        ret: AbiType::String,
     };
     // Console.
     let console_println = FnSig {
@@ -628,6 +671,36 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.fs.ReadFS__read_bytes".to_string(),
+        FnInfo {
+            sig: fs_read_bytes.clone(),
+            abi_sig: Some(fs_read_bytes_abi.clone()),
+            symbol: "capable_rt_fs_read_bytes".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.ReadFS__list_dir".to_string(),
+        FnInfo {
+            sig: fs_list_dir,
+            abi_sig: Some(fs_list_dir_abi),
+            symbol: "capable_rt_fs_list_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.ReadFS__exists".to_string(),
+        FnInfo {
+            sig: fs_exists.clone(),
+            abi_sig: None,
+            symbol: "capable_rt_fs_exists".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.fs.ReadFS__close".to_string(),
         FnInfo {
             sig: fs_readfs_close,
@@ -678,6 +751,36 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.fs.Dir__read_bytes".to_string(),
+        FnInfo {
+            sig: fs_read_bytes,
+            abi_sig: Some(fs_read_bytes_abi),
+            symbol: "capable_rt_fs_dir_read_bytes".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__list_dir".to_string(),
+        FnInfo {
+            sig: fs_dir_list_dir,
+            abi_sig: Some(fs_dir_list_dir_abi),
+            symbol: "capable_rt_fs_dir_list_dir".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__exists".to_string(),
+        FnInfo {
+            sig: fs_exists,
+            abi_sig: None,
+            symbol: "capable_rt_fs_dir_exists".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.fs.Dir__close".to_string(),
         FnInfo {
             sig: fs_dir_close,
@@ -703,6 +806,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: fs_file_read_close,
             abi_sig: None,
             symbol: "capable_rt_fs_file_read_close".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.join".to_string(),
+        FnInfo {
+            sig: fs_join,
+            abi_sig: None,
+            symbol: "capable_rt_fs_join".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

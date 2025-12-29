@@ -93,6 +93,20 @@ fn run_fs_attenuation() {
 }
 
 #[test]
+fn run_fs_helpers() {
+    let out_dir = make_out_dir("fs_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/fs_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("fs helpers ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_match_expr() {
     let out_dir = make_out_dir("match_expr");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
