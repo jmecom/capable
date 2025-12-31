@@ -16,31 +16,39 @@ pub fn main(rc: RootCap) -> i32 {
   // Test generics with <>
   let w = Wrapper<i32>{ value: 42 }
   let v = identity<i32>(w.value)
-  if (v == 42) {
-    c.println("generic ok")
+  if (v != 42) {
+    c.println("FAIL: generic")
+    return 1
   }
+  c.println("generic ok")
 
   // Test indexing with []
   let s = "hello"
   let first = s[0]
-  if (first == 104u8) {
-    c.println("index ok")
+  if (first != 104u8) {  // 'h' is 104
+    c.println("FAIL: index")
+    return 1
   }
+  c.println("index ok")
 
   // Test comparison with < (should not be confused with generics)
   let x = 5
   let y = 10
-  if (x < y) {
-    c.println("compare ok")
+  if (x >= y) {
+    c.println("FAIL: compare")
+    return 1
   }
+  c.println("compare ok")
 
   // Test both in same expression context
   let s2 = "world"
   let idx = identity<i32>(1)
   let ch = s2[idx]
-  if (ch == 111u8) {  // 'o' is 111
-    c.println("combo ok")
+  if (ch != 111u8) {  // 'o' is 111
+    c.println("FAIL: combo")
+    return 1
   }
+  c.println("combo ok")
 
   c.println("generic_and_index ok")
   return 0
