@@ -13,8 +13,8 @@ use crate::hir::{
 
 use super::{
     build_type_params, check, function_key, lower_type, resolve_enum_variant, resolve_method_target,
-    resolve_type_name, BuiltinType, EnumInfo, FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex,
-    StructInfo, Ty, TypeTable, UseMap,
+    resolve_type_name, EnumInfo, FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo,
+    Ty, TypeTable, UseMap,
 };
 
 /// Context for HIR lowering (uses the type checker as source of truth).
@@ -716,71 +716,6 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                             let err_block = HirBlock {
                                 stmts: vec![HirStmt::Expr(HirExprStmt {
                                     expr: err_expr,
-                                    span: method_call.span,
-                                })],
-                            };
-                            return Ok(HirExpr::Match(HirMatch {
-                                expr: Box::new(receiver),
-                                arms: vec![
-                                    HirMatchArm {
-                                        pattern: ok_pattern,
-                                        body: ok_block,
-                                    },
-                                    HirMatchArm {
-                                        pattern: err_pattern,
-                                        body: err_block,
-                                    },
-                                ],
-                                result_ty: hir_ty,
-                                span: method_call.span,
-                            }));
-                        }
-                        "ok" => {
-                            // Convert Result[T, E] to Result[T, unit]
-                            let ok_name = format!("__ok_val_{}", ctx.local_counter);
-                            let ok_local_id = ctx.fresh_local(ok_name.clone(), args[0].clone());
-                            let ok_pattern = HirPattern::Variant {
-                                variant_name: "Ok".to_string(),
-                                binding: Some(ok_local_id),
-                            };
-                            let err_pattern = HirPattern::Variant {
-                                variant_name: "Err".to_string(),
-                                binding: None,
-                            };
-                            // Ok arm: return Ok(x)
-                            let ok_inner = HirExpr::Local(HirLocal {
-                                local_id: ok_local_id,
-                                ty: hir_type_for(args[0].clone(), ctx, method_call.span)?,
-                                span: method_call.span,
-                            });
-                            let ok_result = HirExpr::EnumVariant(HirEnumVariantExpr {
-                                enum_ty: hir_ty.clone(),
-                                variant_name: "Ok".to_string(),
-                                payload: Some(Box::new(ok_inner)),
-                                span: method_call.span,
-                            });
-                            let ok_block = HirBlock {
-                                stmts: vec![HirStmt::Expr(HirExprStmt {
-                                    expr: ok_result,
-                                    span: method_call.span,
-                                })],
-                            };
-                            // Err arm: return Err(())
-                            let unit_ty = hir_type_for(Ty::Builtin(BuiltinType::Unit), ctx, method_call.span)?;
-                            let unit_expr = HirExpr::Literal(HirLiteral {
-                                value: Literal::Unit,
-                                ty: unit_ty,
-                                span: method_call.span,
-                            });
-                            let err_result = HirExpr::EnumVariant(HirEnumVariantExpr {
-                                enum_ty: hir_ty.clone(),
-                                variant_name: "Err".to_string(),
-                                payload: Some(Box::new(unit_expr)),
-                                span: method_call.span,
-                            });
-                            let err_block = HirBlock {
-                                stmts: vec![HirStmt::Expr(HirExprStmt {
-                                    expr: err_result,
                                     span: method_call.span,
                                 })],
                             };

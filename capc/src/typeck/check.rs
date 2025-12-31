@@ -1243,19 +1243,6 @@ pub(super) fn check_expr(
                             }
                             return record_expr_type(recorder, expr, err_ty.clone());
                         }
-                        "ok" => {
-                            if !method_call.args.is_empty() {
-                                return Err(TypeError::new(
-                                    "ok expects no arguments".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            let result_ty = Ty::Path(
-                                "Result".to_string(),
-                                vec![ok_ty.clone(), Ty::Builtin(BuiltinType::Unit)],
-                            );
-                            return record_expr_type(recorder, expr, result_ty);
-                        }
                         _ => {}
                     }
                 }
