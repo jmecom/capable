@@ -57,12 +57,12 @@ fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result[string, unit]
     return Ok(acc)
   }
   let seg_res = parts.get(i)
-  return match (seg_res) {
+  match (seg_res) {
     Ok(seg) => {
-      sanitize_segment(parts, i, acc, seg)
+      return sanitize_segment(parts, i, acc, seg)
     }
     Err(_) => {
-      Err(())
+      return Err(())
     }
   }
 }
@@ -112,12 +112,12 @@ fn parse_request_line(line: string) -> Result[string, unit] {
 fn parse_request_path(req: string) -> Result[string, unit] {
   let lines = req.lines()
   let line_res = lines.get(0)
-  return match (line_res) {
+  match (line_res) {
     Ok(line) => {
-      parse_request_line(line)
+      return parse_request_line(line)
     }
     Err(_) => {
-      Err(())
+      return Err(())
     }
   }
 }
@@ -141,7 +141,7 @@ fn respond_bad_request(conn: &TcpConn) -> Result[unit, NetErr] {
 fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result[unit, NetErr] {
   let listener = net.listen("127.0.0.1", 8080)?
   let conn = listener.accept()?
-  let req = conn.read_to_string()?
+  let req = conn.read(4096)?
   let path_res = parse_request_path(req)
   match (path_res) {
     Ok(path) => {

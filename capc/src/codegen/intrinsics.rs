@@ -206,6 +206,14 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle, AbiType::ResultString],
         ret: AbiType::ResultString,
     };
+    let net_read = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let net_read_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
     let net_write = FnSig {
         params: vec![AbiType::Handle, AbiType::String],
         ret: AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
@@ -723,6 +731,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: net_read_to_string,
             abi_sig: Some(net_read_to_string_abi),
             symbol: "capable_rt_net_read_to_string".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.net.TcpConn__read".to_string(),
+        FnInfo {
+            sig: net_read,
+            abi_sig: Some(net_read_abi),
+            symbol: "capable_rt_net_read".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
