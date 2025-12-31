@@ -849,6 +849,39 @@ pub extern "C" fn capable_rt_net_read_to_string(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_net_read(
+    conn: Handle,
+    max_size: i32,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let result = with_table(&TCP_CONNS, "tcp conn table", |table| {
+        let Some(stream) = table.get_mut(&conn) else {
+            return Err(NetErr::IoError);
+        };
+        let max = max_size.max(0) as usize;
+        let mut buffer = vec![0u8; max];
+        match stream.read(&mut buffer) {
+            Ok(n) => {
+                buffer.truncate(n);
+                match String::from_utf8(buffer) {
+                    Ok(s) => Ok(s),
+                    Err(_) => Err(NetErr::InvalidData),
+                }
+            }
+            Err(err) => Err(map_net_err(err)),
+        }
+    });
+    write_string_result(
+        out_ptr,
+        out_len,
+        out_err,
+        result.map_err(|err| err as i32),
+    )
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_net_write(
     conn: Handle,
     data_ptr: *const u8,

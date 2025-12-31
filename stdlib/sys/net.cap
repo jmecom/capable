@@ -36,6 +36,10 @@ impl TcpConn {
     return Err(NetErr::IoError)
   }
 
+  pub fn read(self: &TcpConn, max_size: i32) -> Result[string, NetErr] {
+    return Err(NetErr::IoError)
+  }
+
   pub fn write(self: &TcpConn, data: string) -> Result[unit, NetErr] {
     return Err(NetErr::IoError)
   }
