@@ -148,6 +148,8 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
                 }
             }
             Stmt::Assign(_) => {}
+            Stmt::Break(_) => {}
+            Stmt::Continue(_) => {}
             Stmt::If(if_stmt) => {
                 if let Some(span) = block_contains_ptr(&if_stmt.then_block) {
                     return Some(span);
@@ -280,6 +282,7 @@ pub(super) fn check_function(
             stdlib,
             module_name,
             &type_params,
+            false, // not inside a loop at function top level
         )?;
     }
 
@@ -317,6 +320,7 @@ fn check_stmt(
     stdlib: &StdlibIndex,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
@@ -481,6 +485,24 @@ fn check_stmt(
             }
             ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
         }
+        Stmt::Break(break_stmt) => {
+            if !in_loop {
+                return Err(TypeError::new(
+                    "break statement outside of loop".to_string(),
+                    break_stmt.span,
+                ));
+            }
+            ensure_linear_all_consumed(scopes, struct_map, enum_map, break_stmt.span)?;
+        }
+        Stmt::Continue(continue_stmt) => {
+            if !in_loop {
+                return Err(TypeError::new(
+                    "continue statement outside of loop".to_string(),
+                    continue_stmt.span,
+                ));
+            }
+            ensure_linear_all_consumed(scopes, struct_map, enum_map, continue_stmt.span)?;
+        }
         Stmt::If(if_stmt) => {
             let cond_ty = check_expr(
                 &if_stmt.cond,
@@ -515,6 +537,7 @@ fn check_stmt(
                 stdlib,
                 module_name,
                 type_params,
+                in_loop,
             )?;
             let mut else_scopes = scopes.clone();
             if let Some(block) = &if_stmt.else_block {
@@ -530,6 +553,7 @@ fn check_stmt(
                     stdlib,
                     module_name,
                     type_params,
+                    in_loop,
                 )?;
             }
             merge_branch_states(
@@ -575,6 +599,7 @@ fn check_stmt(
                 stdlib,
                 module_name,
                 type_params,
+                true, // inside loop, break/continue allowed
             )?;
             ensure_affine_states_match(
                 scopes,
@@ -599,6 +624,7 @@ fn check_stmt(
                     ret_ty,
                     module_name,
                     type_params,
+                    in_loop,
                 )?;
             } else {
                 check_expr(
@@ -635,6 +661,7 @@ fn check_block(
     stdlib: &StdlibIndex,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<(), TypeError> {
     scopes.push_scope();
     for stmt in &block.stmts {
@@ -650,6 +677,7 @@ fn check_block(
             stdlib,
             module_name,
             type_params,
+            in_loop,
         )?;
     }
     ensure_linear_scope_consumed(scopes, struct_map, enum_map, block.span)?;
@@ -1598,6 +1626,7 @@ pub(super) fn check_expr(
             ret_ty,
             module_name,
             type_params,
+            false, // break/continue not allowed in value-producing match
         ),
         Expr::Try(try_expr) => {
             let inner_ty = check_expr(
@@ -1781,6 +1810,7 @@ fn check_match_stmt(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
@@ -1813,6 +1843,7 @@ fn check_match_stmt(
             stdlib,
             module_name,
             type_params,
+            in_loop,
         )?;
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
@@ -1843,6 +1874,7 @@ fn check_match_expr_value(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
@@ -1876,6 +1908,7 @@ fn check_match_expr_value(
             ret_ty,
             module_name,
             type_params,
+            in_loop,
         )?;
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
@@ -1915,6 +1948,7 @@ fn check_match_arm_value(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let Some((last, prefix)) = block.stmts.split_last() else {
         return Err(TypeError::new(
@@ -1941,6 +1975,7 @@ fn check_match_arm_value(
             stdlib,
             module_name,
             type_params,
+            in_loop,
         )?;
     }
     match last {

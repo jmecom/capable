@@ -1,0 +1,16 @@
+module break_basic
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let i = 0
+  while (i < 10) {
+    if (i == 5) {
+      break
+    }
+    i = i + 1
+  }
+  c.println("break ok")
+  return 0
+}

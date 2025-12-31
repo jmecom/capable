@@ -881,3 +881,30 @@ fn typecheck_impl_wrong_module() {
         "expected error about impl module, got: {msg}"
     );
 }
+
+#[test]
+fn typecheck_break_outside_loop_fails() {
+    let source = load_program("should_fail_break_outside_loop.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("break statement outside of loop"));
+}
+
+#[test]
+fn typecheck_continue_outside_loop_fails() {
+    let source = load_program("should_fail_continue_outside_loop.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("continue statement outside of loop"));
+}
+
+#[test]
+fn typecheck_break_in_function_fails() {
+    let source = load_program("should_fail_break_in_function.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("break statement outside of loop"));
+}

@@ -420,6 +420,12 @@ impl MonoCtx {
                     span: ret.span,
                 }))
             }
+            HirStmt::Break(break_stmt) => Ok(HirStmt::Break(HirBreakStmt {
+                span: break_stmt.span,
+            })),
+            HirStmt::Continue(continue_stmt) => Ok(HirStmt::Continue(HirContinueStmt {
+                span: continue_stmt.span,
+            })),
             HirStmt::If(if_stmt) => {
                 let cond = self.mono_expr(module, &if_stmt.cond, subs)?;
                 let then_block = self.mono_block(module, &if_stmt.then_block, subs)?;

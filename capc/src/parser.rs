@@ -466,6 +466,8 @@ impl Parser {
         match self.peek_kind() {
             Some(TokenKind::Let) => Ok(Stmt::Let(self.parse_let()?)),
             Some(TokenKind::Return) => Ok(Stmt::Return(self.parse_return()?)),
+            Some(TokenKind::Break) => Ok(Stmt::Break(self.parse_break()?)),
+            Some(TokenKind::Continue) => Ok(Stmt::Continue(self.parse_continue()?)),
             Some(TokenKind::If) => Ok(Stmt::If(self.parse_if()?)),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
             Some(TokenKind::Ident) => {
@@ -526,6 +528,26 @@ impl Parser {
         Ok(ReturnStmt {
             expr,
             span: Span::new(start, end),
+        })
+    }
+
+    fn parse_break(&mut self) -> Result<BreakStmt, ParseError> {
+        let token = self.expect(TokenKind::Break)?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(token.span.end, |t| t.span.end);
+        Ok(BreakStmt {
+            span: Span::new(token.span.start, end),
+        })
+    }
+
+    fn parse_continue(&mut self) -> Result<ContinueStmt, ParseError> {
+        let token = self.expect(TokenKind::Continue)?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(token.span.end, |t| t.span.end);
+        Ok(ContinueStmt {
+            span: Span::new(token.span.start, end),
         })
     }
 

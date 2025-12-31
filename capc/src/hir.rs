@@ -107,6 +107,8 @@ pub enum HirStmt {
     Let(HirLetStmt),
     Assign(HirAssignStmt),
     Return(HirReturnStmt),
+    Break(HirBreakStmt),
+    Continue(HirContinueStmt),
     If(HirIfStmt),
     While(HirWhileStmt),
     Expr(HirExprStmt),
@@ -118,6 +120,8 @@ impl HirStmt {
             HirStmt::Let(s) => s.span,
             HirStmt::Assign(s) => s.span,
             HirStmt::Return(s) => s.span,
+            HirStmt::Break(s) => s.span,
+            HirStmt::Continue(s) => s.span,
             HirStmt::If(s) => s.span,
             HirStmt::While(s) => s.span,
             HirStmt::Expr(s) => s.span,
@@ -143,6 +147,16 @@ pub struct HirAssignStmt {
 #[derive(Debug, Clone)]
 pub struct HirReturnStmt {
     pub expr: Option<HirExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirBreakStmt {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirContinueStmt {
     pub span: Span,
 }
 

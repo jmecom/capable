@@ -4,11 +4,11 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::abi::AbiType;
 use crate::hir::{
-    HirAssignStmt, HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr,
-    HirExpr, HirExprStmt, HirExternFunction, HirField, HirFieldAccess, HirFunction, HirIfStmt,
-    HirLetStmt, HirLiteral, HirLocal, HirMatch, HirMatchArm, HirParam, HirPattern, HirReturnStmt,
-    HirStmt, HirStruct, HirStructLiteral, HirStructLiteralField, HirType, HirUnary, HirWhileStmt,
-    IntrinsicId, LocalId, ResolvedCallee,
+    HirAssignStmt, HirBinary, HirBlock, HirBreakStmt, HirCall, HirContinueStmt, HirEnum,
+    HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirExternFunction, HirField,
+    HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
+    HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
+    HirStructLiteralField, HirType, HirUnary, HirWhileStmt, IntrinsicId, LocalId, ResolvedCallee,
 };
 
 use super::{
@@ -316,6 +316,16 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
             Ok(HirStmt::Return(HirReturnStmt {
                 expr,
                 span: ret.span,
+            }))
+        }
+        Stmt::Break(break_stmt) => {
+            Ok(HirStmt::Break(HirBreakStmt {
+                span: break_stmt.span,
+            }))
+        }
+        Stmt::Continue(continue_stmt) => {
+            Ok(HirStmt::Continue(HirContinueStmt {
+                span: continue_stmt.span,
             }))
         }
         Stmt::If(if_stmt) => {

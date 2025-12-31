@@ -336,6 +336,7 @@ pub fn build_object(
                     &struct_layouts,
                     &mut module,
                     &mut data_counter,
+                    None, // no loop context at function top level
                 )?;
                 if flow == Flow::Terminated {
                     terminated = true;

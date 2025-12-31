@@ -1,0 +1,23 @@
+module continue_basic
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let sum = 0
+  let i = 0
+  while (i < 10) {
+    i = i + 1
+    if (i == 3) {
+      continue
+    }
+    if (i == 7) {
+      continue
+    }
+    sum = sum + i
+  }
+  if (sum == 45) {
+    c.println("continue ok")
+  }
+  return 0
+}

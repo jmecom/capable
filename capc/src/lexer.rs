@@ -39,6 +39,10 @@ pub enum TokenKind {
     Else,
     #[token("while")]
     While,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
     #[token("return")]
     Return,
     #[token("struct")]

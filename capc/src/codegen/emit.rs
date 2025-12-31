@@ -32,6 +32,12 @@ struct ResultStringSlots {
     err_align: u32,
 }
 
+/// Target blocks for break/continue inside a loop.
+#[derive(Copy, Clone, Debug)]
+pub(super) struct LoopTarget {
+    pub header_block: ir::Block,
+    pub exit_block: ir::Block,
+}
 
 /// Emit a single HIR statement.
 pub(super) fn emit_hir_stmt(
@@ -43,6 +49,7 @@ pub(super) fn emit_hir_stmt(
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
+    loop_target: Option<LoopTarget>,
 ) -> Result<Flow, CodegenError> {
     emit_hir_stmt_inner(
         builder,
@@ -53,6 +60,7 @@ pub(super) fn emit_hir_stmt(
         struct_layouts,
         module,
         data_counter,
+        loop_target,
     )
     .map_err(|err| err.with_span(stmt.span()))
 }
@@ -66,6 +74,7 @@ fn emit_hir_stmt_inner(
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
+    loop_target: Option<LoopTarget>,
 ) -> Result<Flow, CodegenError> {
     use crate::hir::HirStmt;
 
@@ -250,6 +259,7 @@ fn emit_hir_stmt_inner(
                     struct_layouts,
                     module,
                     data_counter,
+                    loop_target,
                 )?;
                 if flow == Flow::Terminated {
                     then_terminated = true;
@@ -276,6 +286,7 @@ fn emit_hir_stmt_inner(
                         struct_layouts,
                         module,
                         data_counter,
+                        loop_target,
                     )?;
                     if flow == Flow::Terminated {
                         else_terminated = true;
@@ -322,6 +333,12 @@ fn emit_hir_stmt_inner(
 
             builder.switch_to_block(body_block);
 
+            // Create loop target for break/continue
+            let body_loop_target = Some(LoopTarget {
+                header_block,
+                exit_block,
+            });
+
             // Loop body gets its own locals
             let mut body_locals = saved_locals.clone();
             let mut body_terminated = false;
@@ -335,6 +352,7 @@ fn emit_hir_stmt_inner(
                     struct_layouts,
                     module,
                     data_counter,
+                    body_loop_target,
                 )?;
                 if flow == Flow::Terminated {
                     body_terminated = true;
@@ -354,6 +372,16 @@ fn emit_hir_stmt_inner(
 
             // After the loop, restore the pre-loop locals snapshot
             *locals = saved_locals;
+        }
+        HirStmt::Break(_) => {
+            let target = loop_target.expect("break outside of loop (should be caught by typeck)");
+            builder.ins().jump(target.exit_block, &[]);
+            return Ok(Flow::Terminated);
+        }
+        HirStmt::Continue(_) => {
+            let target = loop_target.expect("continue outside of loop (should be caught by typeck)");
+            builder.ins().jump(target.header_block, &[]);
+            return Ok(Flow::Terminated);
         }
     }
     Ok(Flow::Continues)
@@ -897,6 +925,7 @@ fn emit_hir_expr_inner(
                     struct_layouts,
                     module,
                     data_counter,
+                    None, // break/continue not supported in expression-context matches
                 )
             } else {
                 emit_hir_match_expr(
@@ -1621,7 +1650,6 @@ fn emit_hir_short_circuit_expr(
     Ok(ValueRepr::Single(param))
 }
 
-/// Emit HIR match as statement (arms can contain returns, don't produce values)
 /// Emit HIR match as statement (arms can contain returns, don't produce values).
 fn emit_hir_match_stmt(
     builder: &mut FunctionBuilder,
@@ -1632,6 +1660,7 @@ fn emit_hir_match_stmt(
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
+    loop_target: Option<LoopTarget>,
 ) -> Result<ValueRepr, CodegenError> {
     // Emit the scrutinee expression
     let value = emit_hir_expr(
@@ -1714,6 +1743,7 @@ fn emit_hir_match_stmt(
                 struct_layouts,
                 module,
                 data_counter,
+                loop_target,
             )?;
             if flow == Flow::Terminated {
                 arm_terminated = true;
@@ -1832,6 +1862,7 @@ fn emit_hir_match_expr(
                 struct_layouts,
                 module,
                 data_counter,
+                None, // break/continue not allowed in value-producing match
             )?;
             if flow == Flow::Terminated {
                 prefix_terminated = true;

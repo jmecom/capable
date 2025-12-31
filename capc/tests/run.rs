@@ -642,3 +642,45 @@ fn run_scoping_assign() {
     assert_eq!(code, 0);
     assert!(stdout.contains("scoping assign test ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_break_basic() {
+    let out_dir = make_out_dir("break_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/break_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("break ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_continue_basic() {
+    let out_dir = make_out_dir("continue_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/continue_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("continue ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_break_nested() {
+    let out_dir = make_out_dir("break_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/break_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("break nested ok"), "stdout was: {stdout:?}");
+}

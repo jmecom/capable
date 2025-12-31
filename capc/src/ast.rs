@@ -142,6 +142,8 @@ pub enum Stmt {
     Let(LetStmt),
     Assign(AssignStmt),
     Return(ReturnStmt),
+    Break(BreakStmt),
+    Continue(ContinueStmt),
     If(IfStmt),
     While(WhileStmt),
     Expr(ExprStmt),
@@ -158,6 +160,16 @@ pub struct LetStmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnStmt {
     pub expr: Option<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreakStmt {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinueStmt {
     pub span: Span,
 }
 
@@ -195,6 +207,8 @@ impl Stmt {
             Stmt::Let(s) => s.span,
             Stmt::Assign(s) => s.span,
             Stmt::Return(s) => s.span,
+            Stmt::Break(s) => s.span,
+            Stmt::Continue(s) => s.span,
             Stmt::If(s) => s.span,
             Stmt::While(s) => s.span,
             Stmt::Expr(s) => s.span,
