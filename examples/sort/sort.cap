@@ -1,0 +1,127 @@
+package safe
+module sort
+use sys::system
+use sys::console
+use sys::stdin
+use sys::io
+use sys::string
+use sys::vec
+
+fn get_line(lines: VecString, i: i32) -> string {
+  match (lines.get(i)) {
+    Ok(line) => { return line }
+    Err(_) => { return "" }
+  }
+}
+
+fn get_idx(indices: VecI32, i: i32) -> i32 {
+  match (indices.get(i)) {
+    Ok(idx) => { return idx }
+    Err(_) => { return 0 }
+  }
+}
+
+fn min_i32(a: i32, b: i32) -> i32 {
+  if (a < b) {
+    return a
+  }
+  return b
+}
+
+// Returns true if a < b lexicographically
+fn str_lt(a: string, b: string) -> bool {
+  let len = min_i32(a.len(), b.len())
+  let i = 0
+  while (i < len) {
+    let ca = a.byte_at(i)
+    let cb = b.byte_at(i)
+    if (ca < cb) {
+      return true
+    }
+    if (ca > cb) {
+      return false
+    }
+    i = i + 1
+  }
+  return a.len() < b.len()
+}
+
+// Compare lines at indices i and j
+fn line_lt(lines: VecString, i: i32, j: i32) -> bool {
+  return str_lt(get_line(lines, i), get_line(lines, j))
+}
+
+// Insertion sort on indices
+fn sort_indices(lines: VecString, indices: VecI32) -> unit {
+  let n = indices.len()
+  let i = 1
+  while (i < n) {
+    let j = i
+    while (j > 0) {
+      let curr_idx = get_idx(indices, j)
+      let prev_idx = get_idx(indices, j - 1)
+      if (line_lt(lines, curr_idx, prev_idx)) {
+        // swap indices[j] and indices[j-1]
+        match (indices.set(j, prev_idx)) {
+          Ok(_) => {}
+          Err(_) => {}
+        }
+        match (indices.set(j - 1, curr_idx)) {
+          Ok(_) => {}
+          Err(_) => {}
+        }
+        j = j - 1
+      } else {
+        j = 0  // break
+      }
+    }
+    i = i + 1
+  }
+}
+
+fn run(c: Console, alloc: Alloc, input: Stdin) -> Result[unit, io::IoErr] {
+  let contents = input.read_to_string()?
+  let lines = contents.lines()
+  let n = lines.len()
+
+  // Create index array [0, 1, 2, ...]
+  let indices = alloc.vec_i32_new()
+  let i = 0
+  while (i < n) {
+    match (indices.push(i)) {
+      Ok(_) => {}
+      Err(_) => {}
+    }
+    i = i + 1
+  }
+
+  sort_indices(lines, indices)
+
+  // Print lines in sorted order (skip empty lines)
+  i = 0
+  while (i < n) {
+    let idx = get_idx(indices, i)
+    let line = get_line(lines, idx)
+    if (line.len() > 0) {
+      c.println(line)
+    }
+    i = i + 1
+  }
+
+  alloc.vec_i32_free(indices)
+  alloc.vec_string_free(lines)
+  return Ok(())
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let input = rc.mint_stdin()
+  let alloc = rc.mint_alloc_default()
+  match (run(c, alloc, input)) {
+    Ok(_) => { return 0 }
+    Err(_) => {
+      c.println("error reading input")
+      return 1
+    }
+  }
+}

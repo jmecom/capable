@@ -1,0 +1,51 @@
+package safe
+module uniq
+use sys::system
+use sys::console
+use sys::stdin
+use sys::io
+use sys::string
+use sys::vec
+
+fn get_line(lines: VecString, i: i32) -> string {
+  match (lines.get(i)) {
+    Ok(line) => { return line }
+    Err(_) => { return "" }
+  }
+}
+
+fn should_print(lines: VecString, i: i32) -> bool {
+  if (i == 0) {
+    return true
+  }
+  let curr = get_line(lines, i)
+  let prev = get_line(lines, i - 1)
+  return !prev.eq(curr)
+}
+
+fn run(c: Console, alloc: Alloc, input: Stdin) -> Result[unit, io::IoErr] {
+  let contents = input.read_to_string()?
+  let lines = contents.lines()
+  let i = 0
+  while (i < lines.len()) {
+    if (should_print(lines, i)) {
+      c.println(get_line(lines, i))
+    }
+    i = i + 1
+  }
+  alloc.vec_string_free(lines)
+  return Ok(())
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let input = rc.mint_stdin()
+  let alloc = rc.mint_alloc_default()
+  match (run(c, alloc, input)) {
+    Ok(_) => { return 0 }
+    Err(_) => {
+      c.println("error reading input")
+      return 1
+    }
+  }
+}
