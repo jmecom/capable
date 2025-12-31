@@ -992,6 +992,17 @@ fn emit_hir_expr_inner(
                     let cmp = builder.ins().icmp(IntCC::NotEqual, a, b);
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
                 }
+                (BinaryOp::Eq, ValueRepr::Pair(ptr1, len1), ValueRepr::Pair(ptr2, len2)) => {
+                    let result = emit_string_eq(builder, module, ptr1, len1, ptr2, len2)?;
+                    Ok(ValueRepr::Single(result))
+                }
+                (BinaryOp::Neq, ValueRepr::Pair(ptr1, len1), ValueRepr::Pair(ptr2, len2)) => {
+                    let eq_result = emit_string_eq(builder, module, ptr1, len1, ptr2, len2)?;
+                    // Invert the result: 1 becomes 0, 0 becomes 1
+                    let one = builder.ins().iconst(ir::types::I8, 1);
+                    let neq_result = builder.ins().bxor(eq_result, one);
+                    Ok(ValueRepr::Single(neq_result))
+                }
                 (BinaryOp::Lt, ValueRepr::Single(a), ValueRepr::Single(b)) => {
                     let cmp = builder.ins().icmp(cmp_cc(&binary.left, IntCC::SignedLessThan, IntCC::UnsignedLessThan), a, b);
                     Ok(ValueRepr::Single(bool_to_i8(builder, cmp)))
@@ -1186,6 +1197,41 @@ fn trap_on_overflow(builder: &mut FunctionBuilder, overflow: Value) {
     builder.switch_to_block(ok_block);
     builder.seal_block(trap_block);
     builder.seal_block(ok_block);
+}
+
+/// Emit a call to the runtime string equality function.
+/// Returns an i8 value: 1 if strings are equal, 0 otherwise.
+fn emit_string_eq(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    ptr1: Value,
+    len1: Value,
+    ptr2: Value,
+    len2: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+    use cranelift_codegen::isa::CallConv;
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (ptr, i64, ptr, i64) -> i8
+    let mut sig = Signature::new(CallConv::SystemV);
+    sig.params.push(AbiParam::new(ptr_ty));
+    sig.params.push(AbiParam::new(ir::types::I64));
+    sig.params.push(AbiParam::new(ptr_ty));
+    sig.params.push(AbiParam::new(ir::types::I64));
+    sig.returns.push(AbiParam::new(ir::types::I8));
+
+    // Declare and import the runtime function
+    let func_id = module
+        .declare_function("capable_rt_string_eq", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+
+    // Call the function
+    let call_inst = builder.ins().call(local_func, &[ptr1, len1, ptr2, len2]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
 }
 
 fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {

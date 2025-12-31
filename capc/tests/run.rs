@@ -810,3 +810,17 @@ fn run_for_continue_nested() {
     assert_eq!(code, 0);
     assert!(stdout.contains("for_continue_nested ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_string_compare() {
+    let out_dir = make_out_dir("string_compare");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/string_compare.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("string_compare ok"), "stdout was: {stdout:?}");
+}

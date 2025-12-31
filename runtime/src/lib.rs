@@ -2087,6 +2087,27 @@ pub extern "C" fn capable_rt_read_stdin_to_string(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_string_eq(
+    ptr1: *const u8,
+    len1: usize,
+    ptr2: *const u8,
+    len2: usize,
+) -> i8 {
+    if len1 != len2 {
+        return 0;
+    }
+    if len1 == 0 {
+        return 1; // Both empty strings are equal
+    }
+    if ptr1.is_null() || ptr2.is_null() {
+        return 0;
+    }
+    let s1 = unsafe { std::slice::from_raw_parts(ptr1, len1) };
+    let s2 = unsafe { std::slice::from_raw_parts(ptr2, len2) };
+    if s1 == s2 { 1 } else { 0 }
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_string_len(ptr: *const u8, len: usize) -> i32 {
     let _ = ptr;
     len.min(i32::MAX as usize) as i32
