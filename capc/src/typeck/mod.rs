@@ -1086,6 +1086,7 @@ impl SpanExt for Expr {
             Expr::Call(call) => call.span,
             Expr::MethodCall(method_call) => method_call.span,
             Expr::FieldAccess(field) => field.span,
+            Expr::Index(index) => index.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

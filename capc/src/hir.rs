@@ -200,6 +200,7 @@ pub enum HirExpr {
     EnumVariant(HirEnumVariantExpr),
     Call(HirCall),
     FieldAccess(HirFieldAccess),
+    Index(HirIndex),
     StructLiteral(HirStructLiteral),
     Unary(HirUnary),
     Binary(HirBinary),
@@ -215,6 +216,7 @@ impl HirExpr {
             HirExpr::EnumVariant(e) => e.span,
             HirExpr::Call(e) => e.span,
             HirExpr::FieldAccess(e) => e.span,
+            HirExpr::Index(e) => e.span,
             HirExpr::StructLiteral(e) => e.span,
             HirExpr::Unary(e) => e.span,
             HirExpr::Binary(e) => e.span,
@@ -230,6 +232,7 @@ impl HirExpr {
             HirExpr::EnumVariant(e) => &e.enum_ty,
             HirExpr::Call(e) => &e.ret_ty,
             HirExpr::FieldAccess(e) => &e.field_ty,
+            HirExpr::Index(e) => &e.elem_ty,
             HirExpr::StructLiteral(e) => &e.struct_ty,
             HirExpr::Unary(e) => &e.ty,
             HirExpr::Binary(e) => &e.ty,
@@ -300,6 +303,14 @@ pub struct HirFieldAccess {
     pub object: Box<HirExpr>,
     pub field_name: String,
     pub field_ty: HirType,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirIndex {
+    pub object: Box<HirExpr>,
+    pub index: Box<HirExpr>,
+    pub elem_ty: HirType,
     pub span: Span,
 }
 

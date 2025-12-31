@@ -638,6 +638,16 @@ impl MonoCtx {
                     span: t.span,
                 }))
             }
+            HirExpr::Index(idx) => {
+                let object = self.mono_expr(module, &idx.object, subs)?;
+                let index = self.mono_expr(module, &idx.index, subs)?;
+                Ok(HirExpr::Index(crate::hir::HirIndex {
+                    object: Box::new(object),
+                    index: Box::new(index),
+                    elem_ty: self.mono_hir_type(module, &idx.elem_ty, subs)?,
+                    span: idx.span,
+                }))
+            }
         }
     }
 

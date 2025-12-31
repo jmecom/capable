@@ -953,6 +953,17 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 span: try_expr.span,
             }))
         }
+        Expr::Index(index_expr) => {
+            let object = lower_expr(&index_expr.object, ctx, ret_ty)?;
+            let index = lower_expr(&index_expr.index, ctx, ret_ty)?;
+
+            Ok(HirExpr::Index(crate::hir::HirIndex {
+                object: Box::new(object),
+                index: Box::new(index),
+                elem_ty: hir_ty,
+                span: index_expr.span,
+            }))
+        }
     }
 }
 

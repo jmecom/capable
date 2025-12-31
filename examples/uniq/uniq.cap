@@ -23,7 +23,7 @@ fn should_print(lines: VecString, i: i32) -> bool {
   return !prev.eq(curr)
 }
 
-fn run(c: Console, alloc: Alloc, input: Stdin) -> Result[unit, io::IoErr] {
+fn run(c: Console, alloc: Alloc, input: Stdin) -> Result<unit, io::IoErr> {
   let contents = input.read_to_string()?
   let lines = contents.lines()
   let i = 0

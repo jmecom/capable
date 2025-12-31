@@ -824,3 +824,31 @@ fn run_string_compare() {
     assert_eq!(code, 0);
     assert!(stdout.contains("string_compare ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_string_index() {
+    let out_dir = make_out_dir("string_index");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/string_index.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("string_index ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_generic_and_index() {
+    let out_dir = make_out_dir("generic_and_index");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/generic_and_index.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("generic_and_index ok"), "stdout was: {stdout:?}");
+}

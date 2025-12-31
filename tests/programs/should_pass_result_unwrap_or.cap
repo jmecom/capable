@@ -1,10 +1,10 @@
 module should_pass_result_unwrap_or
 
-fn make_ok() -> Result[i32, i32] {
+fn make_ok() -> Result<i32, i32> {
   return Ok(1)
 }
 
-fn make_err() -> Result[i32, i32] {
+fn make_err() -> Result<i32, i32> {
   return Err(2)
 }
 

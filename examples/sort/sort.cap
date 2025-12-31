@@ -79,7 +79,7 @@ fn sort_indices(lines: VecString, indices: VecI32) -> unit {
   }
 }
 
-fn run(c: Console, alloc: Alloc, input: Stdin) -> Result[unit, io::IoErr] {
+fn run(c: Console, alloc: Alloc, input: Stdin) -> Result<unit, io::IoErr> {
   let contents = input.read_to_string()?
   let lines = contents.lines()
   let n = lines.len()

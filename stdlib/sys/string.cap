@@ -17,12 +17,12 @@ impl string {
   }
 
   /// Intrinsic; implemented by the runtime.
-  pub fn as_slice(self) -> Slice[u8] {
+  pub fn as_slice(self) -> Slice<u8> {
     return ()
   }
 
   /// bytes() is an alias for as_slice().
-  pub fn bytes(self) -> Slice[u8] {
+  pub fn bytes(self) -> Slice<u8> {
     return self.as_slice()
   }
 

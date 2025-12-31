@@ -3,18 +3,18 @@ module generics_basic
 use sys::console
 use sys::system
 
-struct Box[T] {
+struct Box<T> {
   value: T,
 }
 
-fn id[T](value: T) -> T {
+fn id<T>(value: T) -> T {
   return value
 }
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let b = Box[i32]{ value: 42 }
-  let v = id[i32](b.value)
+  let b = Box<i32>{ value: 42 }
+  let v = id<i32>(b.value)
   c.print_i32(v)
   return 0
 }

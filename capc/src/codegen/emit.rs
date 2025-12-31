@@ -1103,6 +1103,16 @@ fn emit_hir_expr_inner(
             module,
             data_counter,
         ),
+        HirExpr::Index(index_expr) => emit_hir_index(
+            builder,
+            index_expr,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            module,
+            data_counter,
+        ),
         HirExpr::StructLiteral(literal) => {
             emit_hir_struct_literal(
                 builder,
@@ -1234,6 +1244,198 @@ fn emit_string_eq(
     Ok(results[0])
 }
 
+/// Emit an index expression, calling the appropriate runtime function.
+fn emit_hir_index(
+    builder: &mut FunctionBuilder,
+    index_expr: &crate::hir::HirIndex,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    // Emit the object expression
+    let object = emit_hir_expr(
+        builder,
+        &index_expr.object,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )?;
+
+    // Emit the index expression
+    let index = emit_hir_expr(
+        builder,
+        &index_expr.index,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        module,
+        data_counter,
+    )?;
+
+    let index_val = match index {
+        ValueRepr::Single(v) => v,
+        _ => {
+            return Err(CodegenError::Codegen(
+                "index must be a single value".to_string(),
+            ))
+        }
+    };
+
+    // Get the object type to determine what runtime function to call
+    let object_ty = &index_expr.object.ty().ty;
+
+    match object_ty {
+        crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::String) => {
+            // For strings, call capable_rt_string_byte_at(ptr, len, index) -> u8
+            let (ptr, len) = match object {
+                ValueRepr::Pair(p, l) => (p, l),
+                _ => {
+                    return Err(CodegenError::Codegen(
+                        "expected string to be a pointer-length pair".to_string(),
+                    ))
+                }
+            };
+
+            let result = emit_string_byte_at(builder, module, ptr, len, index_val)?;
+            Ok(ValueRepr::Single(result))
+        }
+        crate::typeck::Ty::Path(name, _) if name == "Slice" || name == "sys.buffer.Slice" => {
+            // For Slice[u8], call capable_rt_slice_at(handle, index) -> u8
+            let handle = match object {
+                ValueRepr::Single(h) => h,
+                _ => {
+                    return Err(CodegenError::Codegen(
+                        "expected Slice to be a handle".to_string(),
+                    ))
+                }
+            };
+
+            let result = emit_slice_at(builder, module, handle, index_val)?;
+            Ok(ValueRepr::Single(result))
+        }
+        crate::typeck::Ty::Path(name, _) if name == "MutSlice" || name == "sys.buffer.MutSlice" => {
+            // For MutSlice[u8], call capable_rt_mut_slice_at(handle, index) -> u8
+            let handle = match object {
+                ValueRepr::Single(h) => h,
+                _ => {
+                    return Err(CodegenError::Codegen(
+                        "expected MutSlice to be a handle".to_string(),
+                    ))
+                }
+            };
+
+            let result = emit_mut_slice_at(builder, module, handle, index_val)?;
+            Ok(ValueRepr::Single(result))
+        }
+        _ => Err(CodegenError::Codegen(format!(
+            "cannot index into type {:?}",
+            object_ty
+        ))),
+    }
+}
+
+/// Emit a call to the runtime string byte_at function.
+/// Returns a u8 value at the given index.
+fn emit_string_byte_at(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    ptr: Value,
+    len: Value,
+    index: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+    use cranelift_codegen::isa::CallConv;
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (ptr, i64, i32) -> u8
+    let mut sig = Signature::new(CallConv::SystemV);
+    sig.params.push(AbiParam::new(ptr_ty));
+    sig.params.push(AbiParam::new(ir::types::I64));
+    sig.params.push(AbiParam::new(ir::types::I32));
+    sig.returns.push(AbiParam::new(ir::types::I8));
+
+    // Declare and import the runtime function
+    let func_id = module
+        .declare_function("capable_rt_string_byte_at", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+
+    // Call the function
+    let call_inst = builder.ins().call(local_func, &[ptr, len, index]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
+}
+
+/// Emit a call to the runtime slice at function.
+/// Returns a u8 value at the given index.
+fn emit_slice_at(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    handle: Value,
+    index: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+    use cranelift_codegen::isa::CallConv;
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (handle, i32) -> u8
+    let mut sig = Signature::new(CallConv::SystemV);
+    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
+    sig.params.push(AbiParam::new(ir::types::I32));
+    sig.returns.push(AbiParam::new(ir::types::I8));
+
+    // Declare and import the runtime function
+    let func_id = module
+        .declare_function("capable_rt_slice_at", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+
+    // Call the function
+    let call_inst = builder.ins().call(local_func, &[handle, index]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
+}
+
+/// Emit a call to the runtime mutable slice at function.
+/// Returns a u8 value at the given index.
+fn emit_mut_slice_at(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    handle: Value,
+    index: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+    use cranelift_codegen::isa::CallConv;
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (handle, i32) -> u8
+    let mut sig = Signature::new(CallConv::SystemV);
+    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
+    sig.params.push(AbiParam::new(ir::types::I32));
+    sig.returns.push(AbiParam::new(ir::types::I8));
+
+    // Declare and import the runtime function
+    let func_id = module
+        .declare_function("capable_rt_mut_slice_at", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+
+    // Call the function
+    let call_inst = builder.ins().call(local_func, &[handle, index]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
+}
+
 fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
     let ty = match expr {
         crate::hir::HirExpr::Literal(lit) => &lit.ty,
@@ -1241,6 +1443,7 @@ fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
         crate::hir::HirExpr::EnumVariant(variant) => &variant.enum_ty,
         crate::hir::HirExpr::Call(call) => &call.ret_ty,
         crate::hir::HirExpr::FieldAccess(field) => &field.field_ty,
+        crate::hir::HirExpr::Index(idx) => &idx.elem_ty,
         crate::hir::HirExpr::StructLiteral(lit) => &lit.struct_ty,
         crate::hir::HirExpr::Unary(unary) => &unary.ty,
         crate::hir::HirExpr::Binary(binary) => &binary.ty,

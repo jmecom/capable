@@ -1,6 +1,6 @@
 module should_fail_match_result_non_exhaustive
 
-fn make() -> Result[i32, i32] {
+fn make() -> Result<i32, i32> {
   return Ok(1)
 }
 

@@ -1,7 +1,7 @@
 package safe
 module should_fail_try_non_result
 
-fn make() -> Result[i32, i32] {
+fn make() -> Result<i32, i32> {
   return Ok(1)
 }
 

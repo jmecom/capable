@@ -234,6 +234,7 @@ pub enum Expr {
     Call(CallExpr),
     MethodCall(MethodCallExpr),
     FieldAccess(FieldAccessExpr),
+    Index(IndexExpr),
     StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
@@ -310,6 +311,13 @@ pub struct CallExpr {
 pub struct FieldAccessExpr {
     pub object: Box<Expr>,
     pub field: Ident,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexExpr {
+    pub object: Box<Expr>,
+    pub index: Box<Expr>,
     pub span: Span,
 }
 

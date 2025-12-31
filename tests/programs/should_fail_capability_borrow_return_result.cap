@@ -4,7 +4,7 @@ module should_fail_capability_borrow_return_result
 capability struct Cap
 
 impl Cap {
-  pub fn try_dup(self: &Cap) -> Result[Cap, i32] {
+  pub fn try_dup(self: &Cap) -> Result<Cap, i32> {
     return Ok(Cap{})
   }
 }

@@ -1,11 +1,11 @@
 package safe
 module should_fail_try_err_mismatch
 
-fn make() -> Result[i32, bool] {
+fn make() -> Result<i32, bool> {
   return Err(false)
 }
 
-fn use_try() -> Result[i32, i32] {
+fn use_try() -> Result<i32, i32> {
   let v = make()?
   return Ok(v)
 }

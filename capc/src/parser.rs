@@ -643,7 +643,7 @@ impl Parser {
                             let start = lhs.span().start;
                             self.bump(); // consume '.'
                             let field = self.expect_ident()?;
-                            let type_args = if self.peek_kind() == Some(TokenKind::LBracket) {
+                            let type_args = if self.peek_kind() == Some(TokenKind::Lt) {
                                 self.parse_type_args()?
                             } else {
                                 Vec::new()
@@ -709,26 +709,16 @@ impl Parser {
                             continue;
                         }
                         TokenKind::LBracket => {
-                            let type_args = self.parse_type_args()?;
-                            if self.peek_kind() == Some(TokenKind::LBrace) {
-                                let path = match lhs {
-                                    Expr::Path(p) => p,
-                                    Expr::FieldAccess(ref fa) => self.field_access_to_path(fa)?,
-                                    _ => {
-                                        return Err(self.error_current(
-                                            "expected path before struct literal".to_string(),
-                                        ))
-                                    }
-                                };
-                                lhs = self.parse_struct_literal(path, type_args)?;
-                                continue;
-                            }
-                            if self.peek_kind() != Some(TokenKind::LParen) {
-                                return Err(self.error_current(
-                                    "type arguments require a call or struct literal".to_string(),
-                                ));
-                            }
-                            lhs = self.finish_call(lhs, type_args)?;
+                            // With <> for generics, [] is unambiguously for indexing
+                            let start = lhs.span().start;
+                            self.bump(); // consume '['
+                            let index = self.parse_expr()?;
+                            let end = self.expect(TokenKind::RBracket)?.span.end;
+                            lhs = Expr::Index(IndexExpr {
+                                object: Box::new(lhs),
+                                index: Box::new(index),
+                                span: Span::new(start, end),
+                            });
                             continue;
                         }
                         TokenKind::Question => {
@@ -743,6 +733,47 @@ impl Parser {
                         _ => unreachable!(),
                     }
                 }
+            }
+
+            // Special handling for '<' which can be type arguments or less-than
+            if self.peek_kind() == Some(TokenKind::Lt) {
+                // Check if this looks like type arguments: path<Type>(args) or path<Type>{ ... }
+                if matches!(&lhs, Expr::Path(_) | Expr::FieldAccess(_)) {
+                    // Peek ahead to see if content looks like a type
+                    let looks_like_type = match self.peek_token(1).map(|t| &t.kind) {
+                        Some(TokenKind::Ident) => {
+                            if let Some(tok) = self.peek_token(1) {
+                                let builtin_types = ["i32", "u32", "u8", "bool", "string", "unit"];
+                                tok.text.starts_with(|c: char| c.is_uppercase())
+                                    || builtin_types.contains(&tok.text.as_str())
+                            } else {
+                                false
+                            }
+                        }
+                        Some(TokenKind::Star) => true, // pointer type like *u8
+                        _ => false,
+                    };
+                    if looks_like_type {
+                        let type_args = self.parse_type_args()?;
+                        if self.peek_kind() == Some(TokenKind::LBrace) {
+                            let path = match lhs {
+                                Expr::Path(p) => p,
+                                Expr::FieldAccess(ref fa) => self.field_access_to_path(fa)?,
+                                _ => unreachable!(),
+                            };
+                            lhs = self.parse_struct_literal(path, type_args)?;
+                            continue;
+                        }
+                        if self.peek_kind() == Some(TokenKind::LParen) {
+                            lhs = self.finish_call(lhs, type_args)?;
+                            continue;
+                        }
+                        return Err(self.error_current(
+                            "type arguments require a call or struct literal".to_string(),
+                        ));
+                    }
+                }
+                // Fall through to treat as less-than comparison
             }
 
             // Then, check for binary operators
@@ -1069,9 +1100,9 @@ impl Parser {
         let path = self.parse_path()?;
         let mut args = Vec::new();
         let mut end = path.span.end;
-        if self.peek_kind() == Some(TokenKind::LBracket) {
+        if self.peek_kind() == Some(TokenKind::Lt) {
             self.bump();
-            if self.peek_kind() != Some(TokenKind::RBracket) {
+            if self.peek_kind() != Some(TokenKind::Gt) {
                 loop {
                     args.push(self.parse_type()?);
                     if self.maybe_consume(TokenKind::Comma).is_none() {
@@ -1079,7 +1110,7 @@ impl Parser {
                     }
                 }
             }
-            end = self.expect(TokenKind::RBracket)?.span.end;
+            end = self.expect(TokenKind::Gt)?.span.end;
         }
         let span = Span::new(path.span.start, end);
         Ok(Type::Path { path, args, span })
@@ -1140,12 +1171,12 @@ impl Parser {
     }
 
     fn parse_type_params(&mut self) -> Result<Vec<Ident>, ParseError> {
-        if self.peek_kind() != Some(TokenKind::LBracket) {
+        if self.peek_kind() != Some(TokenKind::Lt) {
             return Ok(Vec::new());
         }
         self.bump();
         let mut params = Vec::new();
-        if self.peek_kind() != Some(TokenKind::RBracket) {
+        if self.peek_kind() != Some(TokenKind::Gt) {
             loop {
                 let ident = self.expect_ident()?;
                 params.push(ident);
@@ -1154,17 +1185,17 @@ impl Parser {
                 }
             }
         }
-        self.expect(TokenKind::RBracket)?;
+        self.expect(TokenKind::Gt)?;
         Ok(params)
     }
 
     fn parse_type_args(&mut self) -> Result<Vec<Type>, ParseError> {
-        if self.peek_kind() != Some(TokenKind::LBracket) {
+        if self.peek_kind() != Some(TokenKind::Lt) {
             return Ok(Vec::new());
         }
         self.bump();
         let mut args = Vec::new();
-        if self.peek_kind() != Some(TokenKind::RBracket) {
+        if self.peek_kind() != Some(TokenKind::Gt) {
             loop {
                 args.push(self.parse_type()?);
                 if self.maybe_consume(TokenKind::Comma).is_none() {
@@ -1172,7 +1203,7 @@ impl Parser {
                 }
             }
         }
-        self.expect(TokenKind::RBracket)?;
+        self.expect(TokenKind::Gt)?;
         Ok(args)
     }
 
@@ -1305,6 +1336,7 @@ impl SpanExt for Expr {
             Expr::Call(call) => call.span,
             Expr::MethodCall(method_call) => method_call.span,
             Expr::FieldAccess(field) => field.span,
+            Expr::Index(index) => index.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

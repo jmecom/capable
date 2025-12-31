@@ -1875,6 +1875,75 @@ pub(super) fn check_expr(
             }
             Ok(field_ty)
         }
+        Expr::Index(index_expr) => {
+            // Type check the object (must be string, Slice[T], or MutSlice[T])
+            let object_ty = check_expr(
+                &index_expr.object,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+
+            // Type check the index (must be i32)
+            let index_ty = check_expr(
+                &index_expr.index,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+
+            if index_ty != Ty::Builtin(BuiltinType::I32) {
+                return Err(TypeError::new(
+                    format!("index must be i32, found {:?}", index_ty),
+                    index_expr.index.span(),
+                ));
+            }
+
+            // Determine element type based on object type
+            match &object_ty {
+                Ty::Builtin(BuiltinType::String) => Ok(Ty::Builtin(BuiltinType::U8)),
+                Ty::Path(name, args) if name == "Slice" || name == "sys.buffer.Slice" => {
+                    if args.len() == 1 {
+                        Ok(args[0].clone())
+                    } else {
+                        Err(TypeError::new(
+                            "Slice requires exactly one type argument".to_string(),
+                            index_expr.span,
+                        ))
+                    }
+                }
+                Ty::Path(name, args) if name == "MutSlice" || name == "sys.buffer.MutSlice" => {
+                    if args.len() == 1 {
+                        Ok(args[0].clone())
+                    } else {
+                        Err(TypeError::new(
+                            "MutSlice requires exactly one type argument".to_string(),
+                            index_expr.span,
+                        ))
+                    }
+                }
+                _ => Err(TypeError::new(
+                    format!("cannot index into type {:?}; only string, Slice[T], and MutSlice[T] are indexable", object_ty),
+                    index_expr.span,
+                )),
+            }
+        }
     }?;
     recorder.record(expr, &ty);
     Ok(ty)

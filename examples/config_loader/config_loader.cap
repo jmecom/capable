@@ -14,7 +14,7 @@ fn print_kv(c: Console, key: string, val: string) -> unit {
   c.println(val)
 }
 
-fn parse_line(c: Console, alloc: Alloc, line: string) -> Result[unit, VecErr] {
+fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, VecErr> {
   if line.len() == 0 {
     return Ok(())
   }
@@ -32,7 +32,7 @@ fn parse_line(c: Console, alloc: Alloc, line: string) -> Result[unit, VecErr] {
   return Ok(())
 }
 
-fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result[unit, VecErr] {
+fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, VecErr> {
   let lines = contents.lines()
   let i = 0
   while i < lines.len() {
@@ -44,7 +44,7 @@ fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result[unit, VecE
   return Ok(())
 }
 
-fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result[unit, FsErr] {
+fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result<unit, FsErr> {
   let contents = fs.read_to_string("app.conf")?
   match (parse_config(c, alloc, contents)) {
     Ok(_) => {

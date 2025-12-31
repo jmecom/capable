@@ -25,7 +25,7 @@ fn strip_query(raw_path: string) -> string {
   }
 }
 
-fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Result[string, unit] {
+fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Result<string, unit> {
   if (seg.len() == 0) {
     return sanitize_parts(parts, i + 1, acc)
   }
@@ -41,7 +41,7 @@ fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Resul
   return sanitize_parts(parts, i + 1, fs::join(acc, seg))
 }
 
-fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result[string, unit] {
+fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result<string, unit> {
   if (i >= parts.len()) {
     return Ok(acc)
   }
@@ -51,7 +51,7 @@ fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result[string, unit]
   }
 }
 
-fn sanitize_path(raw_path: string) -> Result[string, unit] {
+fn sanitize_path(raw_path: string) -> Result<string, unit> {
   match (sanitize_parts(raw_path.split(47u8), 0, "")) {
     Ok(path) => {
       if (path.len() == 0) {
@@ -63,7 +63,7 @@ fn sanitize_path(raw_path: string) -> Result[string, unit] {
   }
 }
 
-fn parse_request_line(line: string) -> Result[string, unit] {
+fn parse_request_line(line: string) -> Result<string, unit> {
   let parts = line.trim().split(32u8)
   match (parts.get(0)) {
     Ok(method) => {
@@ -79,35 +79,35 @@ fn parse_request_line(line: string) -> Result[string, unit] {
   }
 }
 
-fn parse_request_path(req: string) -> Result[string, unit] {
+fn parse_request_path(req: string) -> Result<string, unit> {
   match (req.lines().get(0)) {
     Ok(line) => { return parse_request_line(line) }
     Err(_) => { return Err(()) }
   }
 }
 
-fn respond_ok(conn: &TcpConn, body: string) -> Result[unit, NetErr] {
+fn respond_ok(conn: &TcpConn, body: string) -> Result<unit, NetErr> {
   conn.write("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n")?
   conn.write(body)?
   return Ok(())
 }
 
-fn respond_not_found(conn: &TcpConn) -> Result[unit, NetErr] {
+fn respond_not_found(conn: &TcpConn) -> Result<unit, NetErr> {
   return conn.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\n\r\nnot found\n")
 }
 
-fn respond_bad_request(conn: &TcpConn) -> Result[unit, NetErr] {
+fn respond_bad_request(conn: &TcpConn) -> Result<unit, NetErr> {
   return conn.write("HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nbad request\n")
 }
 
-fn handle_request(conn: &TcpConn, readfs: ReadFS, path: string) -> Result[unit, NetErr] {
+fn handle_request(conn: &TcpConn, readfs: ReadFS, path: string) -> Result<unit, NetErr> {
   match (readfs.read_to_string(path)) {
     Ok(body) => { return respond_ok(conn, body) }
     Err(_) => { return respond_not_found(conn) }
   }
 }
 
-fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result[unit, NetErr] {
+fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result<unit, NetErr> {
   let listener = net.listen("127.0.0.1", 8080)?
   let conn = listener.accept()?
   let req = conn.read(4096)?

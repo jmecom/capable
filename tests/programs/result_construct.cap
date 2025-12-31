@@ -35,7 +35,7 @@ pub fn main(rc: RootCap) -> i32 {
   return 0
 }
 
-fn make(ok: bool) -> Result[string, i32] {
+fn make(ok: bool) -> Result<string, i32> {
   if (ok) {
     return Ok("hello")
   } else {

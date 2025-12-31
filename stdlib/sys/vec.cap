@@ -17,19 +17,19 @@ impl VecU8 {
     return 0
   }
 
-  pub fn get(self, i: i32) -> Result[u8, VecErr] {
+  pub fn get(self, i: i32) -> Result<u8, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn set(self, i: i32, x: u8) -> Result[unit, VecErr] {
+  pub fn set(self, i: i32, x: u8) -> Result<unit, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn push(self, x: u8) -> Result[unit, buffer::AllocErr] {
+  pub fn push(self, x: u8) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn extend(self, other: VecU8) -> Result[unit, buffer::AllocErr] {
+  pub fn extend(self, other: VecU8) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
@@ -41,15 +41,15 @@ impl VecU8 {
     return ()
   }
 
-  pub fn slice(self, start: i32, len: i32) -> Result[Slice[u8], VecErr] {
+  pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn pop(self) -> Result[u8, VecErr] {
+  pub fn pop(self) -> Result<u8, VecErr> {
     return Err(VecErr::Empty)
   }
 
-  pub fn as_slice(self) -> Slice[u8] {
+  pub fn as_slice(self) -> Slice<u8> {
     return ()
   }
 }
@@ -59,19 +59,19 @@ impl VecI32 {
     return 0
   }
 
-  pub fn get(self, i: i32) -> Result[i32, VecErr] {
+  pub fn get(self, i: i32) -> Result<i32, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn set(self, i: i32, x: i32) -> Result[unit, VecErr] {
+  pub fn set(self, i: i32, x: i32) -> Result<unit, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn push(self, x: i32) -> Result[unit, buffer::AllocErr] {
+  pub fn push(self, x: i32) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn extend(self, other: VecI32) -> Result[unit, buffer::AllocErr] {
+  pub fn extend(self, other: VecI32) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
@@ -83,7 +83,7 @@ impl VecI32 {
     return ()
   }
 
-  pub fn pop(self) -> Result[i32, VecErr] {
+  pub fn pop(self) -> Result<i32, VecErr> {
     return Err(VecErr::Empty)
   }
 }
@@ -93,19 +93,19 @@ impl VecString {
     return 0
   }
 
-  pub fn get(self, i: i32) -> Result[string, VecErr] {
+  pub fn get(self, i: i32) -> Result<string, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn push(self, x: string) -> Result[unit, buffer::AllocErr] {
+  pub fn push(self, x: string) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn extend(self, other: VecString) -> Result[unit, buffer::AllocErr] {
+  pub fn extend(self, other: VecString) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn pop(self) -> Result[string, VecErr] {
+  pub fn pop(self) -> Result<string, VecErr> {
     return Err(VecErr::Empty)
   }
 }

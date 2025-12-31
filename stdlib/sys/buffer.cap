@@ -4,8 +4,8 @@ use sys::vec
 
 pub copy opaque struct Alloc
 pub copy opaque struct Buffer
-pub copy opaque struct Slice[T]
-pub copy opaque struct MutSlice[T]
+pub copy opaque struct Slice<T>
+pub copy opaque struct MutSlice<T>
 
 pub enum AllocErr {
   Oom
@@ -28,15 +28,15 @@ impl Alloc {
     return ()
   }
 
-  pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice[u8] {
+  pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice<u8> {
     return ()
   }
 
-  pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice[u8] {
+  pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice<u8> {
     return ()
   }
 
-  pub fn buffer_new(self, initial_len: i32) -> Result[Buffer, AllocErr] {
+  pub fn buffer_new(self, initial_len: i32) -> Result<Buffer, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
@@ -74,11 +74,11 @@ impl Buffer {
     return 0
   }
 
-  pub fn push(self, x: u8) -> Result[unit, AllocErr] {
+  pub fn push(self, x: u8) -> Result<unit, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
-  pub fn extend(self, data: Slice[u8]) -> Result[unit, AllocErr] {
+  pub fn extend(self, data: Slice<u8>) -> Result<unit, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
@@ -86,16 +86,16 @@ impl Buffer {
     return false
   }
 
-  pub fn as_slice(self) -> Slice[u8] {
+  pub fn as_slice(self) -> Slice<u8> {
     return ()
   }
 
-  pub fn as_mut_slice(self) -> MutSlice[u8] {
+  pub fn as_mut_slice(self) -> MutSlice<u8> {
     return ()
   }
 }
 
-impl Slice[u8] {
+impl Slice<u8> {
   pub fn len(self) -> i32 {
     return 0
   }
@@ -105,7 +105,7 @@ impl Slice[u8] {
   }
 }
 
-impl MutSlice[u8] {
+impl MutSlice<u8> {
   pub fn at(self, i: i32) -> u8 {
     return 0
   }
