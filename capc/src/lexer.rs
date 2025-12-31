@@ -39,6 +39,10 @@ pub enum TokenKind {
     Else,
     #[token("while")]
     While,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
     #[token("break")]
     Break,
     #[token("continue")]
@@ -122,6 +126,8 @@ pub enum TokenKind {
     Colon,
     #[token(",")]
     Comma,
+    #[token("..", priority = 3)]
+    DotDot,
     #[token(".")]
     Dot,
     #[token(";")]

@@ -470,6 +470,7 @@ impl Parser {
             Some(TokenKind::Continue) => Ok(Stmt::Continue(self.parse_continue()?)),
             Some(TokenKind::If) => Ok(Stmt::If(self.parse_if()?)),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
+            Some(TokenKind::For) => Ok(Stmt::For(self.parse_for()?)),
             Some(TokenKind::Ident) => {
                 if self.peek_token(1).is_some_and(|t| t.kind == TokenKind::Eq) {
                     Ok(Stmt::Assign(self.parse_assign()?))
@@ -587,6 +588,24 @@ impl Parser {
         let end = body.span.end;
         Ok(WhileStmt {
             cond,
+            body,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_for(&mut self) -> Result<ForStmt, ParseError> {
+        let start = self.expect(TokenKind::For)?.span.start;
+        let var = self.expect_ident()?;
+        self.expect(TokenKind::In)?;
+        let range_start = self.parse_primary()?;
+        self.expect(TokenKind::DotDot)?;
+        let range_end = self.parse_primary()?;
+        let body = self.parse_block()?;
+        let end = body.span.end;
+        Ok(ForStmt {
+            var,
+            start: range_start,
+            end: range_end,
             body,
             span: Span::new(start, end),
         })

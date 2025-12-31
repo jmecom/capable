@@ -1,0 +1,18 @@
+module for_break
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // For loop with break: should exit when i == 5
+  for i in 0..100 {
+    if i == 5 {
+      break
+    }
+    c.println_i32(i)
+  }
+
+  c.println("for_break ok")
+  return 0
+}

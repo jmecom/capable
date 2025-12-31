@@ -1,0 +1,28 @@
+module for_continue_nested
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Continue in nested loop: only affects inner loop
+  let sum = 0
+
+  for i in 0..3 {
+    for j in 0..5 {
+      // Skip when j is 2
+      if j == 2 {
+        continue
+      }
+      sum = sum + 1
+    }
+  }
+
+  // Each inner loop runs 5 times but skips j=2, so 4 iterations
+  // Total: 3 * 4 = 12
+  if sum == 12 {
+    c.println("for_continue_nested ok")
+  }
+
+  return 0
+}

@@ -35,7 +35,7 @@ struct ResultStringSlots {
 /// Target blocks for break/continue inside a loop.
 #[derive(Copy, Clone, Debug)]
 pub(super) struct LoopTarget {
-    pub header_block: ir::Block,
+    pub continue_block: ir::Block, // for while: header_block, for: increment_block
     pub exit_block: ir::Block,
 }
 
@@ -358,8 +358,9 @@ fn emit_hir_stmt_inner(
             builder.switch_to_block(body_block);
 
             // Create loop target for break/continue
+            // For while loops, continue goes to header (re-evaluate condition)
             let body_loop_target = Some(LoopTarget {
-                header_block,
+                continue_block: header_block,
                 exit_block,
             });
 
@@ -397,6 +398,120 @@ fn emit_hir_stmt_inner(
             // After the loop, restore the pre-loop locals snapshot
             *locals = saved_locals;
         }
+        HirStmt::For(for_stmt) => {
+            // Snapshot locals so loop-body lets don't leak out of the loop
+            let saved_locals = locals.clone();
+
+            // Create stack slot for loop variable
+            let loop_var_slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                4, // i32 is 4 bytes
+            ));
+
+            // Evaluate start value and store in slot
+            let start_val = emit_hir_expr(
+                builder,
+                &for_stmt.start,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
+            let start_i32 = match start_val {
+                ValueRepr::Single(v) => v,
+                _ => return Err(CodegenError::Unsupported("for loop start".to_string())),
+            };
+            builder.ins().stack_store(start_i32, loop_var_slot, 0);
+
+            // Evaluate end value (once, before the loop)
+            let end_val = emit_hir_expr(
+                builder,
+                &for_stmt.end,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
+            let end_i32 = match end_val {
+                ValueRepr::Single(v) => v,
+                _ => return Err(CodegenError::Unsupported("for loop end".to_string())),
+            };
+
+            let header_block = builder.create_block();
+            let body_block = builder.create_block();
+            let increment_block = builder.create_block();
+            let exit_block = builder.create_block();
+
+            builder.ins().jump(header_block, &[]);
+            builder.switch_to_block(header_block);
+
+            // Load loop variable and compare with end
+            let current_val = builder.ins().stack_load(ir::types::I32, loop_var_slot, 0);
+            let cond = builder.ins().icmp(ir::condcodes::IntCC::SignedLessThan, current_val, end_i32);
+            builder.ins().brif(cond, body_block, &[], exit_block, &[]);
+
+            builder.switch_to_block(body_block);
+
+            // Create loop target for break/continue
+            // For for loops, continue goes to increment block (not header)
+            let body_loop_target = Some(LoopTarget {
+                continue_block: increment_block,
+                exit_block,
+            });
+
+            // Loop body gets its own locals with the loop variable bound
+            let mut body_locals = saved_locals.clone();
+            body_locals.insert(
+                for_stmt.var_id,
+                LocalValue::Slot(loop_var_slot, ir::types::I32),
+            );
+
+            let mut body_terminated = false;
+            for stmt in &for_stmt.body.stmts {
+                let flow = emit_hir_stmt(
+                    builder,
+                    stmt,
+                    &mut body_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                    body_loop_target,
+                )?;
+                if flow == Flow::Terminated {
+                    body_terminated = true;
+                    break;
+                }
+            }
+
+            // Fall through to increment block (if not terminated by break/continue/return)
+            if !body_terminated {
+                builder.ins().jump(increment_block, &[]);
+            }
+
+            // Increment block: increment loop variable and jump back to header
+            builder.switch_to_block(increment_block);
+            let current = builder.ins().stack_load(ir::types::I32, loop_var_slot, 0);
+            let one = builder.ins().iconst(ir::types::I32, 1);
+            let next = builder.ins().iadd(current, one);
+            builder.ins().stack_store(next, loop_var_slot, 0);
+            builder.ins().jump(header_block, &[]);
+
+            builder.seal_block(body_block);
+            builder.seal_block(increment_block);
+            builder.seal_block(header_block);
+
+            builder.switch_to_block(exit_block);
+            builder.seal_block(exit_block);
+
+            // After the loop, restore the pre-loop locals snapshot
+            *locals = saved_locals;
+        }
         HirStmt::Break(_) => {
             let target = loop_target.expect("break outside of loop (should be caught by typeck)");
             builder.ins().jump(target.exit_block, &[]);
@@ -404,7 +519,7 @@ fn emit_hir_stmt_inner(
         }
         HirStmt::Continue(_) => {
             let target = loop_target.expect("continue outside of loop (should be caught by typeck)");
-            builder.ins().jump(target.header_block, &[]);
+            builder.ins().jump(target.continue_block, &[]);
             return Ok(Flow::Terminated);
         }
     }

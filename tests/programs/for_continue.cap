@@ -1,0 +1,25 @@
+module for_continue
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // For loop with continue: skip specific values
+  // Should print 0 1 3 4 6 7 9 (skip 2, 5, 8)
+  for i in 0..10 {
+    if i == 2 {
+      continue
+    }
+    if i == 5 {
+      continue
+    }
+    if i == 8 {
+      continue
+    }
+    c.println_i32(i)
+  }
+
+  c.println("for_continue ok")
+  return 0
+}

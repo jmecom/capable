@@ -1,0 +1,14 @@
+module should_fail_for_non_i32_start
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Error: for loop range start must be i32
+  for i in true..5 {
+    c.println_i32(i)
+  }
+
+  return 0
+}

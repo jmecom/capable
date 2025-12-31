@@ -1,0 +1,31 @@
+module for_break_nested
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Break in nested loop: only breaks inner loop
+  let outer_count = 0
+  let inner_count = 0
+
+  for i in 0..5 {
+    outer_count = outer_count + 1
+    for j in 0..10 {
+      if j == 3 {
+        break
+      }
+      inner_count = inner_count + 1
+    }
+  }
+
+  // outer_count should be 5 (all iterations)
+  // inner_count should be 5 * 3 = 15 (break at j=3 each time)
+  if outer_count == 5 {
+    if inner_count == 15 {
+      c.println("for_break_nested ok")
+    }
+  }
+
+  return 0
+}

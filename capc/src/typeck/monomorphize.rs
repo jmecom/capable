@@ -450,6 +450,18 @@ impl MonoCtx {
                     span: while_stmt.span,
                 }))
             }
+            HirStmt::For(for_stmt) => {
+                let start = self.mono_expr(module, &for_stmt.start, subs)?;
+                let end = self.mono_expr(module, &for_stmt.end, subs)?;
+                let body = self.mono_block(module, &for_stmt.body, subs)?;
+                Ok(HirStmt::For(HirForStmt {
+                    var_id: for_stmt.var_id,
+                    start,
+                    end,
+                    body,
+                    span: for_stmt.span,
+                }))
+            }
             HirStmt::Expr(expr_stmt) => {
                 let expr = self.mono_expr(module, &expr_stmt.expr, subs)?;
                 Ok(HirStmt::Expr(HirExprStmt {

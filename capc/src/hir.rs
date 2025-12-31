@@ -111,6 +111,7 @@ pub enum HirStmt {
     Continue(HirContinueStmt),
     If(HirIfStmt),
     While(HirWhileStmt),
+    For(HirForStmt),
     Expr(HirExprStmt),
 }
 
@@ -124,6 +125,7 @@ impl HirStmt {
             HirStmt::Continue(s) => s.span,
             HirStmt::If(s) => s.span,
             HirStmt::While(s) => s.span,
+            HirStmt::For(s) => s.span,
             HirStmt::Expr(s) => s.span,
         }
     }
@@ -171,6 +173,15 @@ pub struct HirIfStmt {
 #[derive(Debug, Clone)]
 pub struct HirWhileStmt {
     pub cond: HirExpr,
+    pub body: HirBlock,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirForStmt {
+    pub var_id: LocalId,
+    pub start: HirExpr,
+    pub end: HirExpr,
     pub body: HirBlock,
     pub span: Span,
 }

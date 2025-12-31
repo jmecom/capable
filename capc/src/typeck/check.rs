@@ -167,6 +167,11 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
                     return Some(span);
                 }
             }
+            Stmt::For(for_stmt) => {
+                if let Some(span) = block_contains_ptr(&for_stmt.body) {
+                    return Some(span);
+                }
+            }
             Stmt::Expr(expr_stmt) => {
                 if let Expr::Match(match_expr) = &expr_stmt.expr {
                     for arm in &match_expr.arms {
@@ -607,6 +612,85 @@ fn check_stmt(
                 struct_map,
                 enum_map,
                 while_stmt.span,
+            )?;
+        }
+        Stmt::For(for_stmt) => {
+            // Check start expression - must be i32
+            let start_ty = check_expr(
+                &for_stmt.start,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+            if start_ty != Ty::Builtin(BuiltinType::I32) {
+                return Err(TypeError::new(
+                    "for loop range start must be i32".to_string(),
+                    for_stmt.start.span(),
+                ));
+            }
+
+            // Check end expression - must be i32
+            let end_ty = check_expr(
+                &for_stmt.end,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+            if end_ty != Ty::Builtin(BuiltinType::I32) {
+                return Err(TypeError::new(
+                    "for loop range end must be i32".to_string(),
+                    for_stmt.end.span(),
+                ));
+            }
+
+            // Create body scope with loop variable bound
+            let mut body_scopes = scopes.clone();
+            body_scopes.push_scope();
+            body_scopes.insert_local(
+                for_stmt.var.item.clone(),
+                Ty::Builtin(BuiltinType::I32),
+            );
+
+            check_block(
+                &for_stmt.body,
+                ret_ty,
+                functions,
+                &mut body_scopes,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                module_name,
+                type_params,
+                true, // inside loop, break/continue allowed
+            )?;
+
+            // Pop the loop variable scope before checking affine states
+            body_scopes.pop_scope();
+
+            ensure_affine_states_match(
+                scopes,
+                &body_scopes,
+                struct_map,
+                enum_map,
+                for_stmt.span,
             )?;
         }
         Stmt::Expr(expr_stmt) => {

@@ -698,3 +698,115 @@ fn run_nested_match() {
     assert_eq!(code, 0);
     assert!(stdout.contains("nested match ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_for_basic() {
+    let out_dir = make_out_dir("for_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_basic ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_break() {
+    let out_dir = make_out_dir("for_break");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_break.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_break ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_continue() {
+    let out_dir = make_out_dir("for_continue");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_continue.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_continue ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_nested() {
+    let out_dir = make_out_dir("for_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_nested ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_sum() {
+    let out_dir = make_out_dir("for_sum");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_sum.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_sum ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_empty_range() {
+    let out_dir = make_out_dir("for_empty_range");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_empty_range.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_empty_range ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_break_nested() {
+    let out_dir = make_out_dir("for_break_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_break_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_break_nested ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_continue_nested() {
+    let out_dir = make_out_dir("for_continue_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_continue_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_continue_nested ok"), "stdout was: {stdout:?}");
+}

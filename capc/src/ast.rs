@@ -146,6 +146,7 @@ pub enum Stmt {
     Continue(ContinueStmt),
     If(IfStmt),
     While(WhileStmt),
+    For(ForStmt),
     Expr(ExprStmt),
 }
 
@@ -189,6 +190,15 @@ pub struct WhileStmt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForStmt {
+    pub var: Ident,
+    pub start: Expr,
+    pub end: Expr,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprStmt {
     pub expr: Expr,
     pub span: Span,
@@ -211,6 +221,7 @@ impl Stmt {
             Stmt::Continue(s) => s.span,
             Stmt::If(s) => s.span,
             Stmt::While(s) => s.span,
+            Stmt::For(s) => s.span,
             Stmt::Expr(s) => s.span,
         }
     }

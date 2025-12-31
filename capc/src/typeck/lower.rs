@@ -6,7 +6,7 @@ use crate::abi::AbiType;
 use crate::hir::{
     HirAssignStmt, HirBinary, HirBlock, HirBreakStmt, HirCall, HirContinueStmt, HirEnum,
     HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirExternFunction, HirField,
-    HirFieldAccess, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
+    HirFieldAccess, HirForStmt, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
     HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
     HirStructLiteralField, HirType, HirUnary, HirWhileStmt, IntrinsicId, LocalId, ResolvedCallee,
 };
@@ -352,6 +352,26 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
                 cond,
                 body,
                 span: while_stmt.span,
+            }))
+        }
+        Stmt::For(for_stmt) => {
+            let start = lower_expr(&for_stmt.start, ctx, ret_ty)?;
+            let end = lower_expr(&for_stmt.end, ctx, ret_ty)?;
+
+            // Create a fresh local for the loop variable
+            let var_id = ctx.fresh_local(
+                for_stmt.var.item.clone(),
+                crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::I32),
+            );
+
+            let body = lower_block(&for_stmt.body, ctx, ret_ty)?;
+
+            Ok(HirStmt::For(HirForStmt {
+                var_id,
+                start,
+                end,
+                body,
+                span: for_stmt.span,
             }))
         }
         Stmt::Expr(expr_stmt) => {

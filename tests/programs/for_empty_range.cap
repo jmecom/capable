@@ -1,0 +1,24 @@
+module for_empty_range
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Empty range (start >= end): body should not execute
+  let executed = 0
+  for i in 5..5 {
+    executed = 1
+  }
+
+  // Also test negative range
+  for i in 10..5 {
+    executed = 1
+  }
+
+  if executed == 0 {
+    c.println("for_empty_range ok")
+  }
+
+  return 0
+}
