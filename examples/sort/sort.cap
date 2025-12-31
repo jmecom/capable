@@ -72,7 +72,7 @@ fn sort_indices(lines: VecString, indices: VecI32) -> unit {
         }
         j = j - 1
       } else {
-        j = 0  // break
+        break
       }
     }
     i = i + 1
