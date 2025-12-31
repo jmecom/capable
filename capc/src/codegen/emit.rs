@@ -207,6 +207,30 @@ fn emit_hir_stmt_inner(
             return Ok(Flow::Terminated);
         }
         HirStmt::Expr(expr_stmt) => {
+            // Special handling for match expressions that might diverge
+            if let crate::hir::HirExpr::Match(match_expr) = &expr_stmt.expr {
+                if matches!(
+                    match_expr.result_ty.ty,
+                    crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::Unit)
+                ) {
+                    let diverged = emit_hir_match_stmt(
+                        builder,
+                        match_expr,
+                        locals,
+                        fn_map,
+                        enum_index,
+                        struct_layouts,
+                        module,
+                        data_counter,
+                        loop_target,
+                    )?;
+                    if diverged {
+                        return Ok(Flow::Terminated);
+                    }
+                    // Don't fall through to emit_hir_expr - we already emitted the match
+                    return Ok(Flow::Continues);
+                }
+            }
             let _ = emit_hir_expr(
                 builder,
                 &expr_stmt.expr,
@@ -916,7 +940,9 @@ fn emit_hir_expr_inner(
                 match_expr.result_ty.ty,
                 crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::Unit)
             ) {
-                emit_hir_match_stmt(
+                // Note: divergence handling is done at HirStmt::Expr level.
+                // Here we just emit the match and return Unit.
+                let _diverged = emit_hir_match_stmt(
                     builder,
                     match_expr,
                     locals,
@@ -926,7 +952,8 @@ fn emit_hir_expr_inner(
                     module,
                     data_counter,
                     None, // break/continue not supported in expression-context matches
-                )
+                )?;
+                Ok(ValueRepr::Unit)
             } else {
                 emit_hir_match_expr(
                     builder,
@@ -1651,6 +1678,7 @@ fn emit_hir_short_circuit_expr(
 }
 
 /// Emit HIR match as statement (arms can contain returns, don't produce values).
+/// Returns true if all paths diverged (returned/broke/continued).
 fn emit_hir_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
@@ -1661,7 +1689,7 @@ fn emit_hir_match_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
-) -> Result<ValueRepr, CodegenError> {
+) -> Result<bool, CodegenError> {
     // Emit the scrutinee expression
     let value = emit_hir_expr(
         builder,
@@ -1769,7 +1797,8 @@ fn emit_hir_match_stmt(
         builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
     }
 
-    Ok(ValueRepr::Unit)
+    // Return true if all paths diverged (no arm continues to merge_block)
+    Ok(!any_arm_continues)
 }
 
 /// Emit HIR match expression

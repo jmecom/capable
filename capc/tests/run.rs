@@ -684,3 +684,17 @@ fn run_break_nested() {
     assert_eq!(code, 0);
     assert!(stdout.contains("break nested ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_nested_match() {
+    let out_dir = make_out_dir("nested_match");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/nested_match.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("nested match ok"), "stdout was: {stdout:?}");
+}
