@@ -212,6 +212,8 @@ struct Scopes {
     /// Stack of scopes, where each scope is a map from name to local info.
     /// The last element is the innermost (current) scope.
     stack: Vec<HashMap<String, LocalInfo>>,
+    /// Stack of scope depths that mark loop bodies for break/continue checks.
+    loop_stack: Vec<usize>,
 }
 
 impl Scopes {
@@ -280,7 +282,22 @@ impl Scopes {
                 },
             );
         }
-        Scopes { stack: vec![scope] }
+        Scopes {
+            stack: vec![scope],
+            loop_stack: Vec::new(),
+        }
+    }
+
+    fn push_loop(&mut self) {
+        self.loop_stack.push(self.stack.len());
+    }
+
+    fn pop_loop(&mut self) {
+        self.loop_stack.pop();
+    }
+
+    fn current_loop_depth(&self) -> Option<usize> {
+        self.loop_stack.last().copied()
     }
 
     fn contains(&self, name: &str) -> bool {

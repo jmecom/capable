@@ -691,6 +691,36 @@ impl Parser {
         self.parse_expr_bp(0, allow_struct_literal)
     }
 
+    /// Look ahead to see if a `<...>` type-arg list is closed and followed by
+    /// a call `(` or struct literal `{`.
+    fn type_args_followed_by_call_or_struct(&self) -> bool {
+        if self.peek_kind() != Some(TokenKind::Lt) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let mut idx = self.index;
+        while idx < self.tokens.len() {
+            match self.tokens[idx].kind {
+                TokenKind::Lt => depth += 1,
+                TokenKind::Gt => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.tokens.get(idx + 1).map(|t| &t.kind),
+                            Some(TokenKind::LParen) | Some(TokenKind::LBrace)
+                        );
+                    }
+                }
+                _ => {}
+            }
+            idx += 1;
+        }
+        false
+    }
+
     fn parse_expr_bp(&mut self, min_bp: u8, allow_struct_literal: bool) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_prefix(allow_struct_literal)?;
 
@@ -802,49 +832,31 @@ impl Parser {
             // Special handling for '<' which can be type arguments or less-than
             if self.peek_kind() == Some(TokenKind::Lt) {
                 // Check if this looks like type arguments: path<Type>(args) or path<Type>{ ... }
-                if matches!(&lhs, Expr::Path(_) | Expr::FieldAccess(_)) {
-                    // Peek ahead to see if content looks like a type
-                    let looks_like_type = match self.peek_token(1).map(|t| &t.kind) {
-                        Some(TokenKind::Ident) => {
-                            if let Some(tok) = self.peek_token(1) {
-                                let builtin_types = ["i32", "u32", "u8", "bool", "string", "unit"];
-                                tok.text.starts_with(|c: char| c.is_uppercase())
-                                    || builtin_types.contains(&tok.text.as_str())
-                            } else {
-                                false
-                            }
-                        }
-                        Some(TokenKind::Star) => true, // pointer type like *u8
-                        _ => false,
-                    };
-                    if looks_like_type {
-                        let type_args = self.parse_type_args()?;
-                        if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
-                            let path = match lhs {
-                                Expr::Path(p) => p,
-                                Expr::FieldAccess(ref fa) => self.field_access_to_path(fa)?,
-                                _ => unreachable!(),
-                            };
-                            lhs = self.parse_struct_literal(path, type_args)?;
-                            continue;
-                        }
-                        if self.peek_kind() == Some(TokenKind::LParen) {
-                            lhs = self.finish_call(lhs, type_args)?;
-                            continue;
-                        }
-                        // In no-struct context, if we see LBrace it's the start of a block, not an error
-                        if !allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
-                            // Type args without call in no-struct context - this is actually ok,
-                            // the LBrace is a block. But we parsed type args that don't belong.
-                            // This is a parse error - generic expressions need parens in this context.
-                            return Err(self.error_current(
-                                "generic expressions in this context require parentheses".to_string(),
-                            ));
-                        }
+                if matches!(&lhs, Expr::Path(_) | Expr::FieldAccess(_))
+                    && self.type_args_followed_by_call_or_struct()
+                {
+                    let type_args = self.parse_type_args()?;
+                    if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
+                        let path = match lhs {
+                            Expr::Path(p) => p,
+                            Expr::FieldAccess(ref fa) => self.field_access_to_path(fa)?,
+                            _ => unreachable!(),
+                        };
+                        lhs = self.parse_struct_literal(path, type_args)?;
+                        continue;
+                    }
+                    if self.peek_kind() == Some(TokenKind::LParen) {
+                        lhs = self.finish_call(lhs, type_args)?;
+                        continue;
+                    }
+                    if !allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
                         return Err(self.error_current(
-                            "type arguments require a call or struct literal".to_string(),
+                            "generic expressions in this context require parentheses".to_string(),
                         ));
                     }
+                    return Err(self.error_current(
+                        "type arguments require a call or struct literal".to_string(),
+                    ));
                 }
                 // Fall through to treat as less-than comparison
             }

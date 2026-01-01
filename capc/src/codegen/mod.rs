@@ -276,13 +276,21 @@ pub fn build_object(
                 .declare_function(
                     &info.symbol,
                     Linkage::Export,
-                    &sig_to_clif(&info.sig, module.isa().pointer_type()),
+                    &sig_to_clif(
+                        &info.sig,
+                        module.isa().pointer_type(),
+                        module.isa().default_call_conv(),
+                    ),
                 )
                 .map_err(|err| CodegenError::Codegen(err.to_string()))?;
             let mut ctx = module.make_context();
             ctx.func = Function::with_name_signature(
                 ir::UserFuncName::user(0, func_id.as_u32()),
-                sig_to_clif(&info.sig, module.isa().pointer_type()),
+                sig_to_clif(
+                    &info.sig,
+                    module.isa().pointer_type(),
+                    module.isa().default_call_conv(),
+                ),
             );
 
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -372,8 +380,8 @@ pub fn build_object(
 }
 
 /// Lower a codegen signature into a Cranelift signature.
-fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
-    let mut signature = Signature::new(CallConv::SystemV);
+fn sig_to_clif(sig: &FnSig, ptr_ty: Type, call_conv: CallConv) -> Signature {
+    let mut signature = Signature::new(call_conv);
     for param in &sig.params {
         append_ty_params(&mut signature, param, ptr_ty);
     }

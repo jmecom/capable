@@ -841,7 +841,11 @@ fn emit_hir_expr_inner(
             }
 
             // Emit the call
-            let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+            let sig = sig_to_clif(
+                abi_sig,
+                module.isa().pointer_type(),
+                module.isa().default_call_conv(),
+            );
             let call_symbol = info.runtime_symbol.as_deref().unwrap_or(&info.symbol);
             let func_id = module
                 .declare_function(
@@ -1227,12 +1231,11 @@ fn emit_string_eq(
     len2: Value,
 ) -> Result<Value, CodegenError> {
     use cranelift_codegen::ir::{AbiParam, Signature};
-    use cranelift_codegen::isa::CallConv;
 
     let ptr_ty = module.isa().pointer_type();
 
     // Build signature: (ptr, i64, ptr, i64) -> i8
-    let mut sig = Signature::new(CallConv::SystemV);
+    let mut sig = Signature::new(module.isa().default_call_conv());
     sig.params.push(AbiParam::new(ptr_ty));
     sig.params.push(AbiParam::new(ir::types::I64));
     sig.params.push(AbiParam::new(ptr_ty));
@@ -1358,12 +1361,11 @@ fn emit_string_byte_at(
     index: Value,
 ) -> Result<Value, CodegenError> {
     use cranelift_codegen::ir::{AbiParam, Signature};
-    use cranelift_codegen::isa::CallConv;
 
     let ptr_ty = module.isa().pointer_type();
 
     // Build signature: (ptr, i64, i32) -> u8
-    let mut sig = Signature::new(CallConv::SystemV);
+    let mut sig = Signature::new(module.isa().default_call_conv());
     sig.params.push(AbiParam::new(ptr_ty));
     sig.params.push(AbiParam::new(ir::types::I64));
     sig.params.push(AbiParam::new(ir::types::I32));
@@ -1390,12 +1392,11 @@ fn emit_slice_at(
     index: Value,
 ) -> Result<Value, CodegenError> {
     use cranelift_codegen::ir::{AbiParam, Signature};
-    use cranelift_codegen::isa::CallConv;
 
     let ptr_ty = module.isa().pointer_type();
 
     // Build signature: (handle, i32) -> u8
-    let mut sig = Signature::new(CallConv::SystemV);
+    let mut sig = Signature::new(module.isa().default_call_conv());
     sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
     sig.params.push(AbiParam::new(ir::types::I32));
     sig.returns.push(AbiParam::new(ir::types::I8));
@@ -1421,12 +1422,11 @@ fn emit_mut_slice_at(
     index: Value,
 ) -> Result<Value, CodegenError> {
     use cranelift_codegen::ir::{AbiParam, Signature};
-    use cranelift_codegen::isa::CallConv;
 
     let ptr_ty = module.isa().pointer_type();
 
     // Build signature: (handle, i32) -> u8
-    let mut sig = Signature::new(CallConv::SystemV);
+    let mut sig = Signature::new(module.isa().default_call_conv());
     sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
     sig.params.push(AbiParam::new(ir::types::I32));
     sig.returns.push(AbiParam::new(ir::types::I8));
@@ -2836,7 +2836,11 @@ pub(super) fn emit_runtime_wrapper_call(
         result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
     }
 
-    let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+    let sig = sig_to_clif(
+        abi_sig,
+        module.isa().pointer_type(),
+        module.isa().default_call_conv(),
+    );
     let call_symbol = info
         .runtime_symbol
         .as_deref()

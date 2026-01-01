@@ -497,7 +497,10 @@ fn check_stmt(
                     break_stmt.span,
                 ));
             }
-            ensure_linear_all_consumed(scopes, struct_map, enum_map, break_stmt.span)?;
+            let depth = scopes.current_loop_depth().ok_or_else(|| {
+                TypeError::new("break statement outside of loop".to_string(), break_stmt.span)
+            })?;
+            ensure_linear_scopes_consumed_from(scopes, depth, struct_map, enum_map, break_stmt.span)?;
         }
         Stmt::Continue(continue_stmt) => {
             if !in_loop {
@@ -506,7 +509,16 @@ fn check_stmt(
                     continue_stmt.span,
                 ));
             }
-            ensure_linear_all_consumed(scopes, struct_map, enum_map, continue_stmt.span)?;
+            let depth = scopes.current_loop_depth().ok_or_else(|| {
+                TypeError::new("continue statement outside of loop".to_string(), continue_stmt.span)
+            })?;
+            ensure_linear_scopes_consumed_from(
+                scopes,
+                depth,
+                struct_map,
+                enum_map,
+                continue_stmt.span,
+            )?;
         }
         Stmt::If(if_stmt) => {
             let cond_ty = check_expr(
@@ -592,6 +604,7 @@ fn check_stmt(
                 ));
             }
             let mut body_scopes = scopes.clone();
+            body_scopes.push_loop();
             check_block(
                 &while_stmt.body,
                 ret_ty,
@@ -606,6 +619,7 @@ fn check_stmt(
                 type_params,
                 true, // inside loop, break/continue allowed
             )?;
+            body_scopes.pop_loop();
             ensure_affine_states_match(
                 scopes,
                 &body_scopes,
@@ -667,6 +681,7 @@ fn check_stmt(
                 Ty::Builtin(BuiltinType::I32),
             );
 
+            body_scopes.push_loop();
             check_block(
                 &for_stmt.body,
                 ret_ty,
@@ -681,6 +696,7 @@ fn check_stmt(
                 type_params,
                 true, // inside loop, break/continue allowed
             )?;
+            body_scopes.pop_loop();
 
             // Pop the loop variable scope before checking affine states
             body_scopes.pop_scope();
@@ -850,6 +866,29 @@ fn ensure_linear_scope_consumed(
     span: Span,
 ) -> Result<(), TypeError> {
     if let Some(scope) = scopes.stack.last() {
+        for (name, info) in scope {
+            if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
+                && info.state != MoveState::Moved
+            {
+                return Err(TypeError::new(
+                    format!("linear value `{name}` not consumed"),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Enforce that linear locals in scopes starting at a depth are consumed.
+fn ensure_linear_scopes_consumed_from(
+    scopes: &Scopes,
+    depth: usize,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    for scope in scopes.stack.iter().skip(depth) {
         for (name, info) in scope {
             if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
                 && info.state != MoveState::Moved
@@ -1860,24 +1899,34 @@ pub(super) fn check_expr(
             match &object_ty {
                 Ty::Builtin(BuiltinType::String) => Ok(Ty::Builtin(BuiltinType::U8)),
                 Ty::Path(name, args) if name == "Slice" || name == "sys.buffer.Slice" => {
-                    if args.len() == 1 {
-                        Ok(args[0].clone())
-                    } else {
-                        Err(TypeError::new(
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
                             "Slice requires exactly one type argument".to_string(),
                             index_expr.span,
-                        ))
+                        ));
                     }
+                    if args[0] != Ty::Builtin(BuiltinType::U8) {
+                        return Err(TypeError::new(
+                            "Slice indexing is only supported for Slice<u8>".to_string(),
+                            index_expr.span,
+                        ));
+                    }
+                    Ok(Ty::Builtin(BuiltinType::U8))
                 }
                 Ty::Path(name, args) if name == "MutSlice" || name == "sys.buffer.MutSlice" => {
-                    if args.len() == 1 {
-                        Ok(args[0].clone())
-                    } else {
-                        Err(TypeError::new(
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
                             "MutSlice requires exactly one type argument".to_string(),
                             index_expr.span,
-                        ))
+                        ));
                     }
+                    if args[0] != Ty::Builtin(BuiltinType::U8) {
+                        return Err(TypeError::new(
+                            "MutSlice indexing is only supported for MutSlice<u8>".to_string(),
+                            index_expr.span,
+                        ));
+                    }
+                    Ok(Ty::Builtin(BuiltinType::U8))
                 }
                 // Vec types return Result<T, VecErr>
                 Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString" => {
