@@ -39,6 +39,159 @@ pub(super) struct LoopTarget {
     pub exit_block: ir::Block,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum DeferScopeKind {
+    Regular,
+    LoopBody,
+}
+
+#[derive(Clone, Debug)]
+struct DeferScope {
+    kind: DeferScopeKind,
+    defers: Vec<crate::hir::HirExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct DeferStack {
+    scopes: Vec<DeferScope>,
+}
+
+impl DeferStack {
+    pub(super) fn new() -> Self {
+        Self { scopes: Vec::new() }
+    }
+
+    pub(super) fn push_block_scope(&mut self) {
+        self.push_scope(DeferScopeKind::Regular);
+    }
+
+    pub(super) fn push_loop_scope(&mut self) {
+        self.push_scope(DeferScopeKind::LoopBody);
+    }
+
+    fn push_scope(&mut self, kind: DeferScopeKind) {
+        self.scopes.push(DeferScope {
+            kind,
+            defers: Vec::new(),
+        });
+    }
+
+    pub(super) fn pop_scope(&mut self) {
+        let _ = self.scopes.pop();
+    }
+
+    pub(super) fn push_defer(&mut self, expr: crate::hir::HirExpr) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.defers.push(expr);
+        }
+    }
+
+    fn emit_scope_defers(
+        &self,
+        scope: &DeferScope,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        for defer_expr in scope.defers.iter().rev() {
+            let _ = emit_hir_expr(
+                builder,
+                defer_expr,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn emit_current_and_pop(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        if let Some(scope) = self.scopes.last() {
+            self.emit_scope_defers(
+                scope,
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
+        }
+        self.pop_scope();
+        Ok(())
+    }
+
+    pub(super) fn emit_all_and_clear(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        while let Some(scope) = self.scopes.pop() {
+            self.emit_scope_defers(
+                &scope,
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn emit_until_loop_and_pop(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        while let Some(scope) = self.scopes.pop() {
+            self.emit_scope_defers(
+                &scope,
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
+            if scope.kind == DeferScopeKind::LoopBody {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Emit a single HIR statement.
 pub(super) fn emit_hir_stmt(
     builder: &mut FunctionBuilder,
@@ -50,7 +203,7 @@ pub(super) fn emit_hir_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
-    defers: &[crate::hir::HirExpr],
+    defer_stack: &mut DeferStack,
 ) -> Result<Flow, CodegenError> {
     emit_hir_stmt_inner(
         builder,
@@ -62,7 +215,7 @@ pub(super) fn emit_hir_stmt(
         module,
         data_counter,
         loop_target,
-        defers,
+        defer_stack,
     )
     .map_err(|err| err.with_span(stmt.span()))
 }
@@ -77,7 +230,7 @@ fn emit_hir_stmt_inner(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
-    defers: &[crate::hir::HirExpr],
+    defer_stack: &mut DeferStack,
 ) -> Result<Flow, CodegenError> {
     use crate::hir::HirStmt;
 
@@ -184,6 +337,9 @@ fn emit_hir_stmt_inner(
                 }
             }
         }
+        HirStmt::Defer(defer_stmt) => {
+            defer_stack.push_defer(defer_stmt.expr.clone());
+        }
         HirStmt::Return(ret_stmt) => {
             if let Some(expr) = &ret_stmt.expr {
                 let value = emit_hir_expr(
@@ -196,9 +352,8 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                 )?;
-                emit_defer_calls(
+                defer_stack.emit_all_and_clear(
                     builder,
-                    defers,
                     locals,
                     fn_map,
                     enum_index,
@@ -215,9 +370,8 @@ fn emit_hir_stmt_inner(
                     }
                 };
             } else {
-                emit_defer_calls(
+                defer_stack.emit_all_and_clear(
                     builder,
-                    defers,
                     locals,
                     fn_map,
                     enum_index,
@@ -259,7 +413,7 @@ fn emit_hir_stmt_inner(
                         module,
                         data_counter,
                         loop_target,
-                        defers,
+                        defer_stack,
                     )?;
                     if diverged {
                         return Ok(Flow::Terminated);
@@ -282,6 +436,7 @@ fn emit_hir_stmt_inner(
         HirStmt::If(if_stmt) => {
             // Snapshot locals so branch-scoped lets don't leak
             let saved_locals = locals.clone();
+            let saved_defers = defer_stack.clone();
 
             let then_block = builder.create_block();
             let merge_block = builder.create_block();
@@ -309,6 +464,8 @@ fn emit_hir_stmt_inner(
             // THEN branch with its own locals
             builder.switch_to_block(then_block);
             let mut then_locals = saved_locals.clone();
+            let mut then_defers = saved_defers.clone();
+            then_defers.push_block_scope();
             let mut then_terminated = false;
             for stmt in &if_stmt.then_block.stmts {
                 let flow = emit_hir_stmt(
@@ -321,7 +478,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     loop_target,
-                    defers,
+                    &mut then_defers,
                 )?;
                 if flow == Flow::Terminated {
                     then_terminated = true;
@@ -329,6 +486,15 @@ fn emit_hir_stmt_inner(
                 }
             }
             if !then_terminated {
+                then_defers.emit_current_and_pop(
+                    builder,
+                    &then_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                )?;
                 builder.ins().jump(merge_block, &[]);
             }
             builder.seal_block(then_block);
@@ -337,6 +503,8 @@ fn emit_hir_stmt_inner(
             if let Some(else_block_hir) = &if_stmt.else_block {
                 builder.switch_to_block(else_block);
                 let mut else_locals = saved_locals.clone();
+                let mut else_defers = saved_defers.clone();
+                else_defers.push_block_scope();
                 let mut else_terminated = false;
                 for stmt in &else_block_hir.stmts {
                     let flow = emit_hir_stmt(
@@ -349,7 +517,7 @@ fn emit_hir_stmt_inner(
                         module,
                         data_counter,
                         loop_target,
-                        defers,
+                        &mut else_defers,
                     )?;
                     if flow == Flow::Terminated {
                         else_terminated = true;
@@ -357,6 +525,15 @@ fn emit_hir_stmt_inner(
                     }
                 }
                 if !else_terminated {
+                    else_defers.emit_current_and_pop(
+                        builder,
+                        &else_locals,
+                        fn_map,
+                        enum_index,
+                        struct_layouts,
+                        module,
+                        data_counter,
+                    )?;
                     builder.ins().jump(merge_block, &[]);
                 }
                 builder.seal_block(else_block);
@@ -371,6 +548,7 @@ fn emit_hir_stmt_inner(
         HirStmt::While(while_stmt) => {
             // Snapshot locals so loop-body lets don't leak out of the loop
             let saved_locals = locals.clone();
+            let saved_defers = defer_stack.clone();
 
             let header_block = builder.create_block();
             let body_block = builder.create_block();
@@ -405,6 +583,8 @@ fn emit_hir_stmt_inner(
 
             // Loop body gets its own locals
             let mut body_locals = saved_locals.clone();
+            let mut body_defers = saved_defers.clone();
+            body_defers.push_loop_scope();
             let mut body_terminated = false;
             for stmt in &while_stmt.body.stmts {
                 let flow = emit_hir_stmt(
@@ -417,7 +597,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     body_loop_target,
-                    defers,
+                    &mut body_defers,
                 )?;
                 if flow == Flow::Terminated {
                     body_terminated = true;
@@ -426,6 +606,15 @@ fn emit_hir_stmt_inner(
             }
 
             if !body_terminated {
+                body_defers.emit_current_and_pop(
+                    builder,
+                    &body_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                )?;
                 builder.ins().jump(header_block, &[]);
             }
 
@@ -441,6 +630,7 @@ fn emit_hir_stmt_inner(
         HirStmt::For(for_stmt) => {
             // Snapshot locals so loop-body lets don't leak out of the loop
             let saved_locals = locals.clone();
+            let saved_defers = defer_stack.clone();
 
             // Create stack slot for loop variable
             let loop_var_slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
@@ -509,6 +699,8 @@ fn emit_hir_stmt_inner(
                 for_stmt.var_id,
                 LocalValue::Slot(loop_var_slot, ir::types::I32),
             );
+            let mut body_defers = saved_defers.clone();
+            body_defers.push_loop_scope();
 
             let mut body_terminated = false;
             for stmt in &for_stmt.body.stmts {
@@ -522,7 +714,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     body_loop_target,
-                    defers,
+                    &mut body_defers,
                 )?;
                 if flow == Flow::Terminated {
                     body_terminated = true;
@@ -532,6 +724,15 @@ fn emit_hir_stmt_inner(
 
             // Fall through to increment block (if not terminated by break/continue/return)
             if !body_terminated {
+                body_defers.emit_current_and_pop(
+                    builder,
+                    &body_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                )?;
                 builder.ins().jump(increment_block, &[]);
             }
 
@@ -555,41 +756,34 @@ fn emit_hir_stmt_inner(
         }
         HirStmt::Break(_) => {
             let target = loop_target.expect("break outside of loop (should be caught by typeck)");
+            defer_stack.emit_until_loop_and_pop(
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
             builder.ins().jump(target.exit_block, &[]);
             return Ok(Flow::Terminated);
         }
         HirStmt::Continue(_) => {
             let target = loop_target.expect("continue outside of loop (should be caught by typeck)");
+            defer_stack.emit_until_loop_and_pop(
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
             builder.ins().jump(target.continue_block, &[]);
             return Ok(Flow::Terminated);
         }
     }
     Ok(Flow::Continues)
-}
-
-pub(super) fn emit_defer_calls(
-    builder: &mut FunctionBuilder,
-    defers: &[crate::hir::HirExpr],
-    locals: &HashMap<crate::hir::LocalId, LocalValue>,
-    fn_map: &HashMap<String, FnInfo>,
-    enum_index: &EnumIndex,
-    struct_layouts: &StructLayoutIndex,
-    module: &mut ObjectModule,
-    data_counter: &mut u32,
-) -> Result<(), CodegenError> {
-    for defer_expr in defers.iter().rev() {
-        let _ = emit_hir_expr(
-            builder,
-            defer_expr,
-            locals,
-            fn_map,
-            enum_index,
-            struct_layouts,
-            module,
-            data_counter,
-        )?;
-    }
-    Ok(())
 }
 
 /// Emit a single HIR expression and return its lowered value representation.
@@ -1145,6 +1339,7 @@ fn emit_hir_expr_inner(
             ) {
                 // Note: divergence handling is done at HirStmt::Expr level.
                 // Here we just emit the match and return Unit.
+                let mut temp_defers = DeferStack::new();
                 let _diverged = emit_hir_match_stmt(
                     builder,
                     match_expr,
@@ -1155,7 +1350,7 @@ fn emit_hir_expr_inner(
                     module,
                     data_counter,
                     None, // break/continue not supported in expression-context matches
-                    &[],
+                    &mut temp_defers,
                 )?;
                 Ok(ValueRepr::Unit)
             } else {
@@ -2128,7 +2323,7 @@ fn emit_hir_match_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
-    defers: &[crate::hir::HirExpr],
+    defer_stack: &mut DeferStack,
 ) -> Result<bool, CodegenError> {
     // Emit the scrutinee expression
     let value = emit_hir_expr(
@@ -2191,6 +2386,8 @@ fn emit_hir_match_stmt(
         builder.switch_to_block(arm_block);
 
         let mut arm_locals = locals.clone();
+        let mut arm_defers = defer_stack.clone();
+        arm_defers.push_block_scope();
         hir_bind_match_pattern_value(
             builder,
             &arm.pattern,
@@ -2212,7 +2409,7 @@ fn emit_hir_match_stmt(
                 module,
                 data_counter,
                 loop_target,
-                defers,
+                &mut arm_defers,
             )?;
             if flow == Flow::Terminated {
                 arm_terminated = true;
@@ -2222,6 +2419,15 @@ fn emit_hir_match_stmt(
 
         // If the arm didn't terminate (e.g., with return), jump to merge block
         if !arm_terminated {
+            arm_defers.emit_current_and_pop(
+                builder,
+                &arm_locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
             builder.ins().jump(merge_block, &[]);
             any_arm_continues = true;
         }
@@ -2307,6 +2513,8 @@ fn emit_hir_match_expr(
 
         builder.switch_to_block(arm_block);
         let mut arm_locals = locals.clone();
+        let mut arm_defers = DeferStack::new();
+        arm_defers.push_block_scope();
         hir_bind_match_pattern_value(
             builder,
             &arm.pattern,
@@ -2333,7 +2541,7 @@ fn emit_hir_match_expr(
                 module,
                 data_counter,
                 None, // break/continue not allowed in value-producing match
-                &[],
+                &mut arm_defers,
             )?;
             if flow == Flow::Terminated {
                 prefix_terminated = true;
@@ -2421,6 +2629,15 @@ fn emit_hir_match_expr(
             for (idx, val) in values.iter().enumerate() {
                 builder.ins().stack_store(*val, shape.slots[idx], 0);
             }
+            arm_defers.emit_current_and_pop(
+                builder,
+                &arm_locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                module,
+                data_counter,
+            )?;
             builder.ins().jump(merge_block, &[]);
             builder.seal_block(arm_block);
         }

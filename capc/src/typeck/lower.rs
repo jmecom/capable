@@ -4,8 +4,8 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::abi::AbiType;
 use crate::hir::{
-    HirAssignStmt, HirBinary, HirBlock, HirBreakStmt, HirCall, HirContinueStmt, HirEnum,
-    HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirExternFunction, HirField,
+    HirAssignStmt, HirBinary, HirBlock, HirBreakStmt, HirCall, HirContinueStmt, HirDeferStmt,
+    HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirExternFunction, HirField,
     HirFieldAccess, HirForStmt, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
     HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
     HirStructLiteralField, HirTrap, HirType, HirUnary, HirWhileStmt, IntrinsicId, LocalId,
@@ -35,7 +35,6 @@ struct LoweringCtx<'a> {
     local_types: HashMap<String, Ty>,
     local_counter: usize,
     type_params: HashSet<String>,
-    defers: Vec<HirExpr>,
 }
 
 impl<'a> LoweringCtx<'a> {
@@ -63,7 +62,6 @@ impl<'a> LoweringCtx<'a> {
             local_types: HashMap::new(),
             local_counter: 0,
             type_params: HashSet::new(),
-            defers: Vec::new(),
         }
     }
 
@@ -234,7 +232,6 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     ctx.local_counter = 0;
     ctx.local_map.clear();
     ctx.local_types.clear();
-    ctx.defers.clear();
     ctx.type_table = ctx
         .type_tables
         .and_then(|tables| tables.get(&function_key(ctx.module_name, &func.name.item)));
@@ -265,7 +262,6 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib, &type_params)?;
     let hir_ret_ty = hir_type_for(ret_ty.clone(), ctx, func.ret.span())?;
     let body = lower_block(&func.body, ctx, &ret_ty)?;
-    let defers = std::mem::take(&mut ctx.defers);
 
     Ok(HirFunction {
         name: func.name.item.clone(),
@@ -273,7 +269,6 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         params,
         ret_ty: hir_ret_ty,
         body,
-        defers,
     })
 }
 
@@ -474,7 +469,10 @@ fn lower_defer_stmt(
                     hir_ret_ty,
                     ctx,
                 )?;
-                ctx.defers.push(deferred);
+                stmts.push(HirStmt::Defer(HirDeferStmt {
+                    expr: deferred,
+                    span: defer_stmt.span,
+                }));
                 return Ok(stmts);
             }
 
@@ -517,7 +515,10 @@ fn lower_defer_stmt(
         }
     };
 
-    ctx.defers.push(deferred);
+    stmts.push(HirStmt::Defer(HirDeferStmt {
+        expr: deferred,
+        span: defer_stmt.span,
+    }));
     Ok(stmts)
 }
 

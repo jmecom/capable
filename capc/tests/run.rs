@@ -897,3 +897,34 @@ fn run_defer() {
         "stdout was: {stdout:?}"
     );
 }
+
+#[test]
+fn run_defer_scope() {
+    let out_dir = make_out_dir("defer_scope");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_defer_scope.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("start\nin if\nif defer\nafter if\nin loop\nloop defer\nafter loop\n"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
+fn run_defer_return() {
+    let out_dir = make_out_dir("defer_return");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_defer_return.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("start\ninner\nouter\n"), "stdout was: {stdout:?}");
+}

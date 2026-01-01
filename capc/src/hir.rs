@@ -50,7 +50,6 @@ pub struct HirFunction {
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
     pub body: HirBlock,
-    pub defers: Vec<HirExpr>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +106,7 @@ pub struct HirBlock {
 pub enum HirStmt {
     Let(HirLetStmt),
     Assign(HirAssignStmt),
+    Defer(HirDeferStmt),
     Return(HirReturnStmt),
     Break(HirBreakStmt),
     Continue(HirContinueStmt),
@@ -121,6 +121,7 @@ impl HirStmt {
         match self {
             HirStmt::Let(s) => s.span,
             HirStmt::Assign(s) => s.span,
+            HirStmt::Defer(s) => s.span,
             HirStmt::Return(s) => s.span,
             HirStmt::Break(s) => s.span,
             HirStmt::Continue(s) => s.span,
@@ -143,6 +144,12 @@ pub struct HirLetStmt {
 #[derive(Debug, Clone)]
 pub struct HirAssignStmt {
     pub local_id: LocalId,
+    pub expr: HirExpr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirDeferStmt {
     pub expr: HirExpr,
     pub span: Span,
 }

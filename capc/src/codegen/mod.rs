@@ -28,10 +28,7 @@ mod abi_quirks;
 mod intrinsics;
 mod layout;
 
-use emit::{
-    emit_defer_calls, emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local,
-    value_from_params,
-};
+use emit::{emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local, value_from_params, DeferStack};
 use layout::{build_enum_index, build_struct_layout_index};
 
 #[derive(Debug, Error, Diagnostic)]
@@ -335,6 +332,8 @@ pub fn build_object(
                 let local = store_local(&mut builder, value);
                 locals.insert(param.local_id, local);
             }
+            let mut defer_stack = DeferStack::new();
+            defer_stack.push_block_scope();
 
             let mut terminated = false;
             for stmt in &func.body.stmts {
@@ -348,7 +347,7 @@ pub fn build_object(
                     &mut module,
                     &mut data_counter,
                     None, // no loop context at function top level
-                    &func.defers,
+                    &mut defer_stack,
                 )?;
                 if flow == Flow::Terminated {
                     terminated = true;
@@ -357,9 +356,8 @@ pub fn build_object(
             }
 
             if info.sig.ret == AbiType::Unit && !terminated {
-                emit_defer_calls(
+                defer_stack.emit_all_and_clear(
                     &mut builder,
-                    &func.defers,
                     &locals,
                     &fn_map,
                     &enum_index,

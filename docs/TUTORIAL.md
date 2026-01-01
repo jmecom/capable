@@ -60,8 +60,8 @@ Structs and enums are nominal types. Enums are currently unit variants only.
 
 ## 4) Defer
 
-`defer` schedules a function or method call to run when the current function
-returns (LIFO order). Arguments are evaluated at the defer site.
+`defer` schedules a function or method call to run when the current scope
+exits (LIFO order). Arguments are evaluated at the defer site.
 
 ```cap
 pub fn main(rc: RootCap) -> i32 {
@@ -73,8 +73,7 @@ pub fn main(rc: RootCap) -> i32 {
 }
 ```
 
-Current restrictions: `defer` is only allowed at the top level of a function
-body, and the deferred expression must be a call.
+Current restriction: the deferred expression must be a call.
 
 ## 5) Methods
 
