@@ -355,6 +355,7 @@ fn resolve_method_target(
     receiver_ty: &Ty,
     module_name: &str,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     span: Span,
 ) -> Result<(String, String, Vec<Ty>), TypeError> {
     let base_ty = match receiver_ty {
@@ -379,7 +380,7 @@ fn resolve_method_target(
         }
         _ => {
             return Err(TypeError::new(
-                "method receiver must be a struct value".to_string(),
+                "method receiver must be a struct or enum value".to_string(),
                 span,
             ));
         }
@@ -392,6 +393,19 @@ fn resolve_method_target(
             .unwrap_or(receiver_name)
             .to_string();
         return Ok((info.module.clone(), type_name, receiver_args.clone()));
+    }
+
+    if enum_map.contains_key(receiver_name) {
+        let type_name = receiver_name
+            .rsplit_once('.')
+            .map(|(_, t)| t)
+            .unwrap_or(receiver_name)
+            .to_string();
+        let mod_part = receiver_name
+            .rsplit_once('.')
+            .map(|(m, _)| m)
+            .unwrap_or(module_name);
+        return Ok((mod_part.to_string(), type_name, receiver_args.clone()));
     }
 
     if receiver_name.contains('.') {
@@ -408,9 +422,12 @@ fn resolve_method_target(
     if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
         return Ok((info.module.clone(), receiver_name.to_string(), receiver_args.clone()));
     }
+    if enum_map.contains_key(&format!("{module_name}.{receiver_name}")) {
+        return Ok((module_name.to_string(), receiver_name.to_string(), receiver_args.clone()));
+    }
 
     Err(TypeError::new(
-        format!("unknown struct `{receiver_name}`"),
+        format!("unknown struct or enum `{receiver_name}`"),
         span,
     ))
 }

@@ -684,6 +684,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 &receiver_ty,
                 ctx.module_name,
                 ctx.structs,
+                ctx.enums,
                 method_call.receiver.span(),
             )?;
             let method_fn = format!("{type_name}__{}", method_call.method.item);

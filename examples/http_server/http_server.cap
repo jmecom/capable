@@ -40,47 +40,49 @@ fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result<string, unit>
     return Ok(acc)
   }
   let seg_result = parts[i]
-  if (seg_result.is_err()) {
-    return Err(())
+  match (seg_result) {
+    Ok(seg) => { return sanitize_segment(parts, i, acc, seg) }
+    Err(_) => { return Err(()) }
   }
-  return sanitize_segment(parts, i, acc, seg_result.ok())
 }
 
 fn sanitize_path(raw_path: string) -> Result<string, unit> {
   let result = sanitize_parts(raw_path.split(47u8), 0, "")
-  if (result.is_err()) {
-    return Err(())
+  match (result) {
+    Ok(path) => {
+      if (path.len() == 0) {
+        return Ok("index.html")
+      }
+      return Ok(path)
+    }
+    Err(_) => { return Err(()) }
   }
-  let path = result.ok()
-  if (path.len() == 0) {
-    return Ok("index.html")
-  }
-  return Ok(path)
 }
 
 fn parse_request_line(line: string) -> Result<string, unit> {
   let parts = line.trim().split(32u8)
   let method_result = parts[0]
-  if (method_result.is_err()) {
-    return Err(())
-  }
-  let method = method_result.ok()
-  if (method != "GET") {
-    return Err(())
+  match (method_result) {
+    Ok(method) => {
+      if (method != "GET") {
+        return Err(())
+      }
+    }
+    Err(_) => { return Err(()) }
   }
   let path_result = parts[1]
-  if (path_result.is_err()) {
-    return Err(())
+  match (path_result) {
+    Ok(raw_path) => { return sanitize_path(strip_query(raw_path)) }
+    Err(_) => { return Err(()) }
   }
-  return sanitize_path(strip_query(path_result.ok()))
 }
 
 fn parse_request_path(req: string) -> Result<string, unit> {
   let line_result = req.lines()[0]
-  if (line_result.is_err()) {
-    return Err(())
+  match (line_result) {
+    Ok(line) => { return parse_request_line(line) }
+    Err(_) => { return Err(()) }
   }
-  return parse_request_line(line_result.ok())
 }
 
 fn respond_ok(conn: &TcpConn, body: string) -> Result<unit, NetErr> {
@@ -98,22 +100,19 @@ fn respond_bad_request(conn: &TcpConn) -> Result<unit, NetErr> {
 }
 
 fn handle_request(conn: &TcpConn, readfs: ReadFS, path: string) -> Result<unit, NetErr> {
-  let file_result = readfs.read_to_string(path)
-  if (file_result.is_ok()) {
-    return respond_ok(conn, file_result.ok())
+  match (readfs.read_to_string(path)) {
+    Ok(body) => { return respond_ok(conn, body) }
+    Err(_) => { return respond_not_found(conn) }
   }
-  return respond_not_found(conn)
 }
 
 fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result<unit, NetErr> {
   let listener = net.listen("127.0.0.1", 8080)?
   let conn = listener.accept()?
   let req = conn.read(4096)?
-  let path_result = parse_request_path(req)
-  if (path_result.is_ok()) {
-    handle_request(conn, readfs, path_result.ok())?
-  } else {
-    respond_bad_request(conn)?
+  match (parse_request_path(req)) {
+    Ok(path) => { handle_request(conn, readfs, path)? }
+    Err(_) => { respond_bad_request(conn)? }
   }
   conn.close()
   return Ok(())

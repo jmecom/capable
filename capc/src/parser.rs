@@ -872,8 +872,8 @@ impl Parser {
             }
 
             self.bump();
-            // RHS of binary operator always allows struct literals (no ambiguity)
-            let rhs = self.parse_expr_bp(r_bp, true)?;
+            // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
+            let rhs = self.parse_expr_bp(r_bp, allow_struct_literal)?;
             let span = Span::new(lhs.span().start, rhs.span().end);
             lhs = Expr::Binary(BinaryExpr {
                 op,
@@ -890,8 +890,8 @@ impl Parser {
         match self.peek_kind() {
             Some(TokenKind::Minus) => {
                 let start = self.bump().unwrap().span.start;
-                // Unary operands always allow struct literals (no ambiguity)
-                let expr = self.parse_expr_bp(7, true)?;
+                // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
+                let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Neg,
                     span: Span::new(start, expr.span().end),
@@ -900,8 +900,8 @@ impl Parser {
             }
             Some(TokenKind::Bang) => {
                 let start = self.bump().unwrap().span.start;
-                // Unary operands always allow struct literals (no ambiguity)
-                let expr = self.parse_expr_bp(7, true)?;
+                // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
+                let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Not,
                     span: Span::new(start, expr.span().end),

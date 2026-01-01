@@ -1303,6 +1303,7 @@ pub(super) fn check_expr(
                 &receiver_ty,
                 module_name,
                 struct_map,
+                enum_map,
                 method_call.receiver.span(),
             )?;
             let method_fn = format!("{type_name}__{}", method_call.method.item);
