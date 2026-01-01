@@ -3,6 +3,7 @@ module sys::vec
 
 use sys::buffer
 
+pub copy opaque struct Vec<T>
 pub copy opaque struct VecU8
 pub copy opaque struct VecI32
 pub copy opaque struct VecString

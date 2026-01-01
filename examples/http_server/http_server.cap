@@ -19,7 +19,7 @@ fn strip_query(raw_path: string) -> string {
   return raw_path.split(63u8)[0].unwrap_or("")
 }
 
-fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Result<string, unit> {
+fn sanitize_segment(parts: Vec<string>, i: i32, acc: string, seg: string) -> Result<string, unit> {
   if (seg.len() == 0) {
     return sanitize_parts(parts, i + 1, acc)
   }
@@ -35,7 +35,7 @@ fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Resul
   return sanitize_parts(parts, i + 1, fs::join(acc, seg))
 }
 
-fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result<string, unit> {
+fn sanitize_parts(parts: Vec<string>, i: i32, acc: string) -> Result<string, unit> {
   if (i >= parts.len()) {
     return Ok(acc)
   }

@@ -15,11 +15,11 @@ impl ReadFS {
     return ()
   }
 
-  pub fn read_bytes(self, path: string) -> Result<vec::VecU8, FsErr> {
+  pub fn read_bytes(self, path: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  pub fn list_dir(self, path: string) -> Result<vec::VecString, FsErr> {
+  pub fn list_dir(self, path: string) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
@@ -51,11 +51,11 @@ impl Dir {
     return ()
   }
 
-  pub fn read_bytes(self, name: string) -> Result<vec::VecU8, FsErr> {
+  pub fn read_bytes(self, name: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  pub fn list_dir(self) -> Result<vec::VecString, FsErr> {
+  pub fn list_dir(self) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 

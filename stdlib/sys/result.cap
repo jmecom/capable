@@ -34,4 +34,18 @@ impl<T, E> Result<T, E> {
       Result::Err(err) => { return err }
     }
   }
+
+  pub fn ok(self) -> T {
+    match self {
+      Result::Ok(val) => { return val }
+      Result::Err(_) => { panic() }
+    }
+  }
+
+  pub fn err(self) -> E {
+    match self {
+      Result::Ok(_) => { panic() }
+      Result::Err(err) => { return err }
+    }
+  }
 }

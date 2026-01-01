@@ -19,8 +19,8 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::hir::HirModule;
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 7] = [
-    "i32", "i64", "u32", "u8", "bool", "string", "unit",
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
+    "i32", "i64", "u32", "u8", "bool", "string", "unit", "never",
 ];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
@@ -90,6 +90,7 @@ pub enum BuiltinType {
     Bool,
     String,
     Unit,
+    Never,
 }
 
 pub(super) fn function_key(module_name: &str, func_name: &str) -> String {
@@ -711,17 +712,64 @@ fn lower_type(
                     "bool" => Some(BuiltinType::Bool),
                     "string" => Some(BuiltinType::String),
                     "unit" => Some(BuiltinType::Unit),
+                    "never" => Some(BuiltinType::Never),
                     _ => None,
                 };
                 if let Some(builtin) = builtin {
                     return Ok(Ty::Builtin(builtin));
                 }
+                let resolved_joined = resolved.join(".");
                 let alias = resolve_type_name(path, use_map, stdlib);
-                if alias != resolved.join(".") {
-                    return Ok(Ty::Path(alias, args));
+                let joined = if alias != resolved_joined {
+                    alias
+                } else {
+                    resolved_joined
+                };
+                if joined == "Vec" || joined == "sys.vec.Vec" {
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
+                            format!("Vec expects 1 type argument, found {}", args.len()),
+                            path.span,
+                        ));
+                    }
+                    let elem = &args[0];
+                    let vec_name = match elem {
+                        Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
+                        Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
+                        Ty::Builtin(BuiltinType::String) => "sys.vec.VecString",
+                        _ => {
+                            return Err(TypeError::new(
+                                "Vec only supports u8, i32, and string element types".to_string(),
+                                path.span,
+                            ))
+                        }
+                    };
+                    return Ok(Ty::Path(vec_name.to_string(), Vec::new()));
                 }
+                return Ok(Ty::Path(joined, args));
             }
             let joined = path_segments.join(".");
+            if joined == "Vec" || joined == "sys.vec.Vec" {
+                if args.len() != 1 {
+                    return Err(TypeError::new(
+                        format!("Vec expects 1 type argument, found {}", args.len()),
+                        path.span,
+                    ));
+                }
+                let elem = &args[0];
+                let vec_name = match elem {
+                    Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
+                    Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
+                    Ty::Builtin(BuiltinType::String) => "sys.vec.VecString",
+                    _ => {
+                        return Err(TypeError::new(
+                            "Vec only supports u8, i32, and string element types".to_string(),
+                            path.span,
+                        ))
+                    }
+                };
+                return Ok(Ty::Path(vec_name.to_string(), Vec::new()));
+            }
             Ok(Ty::Path(joined, args))
         }
     }

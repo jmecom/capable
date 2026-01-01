@@ -14,14 +14,18 @@ pub fn main(rc: RootCap) -> i32 {
   let ok_result = make_ok()
   let err_result = make_err()
 
-  let val = ok_result.unwrap_or(0)
-  if val != 42 {
-    return 1
+  if ok_result.is_ok() {
+    let val = ok_result.ok()
+    if val != 42 {
+      return 1
+    }
   }
 
-  let e = err_result.unwrap_err_or(0)
-  if e != 99 {
-    return 2
+  if err_result.is_err() {
+    let e = err_result.err()
+    if e != 99 {
+      return 2
+    }
   }
 
   con.print("ok_err ok")

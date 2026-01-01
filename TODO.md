@@ -1,5 +1,4 @@
-Implement Result<T, E> and is_ok and friends as stdlib functions with geneircs, not weird compile rhardcoded stuff.
-
-Stdlib types for generics instead of Vec32, VecString, etc
-
-Have codex review the claude generated commits
+Done:
+- Result<T, E> + is_ok/is_err/ok/err/unwrap_* implemented in stdlib (panic uses never type).
+- Stdlib APIs updated to use Vec<T> (compiler maps Vec<u8>/Vec<i32>/Vec<string> to VecU8/VecI32/VecString).
+- Codex reviewed Claude-generated commits.

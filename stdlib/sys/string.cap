@@ -27,17 +27,17 @@ impl string {
   }
 
   /// Intrinsic; implemented by the runtime.
-  pub fn split_whitespace(self) -> VecString {
+  pub fn split_whitespace(self) -> Vec<string> {
     return ()
   }
 
   /// Intrinsic; implemented by the runtime.
-  pub fn lines(self) -> VecString {
+  pub fn lines(self) -> Vec<string> {
     return ()
   }
 
   /// Intrinsic; implemented by the runtime.
-  pub fn split(self, delim: u8) -> VecString {
+  pub fn split(self, delim: u8) -> Vec<string> {
     return ()
   }
 
@@ -57,7 +57,7 @@ impl string {
   }
 
   /// split_lines() is an alias for lines().
-  pub fn split_lines(self) -> VecString {
+  pub fn split_lines(self) -> Vec<string> {
     return self.lines()
   }
 

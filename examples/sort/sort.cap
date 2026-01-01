@@ -33,14 +33,14 @@ fn str_lt(a: string, b: string) -> bool {
 }
 
 // Compare lines at indices i and j
-fn line_lt(lines: VecString, i: i32, j: i32) -> bool {
+fn line_lt(lines: Vec<string>, i: i32, j: i32) -> bool {
   let line_i = lines[i].unwrap_or("")
   let line_j = lines[j].unwrap_or("")
   return str_lt(line_i, line_j)
 }
 
 // Insertion sort on indices
-fn sort_indices(lines: VecString, indices: VecI32) -> unit {
+fn sort_indices(lines: Vec<string>, indices: Vec<i32>) -> unit {
   let n = indices.len()
   for i in 1..n {
     let j = i

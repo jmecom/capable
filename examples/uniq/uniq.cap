@@ -7,7 +7,7 @@ use sys::io
 use sys::string
 use sys::vec
 
-fn should_print(lines: VecString, i: i32) -> bool {
+fn should_print(lines: Vec<string>, i: i32) -> bool {
   if (i == 0) {
     return true
   }

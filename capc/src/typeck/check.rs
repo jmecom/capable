@@ -385,7 +385,10 @@ fn check_stmt(
                 } else {
                     false
                 };
-                if annot_ty != expr_ty && !matches_ref {
+                if annot_ty != expr_ty
+                    && !matches_ref
+                    && !matches!(expr_ty, Ty::Builtin(BuiltinType::Never))
+                {
                     return Err(TypeError::new(
                         format!("type mismatch: expected {annot_ty:?}, found {expr_ty:?}"),
                         let_stmt.span,
@@ -453,7 +456,7 @@ fn check_stmt(
                 module_name,
                 type_params,
             )?;
-            if expr_ty != existing {
+            if expr_ty != existing && !matches!(expr_ty, Ty::Builtin(BuiltinType::Never)) {
                 return Err(TypeError::new(
                     format!(
                         "assignment type mismatch: expected {existing:?}, found {expr_ty:?}"
@@ -483,6 +486,10 @@ fn check_stmt(
                 Ty::Builtin(BuiltinType::Unit)
             };
             if &expr_ty != ret_ty {
+                if matches!(expr_ty, Ty::Builtin(BuiltinType::Never)) {
+                    ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
+                    return Ok(());
+                }
                 return Err(TypeError::new(
                     format!("return type mismatch: expected {ret_ty:?}, found {expr_ty:?}"),
                     ret_stmt.span,
@@ -1076,8 +1083,7 @@ pub(super) fn check_expr(
                         ));
                     }
                     // panic() is a diverging expression - it never returns.
-                    // We type it as unit but it will trap at runtime.
-                    return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
+                    return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Never));
                 }
                 if name == "Ok" || name == "Err" {
                     if call.args.len() != 1 {
@@ -1202,7 +1208,10 @@ pub(super) fn check_expr(
                 } else {
                     false
                 };
-                if &arg_ty != expected_inner && !matches_ref {
+                if &arg_ty != expected_inner
+                    && !matches_ref
+                    && !matches!(arg_ty, Ty::Builtin(BuiltinType::Never))
+                {
                     return Err(TypeError::new(
                         format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
                         arg.span(),
@@ -1312,7 +1321,10 @@ pub(super) fn check_expr(
                     } else {
                         false
                     };
-                    if &arg_ty != expected_inner && !matches_ref {
+                    if &arg_ty != expected_inner
+                        && !matches_ref
+                        && !matches!(arg_ty, Ty::Builtin(BuiltinType::Never))
+                    {
                         return Err(TypeError::new(
                             format!(
                                 "argument type mismatch: expected {expected:?}, found {arg_ty:?}"
@@ -1521,7 +1533,10 @@ pub(super) fn check_expr(
                 } else {
                     false
                 };
-                if &arg_ty != expected_inner && !matches_ref {
+                if &arg_ty != expected_inner
+                    && !matches_ref
+                    && !matches!(arg_ty, Ty::Builtin(BuiltinType::Never))
+                {
                     return Err(TypeError::new(
                         format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
                         arg.span(),
@@ -1621,6 +1636,10 @@ pub(super) fn check_expr(
                         || left == Ty::Builtin(BuiltinType::I64))
                     {
                         Ok(left)
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
+                        Ok(Ty::Builtin(BuiltinType::Never))
                     } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
                         Err(TypeError::new(
                             "implicit numeric conversions are not allowed".to_string(),
@@ -1636,6 +1655,10 @@ pub(super) fn check_expr(
                 BinaryOp::Eq | BinaryOp::Neq => {
                     if left == right {
                         Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
+                        Ok(Ty::Builtin(BuiltinType::Bool))
                     } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
                         Err(TypeError::new(
                             "implicit numeric conversions are not allowed".to_string(),
@@ -1650,6 +1673,10 @@ pub(super) fn check_expr(
                 }
                 BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
                     if left == right && is_orderable_type(&left) {
+                        Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
                         Ok(Ty::Builtin(BuiltinType::Bool))
                     } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
                         Err(TypeError::new(
@@ -2084,7 +2111,11 @@ fn check_match_expr_value(
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
         if let Some(prev) = &result_ty {
-            if prev != &arm_ty {
+            if matches!(prev, Ty::Builtin(BuiltinType::Never)) {
+                result_ty = Some(arm_ty);
+            } else if matches!(arm_ty, Ty::Builtin(BuiltinType::Never)) {
+                // Keep the previous type; never can coerce to any type.
+            } else if prev != &arm_ty {
                 return Err(TypeError::new(
                     format!("match arm type mismatch: expected {prev:?}, found {arm_ty:?}"),
                     arm.body.span,

@@ -207,6 +207,19 @@ fn emit_hir_stmt_inner(
             return Ok(Flow::Terminated);
         }
         HirStmt::Expr(expr_stmt) => {
+            if matches!(expr_stmt.expr, crate::hir::HirExpr::Trap(_)) {
+                let _ = emit_hir_expr(
+                    builder,
+                    &expr_stmt.expr,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                )?;
+                return Ok(Flow::Terminated);
+            }
             // Special handling for match expressions that might diverge
             if let crate::hir::HirExpr::Match(match_expr) = &expr_stmt.expr {
                 if matches!(
@@ -1594,7 +1607,7 @@ fn store_value_by_ty(
     let ptr_ty = module.isa().pointer_type();
     match &ty.ty {
         Ty::Builtin(b) => match b {
-            BuiltinType::Unit => Ok(()),
+            BuiltinType::Unit | BuiltinType::Never => Ok(()),
             BuiltinType::I32 | BuiltinType::U32 => {
                 let ValueRepr::Single(val) = value else {
                     return Err(CodegenError::Unsupported("store i32".to_string()));
@@ -1761,7 +1774,7 @@ fn load_value_by_ty(
     let ptr_ty = module.isa().pointer_type();
     match &ty.ty {
         Ty::Builtin(b) => match b {
-            BuiltinType::Unit => Ok(ValueRepr::Unit),
+            BuiltinType::Unit | BuiltinType::Never => Ok(ValueRepr::Unit),
             BuiltinType::I32 | BuiltinType::U32 => Ok(ValueRepr::Single(
                 builder.ins().load(ir::types::I32, MemFlags::new(), addr, 0),
             )),

@@ -44,27 +44,27 @@ impl Alloc {
     return ()
   }
 
-  pub fn vec_u8_new(self) -> vec::VecU8 {
+  pub fn vec_u8_new(self) -> vec::Vec<u8> {
     return ()
   }
 
-  pub fn vec_u8_free(self, v: vec::VecU8) -> unit {
+  pub fn vec_u8_free(self, v: vec::Vec<u8>) -> unit {
     return ()
   }
 
-  pub fn vec_i32_new(self) -> vec::VecI32 {
+  pub fn vec_i32_new(self) -> vec::Vec<i32> {
     return ()
   }
 
-  pub fn vec_i32_free(self, v: vec::VecI32) -> unit {
+  pub fn vec_i32_free(self, v: vec::Vec<i32>) -> unit {
     return ()
   }
 
-  pub fn vec_string_new(self) -> vec::VecString {
+  pub fn vec_string_new(self) -> vec::Vec<string> {
     return ()
   }
 
-  pub fn vec_string_free(self, v: vec::VecString) -> unit {
+  pub fn vec_string_free(self, v: vec::Vec<string>) -> unit {
     return ()
   }
 }

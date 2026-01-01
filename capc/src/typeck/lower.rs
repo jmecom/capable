@@ -14,8 +14,8 @@ use crate::hir::{
 
 use super::{
     build_type_params, check, function_key, lower_type, resolve_enum_variant, resolve_method_target,
-    resolve_type_name, BuiltinType, EnumInfo, FunctionSig, FunctionTypeTables, SpanExt,
-    StdlibIndex, StructInfo, Ty, TypeTable, UseMap,
+    resolve_type_name, EnumInfo, FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo,
+    Ty, TypeTable, UseMap,
 };
 
 /// Context for HIR lowering (uses the type checker as source of truth).
@@ -464,6 +464,7 @@ fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeE
             BuiltinType::Bool => Ok(AbiType::Bool),
             BuiltinType::String => Ok(AbiType::String),
             BuiltinType::Unit => Ok(AbiType::Unit),
+            BuiltinType::Never => Ok(AbiType::Unit),
         },
         Ty::Ptr(_) => Ok(AbiType::Ptr),
         Ty::Ref(inner) => abi_type_for(inner, ctx, span),
