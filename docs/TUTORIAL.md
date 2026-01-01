@@ -39,10 +39,11 @@ pub fn main() -> i32 {
 }
 ```
 
-- Statements: `let`, assignment, `if`, `while`, `return`, `match`, `defer`.
+- Statements: `let`, assignment, `if`, `while`, `for`, `return`, `match`, `defer`.
 - Expressions: literals, calls, binary ops, unary ops, method calls.
 - Modules + imports: `module ...` and `use ...` (aliases by last path segment).
 - If a function returns `unit`, you can omit the `-> unit` annotation.
+- `for { ... }` is an infinite loop (Go style); `for i in a..b` is range.
 - Integer arithmetic traps on overflow.
 - Variable shadowing is not allowed.
 

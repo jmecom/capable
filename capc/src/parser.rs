@@ -471,7 +471,7 @@ impl Parser {
             Some(TokenKind::Defer) => Ok(Stmt::Defer(self.parse_defer()?)),
             Some(TokenKind::If) => self.parse_if_stmt(),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
-            Some(TokenKind::For) => Ok(Stmt::For(self.parse_for()?)),
+            Some(TokenKind::For) => self.parse_for_stmt(),
             Some(TokenKind::Ident) => {
                 if self.peek_token(1).is_some_and(|t| t.kind == TokenKind::Eq) {
                     Ok(Stmt::Assign(self.parse_assign()?))
@@ -661,8 +661,7 @@ impl Parser {
         })
     }
 
-    fn parse_for(&mut self) -> Result<ForStmt, ParseError> {
-        let start = self.expect(TokenKind::For)?.span.start;
+    fn parse_for_after(&mut self, start: usize) -> Result<ForStmt, ParseError> {
         let var = self.expect_ident()?;
         self.expect(TokenKind::In)?;
         let range_start = self.parse_range_bound()?;
@@ -677,6 +676,25 @@ impl Parser {
             body,
             span: Span::new(start, end),
         })
+    }
+
+    fn parse_for_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let for_token = self.expect(TokenKind::For)?;
+        let start = for_token.span.start;
+        if self.peek_kind() == Some(TokenKind::LBrace) {
+            let body = self.parse_block()?;
+            let end = body.span.end;
+            let cond = Expr::Literal(LiteralExpr {
+                value: Literal::Bool(true),
+                span: for_token.span,
+            });
+            return Ok(Stmt::While(WhileStmt {
+                cond,
+                body,
+                span: Span::new(start, end),
+            }));
+        }
+        Ok(Stmt::For(self.parse_for_after(start)?))
     }
 
     /// Parse a simple expression for range bounds (no struct literals allowed)

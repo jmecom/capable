@@ -942,3 +942,17 @@ fn run_if_let() {
     assert_eq!(code, 0);
     assert!(stdout.contains("ok\nerr\nif_let ok\n"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_for_forever() {
+    let out_dir = make_out_dir("for_forever");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_for_forever.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("0\n1\n2\nfor_forever ok\n"), "stdout was: {stdout:?}");
+}

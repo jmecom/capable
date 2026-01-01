@@ -1,0 +1,17 @@
+module should_pass_for_forever
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let i = 0
+  for {
+    c.println_i32(i)
+    if (i == 2) {
+      break
+    }
+    i = i + 1
+  }
+  c.println("for_forever ok")
+  return 0
+}
