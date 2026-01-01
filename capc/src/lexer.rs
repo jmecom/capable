@@ -143,6 +143,8 @@ pub enum TokenKind {
     Int,
     #[regex(r#"\"([^\"\\]|\\.)*\""#)]
     Str,
+    #[regex(r#"'([^'\\]|\\x[0-9a-fA-F]{2}|\\.)'"#)]
+    Char,
 
     Error,
 }

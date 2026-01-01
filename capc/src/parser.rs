@@ -1049,6 +1049,16 @@ impl Parser {
                     span: token.span,
                 }))
             }
+            Some(TokenKind::Char) => {
+                let token = self.bump().unwrap();
+                let value = unescape_char(&token.text).map_err(|message| {
+                    self.error_at(token.span, format!("invalid char literal: {message}"))
+                })?;
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::U8(value),
+                    span: token.span,
+                }))
+            }
             Some(TokenKind::True) => {
                 let token = self.bump().unwrap();
                 Ok(Expr::Literal(LiteralExpr {
@@ -1105,8 +1115,8 @@ impl Parser {
                     Ok(Expr::Path(path))
                 }
             }
-            Some(_other) => Err(self.error_current(format!(
-                "unexpected token in expression: {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "unexpected token in expression: {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -1153,6 +1163,13 @@ impl Parser {
                     self.error_at(token.span, "invalid integer literal".to_string())
                 })?;
                 Ok(Pattern::Literal(Literal::Int(value)))
+            }
+            Some(TokenKind::Char) => {
+                let token = self.bump().unwrap();
+                let value = unescape_char(&token.text).map_err(|message| {
+                    self.error_at(token.span, format!("invalid char literal: {message}"))
+                })?;
+                Ok(Pattern::Literal(Literal::U8(value)))
             }
             Some(TokenKind::True) => {
                 self.bump();
@@ -1495,6 +1512,42 @@ fn unescape_string(text: &str) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+fn unescape_char(text: &str) -> Result<u8, String> {
+    let mut chars = text.chars();
+    if chars.next() != Some('\'') || text.len() < 2 {
+        return Err("missing quotes".to_string());
+    }
+    let Some(ch) = chars.next() else {
+        return Err("empty char literal".to_string());
+    };
+    let value = if ch == '\\' {
+        let Some(esc) = chars.next() else {
+            return Err("invalid escape".to_string());
+        };
+        match esc {
+            'n' => b'\n',
+            'r' => b'\r',
+            't' => b'\t',
+            '\\' => b'\\',
+            '\'' => b'\'',
+            'x' => {
+                let hi = chars.next().ok_or_else(|| "invalid hex escape".to_string())?;
+                let lo = chars.next().ok_or_else(|| "invalid hex escape".to_string())?;
+                let hex = format!("{hi}{lo}");
+                u8::from_str_radix(&hex, 16).map_err(|_| "invalid hex escape".to_string())?
+            }
+            other => return Err(format!("unsupported escape \\{other}")),
+        }
+    } else {
+        let code = ch as u32;
+        if code > 255 {
+            return Err("char literal out of range".to_string());
+        }
+        code as u8
+    };
+    Ok(value)
 }
 
 trait SpanExt {

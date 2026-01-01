@@ -144,4 +144,80 @@ impl string {
     }
     return true
   }
+
+  pub fn is_empty(self) -> bool {
+    return self.len() == 0
+  }
+
+  pub fn byte_at_checked(self, index: i32) -> Result<u8, unit> {
+    if (index < 0) {
+      return Err(())
+    }
+    if (index >= self.len()) {
+      return Err(())
+    }
+    return Ok(self.byte_at(index))
+  }
+
+  pub fn index_of_byte(self, needle: u8) -> Result<i32, unit> {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      if (self.byte_at(i) == needle) {
+        return Ok(i)
+      }
+      i = i + 1
+    }
+    return Err(())
+  }
+
+  pub fn last_index_of_byte(self, needle: u8) -> Result<i32, unit> {
+    let len = self.len()
+    if (len == 0) {
+      return Err(())
+    }
+    let i = len - 1
+    while (true) {
+      if (self.byte_at(i) == needle) {
+        return Ok(i)
+      }
+      if (i == 0) {
+        break
+      }
+      i = i - 1
+    }
+    return Err(())
+  }
+
+  pub fn contains_byte(self, needle: u8) -> bool {
+    match (self.index_of_byte(needle)) {
+      Ok(_) => { return true }
+      Err(_) => { return false }
+    }
+  }
+
+  pub fn count_byte(self, needle: u8) -> i32 {
+    let len = self.len()
+    let i = 0
+    let count = 0
+    while (i < len) {
+      if (self.byte_at(i) == needle) {
+        count = count + 1
+      }
+      i = i + 1
+    }
+    return count
+  }
+
+  pub fn is_ascii(self) -> bool {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      if (self.byte_at(i) > '\x7f') {
+        return false
+      }
+      i = i + 1
+    }
+    return true
+  }
 }
