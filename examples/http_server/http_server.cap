@@ -12,27 +12,21 @@ fn arg_or_default(args: Args, index: i32, default: string) -> string {
   if (args.len() <= index) {
     return default
   }
-  match (args.at(index)) {
-    Ok(value) => { return value }
-    Err(_) => { return default }
-  }
+  return args.at(index).unwrap_or(default)
 }
 
 fn strip_query(raw_path: string) -> string {
-  match (raw_path.split(63u8).get(0)) {
-    Ok(path) => { return path }
-    Err(_) => { return "" }
-  }
+  return raw_path.split(63u8)[0].unwrap_or("")
 }
 
 fn sanitize_segment(parts: VecString, i: i32, acc: string, seg: string) -> Result<string, unit> {
   if (seg.len() == 0) {
     return sanitize_parts(parts, i + 1, acc)
   }
-  if (seg.eq(".")) {
+  if (seg == ".") {
     return sanitize_parts(parts, i + 1, acc)
   }
-  if (seg.eq("..")) {
+  if (seg == "..") {
     return Err(())
   }
   if (acc.len() == 0) {
@@ -45,45 +39,48 @@ fn sanitize_parts(parts: VecString, i: i32, acc: string) -> Result<string, unit>
   if (i >= parts.len()) {
     return Ok(acc)
   }
-  match (parts.get(i)) {
-    Ok(seg) => { return sanitize_segment(parts, i, acc, seg) }
-    Err(_) => { return Err(()) }
+  let seg_result = parts[i]
+  if (seg_result.is_err()) {
+    return Err(())
   }
+  return sanitize_segment(parts, i, acc, seg_result.ok())
 }
 
 fn sanitize_path(raw_path: string) -> Result<string, unit> {
-  match (sanitize_parts(raw_path.split(47u8), 0, "")) {
-    Ok(path) => {
-      if (path.len() == 0) {
-        return Ok("index.html")
-      }
-      return Ok(path)
-    }
-    Err(_) => { return Err(()) }
+  let result = sanitize_parts(raw_path.split(47u8), 0, "")
+  if (result.is_err()) {
+    return Err(())
   }
+  let path = result.ok()
+  if (path.len() == 0) {
+    return Ok("index.html")
+  }
+  return Ok(path)
 }
 
 fn parse_request_line(line: string) -> Result<string, unit> {
   let parts = line.trim().split(32u8)
-  match (parts.get(0)) {
-    Ok(method) => {
-      if (!method.eq("GET")) {
-        return Err(())
-      }
-    }
-    Err(_) => { return Err(()) }
+  let method_result = parts[0]
+  if (method_result.is_err()) {
+    return Err(())
   }
-  match (parts.get(1)) {
-    Ok(raw_path) => { return sanitize_path(strip_query(raw_path)) }
-    Err(_) => { return Err(()) }
+  let method = method_result.ok()
+  if (method != "GET") {
+    return Err(())
   }
+  let path_result = parts[1]
+  if (path_result.is_err()) {
+    return Err(())
+  }
+  return sanitize_path(strip_query(path_result.ok()))
 }
 
 fn parse_request_path(req: string) -> Result<string, unit> {
-  match (req.lines().get(0)) {
-    Ok(line) => { return parse_request_line(line) }
-    Err(_) => { return Err(()) }
+  let line_result = req.lines()[0]
+  if (line_result.is_err()) {
+    return Err(())
   }
+  return parse_request_line(line_result.ok())
 }
 
 fn respond_ok(conn: &TcpConn, body: string) -> Result<unit, NetErr> {
@@ -101,19 +98,22 @@ fn respond_bad_request(conn: &TcpConn) -> Result<unit, NetErr> {
 }
 
 fn handle_request(conn: &TcpConn, readfs: ReadFS, path: string) -> Result<unit, NetErr> {
-  match (readfs.read_to_string(path)) {
-    Ok(body) => { return respond_ok(conn, body) }
-    Err(_) => { return respond_not_found(conn) }
+  let file_result = readfs.read_to_string(path)
+  if (file_result.is_ok()) {
+    return respond_ok(conn, file_result.ok())
   }
+  return respond_not_found(conn)
 }
 
 fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result<unit, NetErr> {
   let listener = net.listen("127.0.0.1", 8080)?
   let conn = listener.accept()?
   let req = conn.read(4096)?
-  match (parse_request_path(req)) {
-    Ok(path) => { handle_request(conn, readfs, path)? }
-    Err(_) => { respond_bad_request(conn)? }
+  let path_result = parse_request_path(req)
+  if (path_result.is_ok()) {
+    handle_request(conn, readfs, path_result.ok())?
+  } else {
+    respond_bad_request(conn)?
   }
   conn.close()
   return Ok(())
@@ -126,9 +126,9 @@ pub fn main(rc: RootCap) -> i32 {
   let root = arg_or_default(args, 1, ".")
   let readfs = rc.mint_readfs(root)
   c.println("listening on 127.0.0.1:8080")
-  match (serve_once(c, net, readfs)) {
-    Ok(_) => {}
-    Err(_) => { c.println("server error") }
+  let result = serve_once(c, net, readfs)
+  if (result.is_err()) {
+    c.println("server error")
   }
   return 0
 }

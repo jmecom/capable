@@ -597,9 +597,9 @@ impl Parser {
         let start = self.expect(TokenKind::For)?.span.start;
         let var = self.expect_ident()?;
         self.expect(TokenKind::In)?;
-        let range_start = self.parse_primary()?;
+        let range_start = self.parse_range_bound()?;
         self.expect(TokenKind::DotDot)?;
-        let range_end = self.parse_primary()?;
+        let range_end = self.parse_range_bound()?;
         let body = self.parse_block()?;
         let end = body.span.end;
         Ok(ForStmt {
@@ -609,6 +609,58 @@ impl Parser {
             body,
             span: Span::new(start, end),
         })
+    }
+
+    /// Parse a simple expression for range bounds (no struct literals allowed)
+    fn parse_range_bound(&mut self) -> Result<Expr, ParseError> {
+        match self.peek_kind() {
+            Some(TokenKind::Int) => {
+                let token = self.bump().unwrap();
+                let value = token.text.parse::<i64>().map_err(|_| {
+                    self.error_at(token.span, "invalid integer literal".to_string())
+                })?;
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::Int(value),
+                    span: token.span,
+                }))
+            }
+            Some(TokenKind::True) => {
+                let token = self.bump().unwrap();
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::Bool(true),
+                    span: token.span,
+                }))
+            }
+            Some(TokenKind::False) => {
+                let token = self.bump().unwrap();
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::Bool(false),
+                    span: token.span,
+                }))
+            }
+            Some(TokenKind::Ident) => {
+                // Parse just a simple path (no struct literal)
+                let first_ident = self.expect_ident()?;
+                let start = first_ident.span.start;
+                let mut segments = vec![first_ident];
+
+                while self.peek_kind() == Some(TokenKind::ColonColon) {
+                    self.bump();
+                    let segment = self.expect_ident()?;
+                    segments.push(segment);
+                }
+
+                let end = segments.last().unwrap().span.end;
+                Ok(Expr::Path(Path {
+                    segments,
+                    span: Span::new(start, end),
+                }))
+            }
+            Some(_other) => Err(self.error_current(format!(
+                "expected integer or identifier in range bound, found {{other:?}}"
+            ))),
+            None => Err(self.error_current("unexpected end of input".to_string())),
+        }
     }
 
     fn parse_expr_stmt(&mut self) -> Result<ExprStmt, ParseError> {

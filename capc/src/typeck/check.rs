@@ -1982,8 +1982,36 @@ pub(super) fn check_expr(
                         ))
                     }
                 }
+                // Vec types return Result<T, VecErr>
+                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString" => {
+                    Ok(Ty::Path(
+                        "Result".to_string(),
+                        vec![
+                            Ty::Builtin(BuiltinType::String),
+                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
+                        ],
+                    ))
+                }
+                Ty::Path(name, _) if name == "VecI32" || name == "sys.vec.VecI32" => {
+                    Ok(Ty::Path(
+                        "Result".to_string(),
+                        vec![
+                            Ty::Builtin(BuiltinType::I32),
+                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
+                        ],
+                    ))
+                }
+                Ty::Path(name, _) if name == "VecU8" || name == "sys.vec.VecU8" => {
+                    Ok(Ty::Path(
+                        "Result".to_string(),
+                        vec![
+                            Ty::Builtin(BuiltinType::U8),
+                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
+                        ],
+                    ))
+                }
                 _ => Err(TypeError::new(
-                    format!("cannot index into type {:?}; only string, Slice[T], and MutSlice[T] are indexable", object_ty),
+                    format!("cannot index into type {:?}; only string, Slice[T], MutSlice[T], and Vec types are indexable", object_ty),
                     index_expr.span,
                 )),
             }

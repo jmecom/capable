@@ -1156,12 +1156,49 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             let object = lower_expr(&index_expr.object, ctx, ret_ty)?;
             let index = lower_expr(&index_expr.index, ctx, ret_ty)?;
 
-            Ok(HirExpr::Index(crate::hir::HirIndex {
-                object: Box::new(object),
-                index: Box::new(index),
-                elem_ty: hir_ty,
-                span: index_expr.span,
-            }))
+            // Check if this is a Vec type - if so, desugar to .get() call
+            let object_ty = &object.ty().ty;
+            let is_vec_type = matches!(object_ty,
+                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString"
+                    || name == "VecI32" || name == "sys.vec.VecI32"
+                    || name == "VecU8" || name == "sys.vec.VecU8"
+            );
+
+            if is_vec_type {
+                // Desugar vec[i] to vec.get(i)
+                // Get the short type name (e.g., "VecString" from "sys.vec.VecString")
+                let type_name = match object_ty {
+                    Ty::Path(name, _) => {
+                        if name.starts_with("sys.vec.") {
+                            name.strip_prefix("sys.vec.").unwrap()
+                        } else {
+                            name.as_str()
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                let key = format!("sys.vec.{}__get", type_name);
+                let symbol = format!("capable_{}", key.replace('.', "_").replace("__", "_"));
+
+                Ok(HirExpr::Call(crate::hir::HirCall {
+                    callee: ResolvedCallee::Function {
+                        module: "sys.vec".to_string(),
+                        name: format!("{}__get", type_name),
+                        symbol,
+                    },
+                    type_args: vec![],
+                    args: vec![object, index],
+                    ret_ty: hir_ty,
+                    span: index_expr.span,
+                }))
+            } else {
+                Ok(HirExpr::Index(crate::hir::HirIndex {
+                    object: Box::new(object),
+                    index: Box::new(index),
+                    elem_ty: hir_ty,
+                    span: index_expr.span,
+                }))
+            }
         }
     }
 }
