@@ -420,6 +420,7 @@ fn resolve_impl_target(
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     type_params: &HashSet<String>,
     module_name: &str,
     span: Span,
@@ -427,6 +428,7 @@ fn resolve_impl_target(
     let target_ty = lower_type(target, use_map, stdlib, type_params)?;
     let (impl_module, type_name) = match &target_ty {
         Ty::Path(target_name, _target_args) => {
+            // Check struct_map first
             if let Some(info) = struct_map.get(target_name) {
                 let type_name = target_name
                     .rsplit_once('.')
@@ -434,6 +436,18 @@ fn resolve_impl_target(
                     .unwrap_or(target_name)
                     .to_string();
                 (info.module.clone(), type_name)
+            // Check enum_map
+            } else if enum_map.contains_key(target_name) {
+                let type_name = target_name
+                    .rsplit_once('.')
+                    .map(|(_, t)| t)
+                    .unwrap_or(target_name)
+                    .to_string();
+                let mod_part = target_name
+                    .rsplit_once('.')
+                    .map(|(m, _)| m)
+                    .unwrap_or(module_name);
+                (mod_part.to_string(), type_name)
             } else if target_name.contains('.') {
                 let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
                     TypeError::new("invalid type path".to_string(), span)
@@ -441,9 +455,11 @@ fn resolve_impl_target(
                 (mod_part.to_string(), type_part.to_string())
             } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
                 (info.module.clone(), target_name.clone())
+            } else if enum_map.contains_key(&format!("{module_name}.{target_name}")) {
+                (module_name.to_string(), target_name.clone())
             } else {
                 return Err(TypeError::new(
-                    "impl target must be a struct type name".to_string(),
+                    "impl target must be a struct or enum type name".to_string(),
                     span,
                 ));
             }
@@ -452,7 +468,7 @@ fn resolve_impl_target(
         Ty::Builtin(BuiltinType::U8) => ("sys.bytes".to_string(), "u8".to_string()),
         _ => {
             return Err(TypeError::new(
-                "impl target must be a struct type name".to_string(),
+                "impl target must be a struct or enum type name".to_string(),
                 span,
             ));
         }
@@ -576,6 +592,7 @@ fn desugar_impl_methods(
         use_map,
         stdlib,
         struct_map,
+        enum_map,
         &impl_type_params,
         module_name,
         impl_block.span,

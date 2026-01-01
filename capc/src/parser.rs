@@ -554,7 +554,8 @@ impl Parser {
 
     fn parse_if(&mut self) -> Result<IfStmt, ParseError> {
         let start = self.expect(TokenKind::If)?.span.start;
-        let cond = self.parse_expr()?;
+        // Use parse_expr_no_struct because `{` after condition starts the then-block, not a struct literal
+        let cond = self.parse_expr_no_struct()?;
         let then_block = self.parse_block()?;
         let else_block = if self.peek_kind() == Some(TokenKind::Else) {
             self.bump();
@@ -583,7 +584,8 @@ impl Parser {
 
     fn parse_while(&mut self) -> Result<WhileStmt, ParseError> {
         let start = self.expect(TokenKind::While)?.span.start;
-        let cond = self.parse_expr()?;
+        // Use parse_expr_no_struct because `{` after condition starts the loop body, not a struct literal
+        let cond = self.parse_expr_no_struct()?;
         let body = self.parse_block()?;
         let end = body.span.end;
         Ok(WhileStmt {
@@ -676,11 +678,21 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_expr_bp(0)
+        self.parse_expr_inner(true)
     }
 
-    fn parse_expr_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
-        let mut lhs = self.parse_prefix()?;
+    /// Parse an expression where struct literals are not allowed.
+    /// Used in if/while/for/match scrutinee positions where `{` starts a block, not a struct literal.
+    fn parse_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
+        self.parse_expr_inner(false)
+    }
+
+    fn parse_expr_inner(&mut self, allow_struct_literal: bool) -> Result<Expr, ParseError> {
+        self.parse_expr_bp(0, allow_struct_literal)
+    }
+
+    fn parse_expr_bp(&mut self, min_bp: u8, allow_struct_literal: bool) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_prefix(allow_struct_literal)?;
 
         loop {
             // First, check for postfix operators
@@ -702,7 +714,7 @@ impl Parser {
                             };
 
                             // Check if this is a struct literal (followed by '{')
-                            if self.peek_kind() == Some(TokenKind::LBrace) {
+                            if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
                                 // Convert the lhs and field into a path for the struct literal
                                 let mut path = match lhs {
                                     Expr::Path(p) => p,
@@ -807,7 +819,7 @@ impl Parser {
                     };
                     if looks_like_type {
                         let type_args = self.parse_type_args()?;
-                        if self.peek_kind() == Some(TokenKind::LBrace) {
+                        if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
                             let path = match lhs {
                                 Expr::Path(p) => p,
                                 Expr::FieldAccess(ref fa) => self.field_access_to_path(fa)?,
@@ -819,6 +831,15 @@ impl Parser {
                         if self.peek_kind() == Some(TokenKind::LParen) {
                             lhs = self.finish_call(lhs, type_args)?;
                             continue;
+                        }
+                        // In no-struct context, if we see LBrace it's the start of a block, not an error
+                        if !allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
+                            // Type args without call in no-struct context - this is actually ok,
+                            // the LBrace is a block. But we parsed type args that don't belong.
+                            // This is a parse error - generic expressions need parens in this context.
+                            return Err(self.error_current(
+                                "generic expressions in this context require parentheses".to_string(),
+                            ));
                         }
                         return Err(self.error_current(
                             "type arguments require a call or struct literal".to_string(),
@@ -851,7 +872,8 @@ impl Parser {
             }
 
             self.bump();
-            let rhs = self.parse_expr_bp(r_bp)?;
+            // RHS of binary operator always allows struct literals (no ambiguity)
+            let rhs = self.parse_expr_bp(r_bp, true)?;
             let span = Span::new(lhs.span().start, rhs.span().end);
             lhs = Expr::Binary(BinaryExpr {
                 op,
@@ -864,11 +886,12 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_prefix(&mut self) -> Result<Expr, ParseError> {
+    fn parse_prefix(&mut self, allow_struct_literal: bool) -> Result<Expr, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Minus) => {
                 let start = self.bump().unwrap().span.start;
-                let expr = self.parse_expr_bp(7)?;
+                // Unary operands always allow struct literals (no ambiguity)
+                let expr = self.parse_expr_bp(7, true)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Neg,
                     span: Span::new(start, expr.span().end),
@@ -877,7 +900,8 @@ impl Parser {
             }
             Some(TokenKind::Bang) => {
                 let start = self.bump().unwrap().span.start;
-                let expr = self.parse_expr_bp(7)?;
+                // Unary operands always allow struct literals (no ambiguity)
+                let expr = self.parse_expr_bp(7, true)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Not,
                     span: Span::new(start, expr.span().end),
@@ -885,11 +909,11 @@ impl Parser {
                 }))
             }
             Some(TokenKind::Match) => self.parse_match(),
-            _ => self.parse_primary(),
+            _ => self.parse_primary(allow_struct_literal),
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+    fn parse_primary(&mut self, allow_struct_literal: bool) -> Result<Expr, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Int) => {
                 let token = self.bump().unwrap();
@@ -979,7 +1003,7 @@ impl Parser {
                     span: Span::new(start, end),
                 };
 
-                if self.peek_kind() == Some(TokenKind::LBrace) {
+                if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
                     self.parse_struct_literal(path, Vec::new())
                 } else {
                     Ok(Expr::Path(path))
@@ -995,7 +1019,8 @@ impl Parser {
     fn parse_match(&mut self) -> Result<Expr, ParseError> {
         let match_token = self.expect(TokenKind::Match)?;
         let start = match_token.span.start;
-        let expr = self.parse_expr()?;
+        // Use parse_expr_no_struct because `{` after the scrutinee starts the match arms, not a struct literal
+        let expr = self.parse_expr_no_struct()?;
         self.expect(TokenKind::LBrace)?;
         let mut arms = Vec::new();
         while self.peek_kind() != Some(TokenKind::RBrace) {

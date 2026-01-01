@@ -127,7 +127,7 @@ fn typecheck_result_unwrap_or_mismatch_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("unwrap_or type mismatch"));
+    assert!(err.to_string().contains("argument type mismatch"));
 }
 
 #[test]

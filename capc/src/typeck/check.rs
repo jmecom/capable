@@ -1029,6 +1029,17 @@ pub(super) fn check_expr(
                     )?;
                     return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
                 }
+                if name == "panic" {
+                    if !call.args.is_empty() {
+                        return Err(TypeError::new(
+                            "panic takes no arguments".to_string(),
+                            call.span,
+                        ));
+                    }
+                    // panic() is a diverging expression - it never returns.
+                    // We type it as unit but it will trap at runtime.
+                    return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
+                }
                 if name == "Ok" || name == "Err" {
                     if call.args.len() != 1 {
                         return Err(TypeError::new(
@@ -1288,121 +1299,6 @@ pub(super) fn check_expr(
                 module_name,
                 type_params,
             )?;
-            if let Ty::Path(name, args) = &receiver_ty {
-                if name == "sys.result.Result" && args.len() == 2 {
-                    let ok_ty = &args[0];
-                    let err_ty = &args[1];
-                    match method_call.method.item.as_str() {
-                        "unwrap_or" => {
-                            if method_call.args.len() != 1 {
-                                return Err(TypeError::new(
-                                    "unwrap_or expects one argument".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            let arg_ty = check_expr(
-                                &method_call.args[0],
-                                functions,
-                                scopes,
-                                UseMode::Move,
-                                recorder,
-                                use_map,
-                                struct_map,
-                                enum_map,
-                                stdlib,
-                                ret_ty,
-                                module_name,
-                                type_params,
-                            )?;
-                            if &arg_ty != ok_ty {
-                                return Err(TypeError::new(
-                                    format!(
-                                        "unwrap_or type mismatch: expected {ok_ty:?}, found {arg_ty:?}"
-                                    ),
-                                    method_call.args[0].span(),
-                                ));
-                            }
-                            return record_expr_type(recorder, expr, ok_ty.clone());
-                        }
-                        "unwrap_err_or" => {
-                            if method_call.args.len() != 1 {
-                                return Err(TypeError::new(
-                                    "unwrap_err_or expects one argument".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            let arg_ty = check_expr(
-                                &method_call.args[0],
-                                functions,
-                                scopes,
-                                UseMode::Move,
-                                recorder,
-                                use_map,
-                                struct_map,
-                                enum_map,
-                                stdlib,
-                                ret_ty,
-                                module_name,
-                                type_params,
-                            )?;
-                            if &arg_ty != err_ty {
-                                return Err(TypeError::new(
-                                    format!(
-                                        "unwrap_err_or type mismatch: expected {err_ty:?}, found {arg_ty:?}"
-                                    ),
-                                    method_call.args[0].span(),
-                                ));
-                            }
-                            return record_expr_type(recorder, expr, err_ty.clone());
-                        }
-                        "is_ok" => {
-                            if !method_call.args.is_empty() {
-                                return Err(TypeError::new(
-                                    "is_ok takes no arguments".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            return record_expr_type(
-                                recorder,
-                                expr,
-                                Ty::Builtin(BuiltinType::Bool),
-                            );
-                        }
-                        "is_err" => {
-                            if !method_call.args.is_empty() {
-                                return Err(TypeError::new(
-                                    "is_err takes no arguments".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            return record_expr_type(
-                                recorder,
-                                expr,
-                                Ty::Builtin(BuiltinType::Bool),
-                            );
-                        }
-                        "ok" => {
-                            if !method_call.args.is_empty() {
-                                return Err(TypeError::new(
-                                    "ok takes no arguments".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            return record_expr_type(recorder, expr, ok_ty.clone());
-                        }
-                        "err" => {
-                            if !method_call.args.is_empty() {
-                                return Err(TypeError::new(
-                                    "err takes no arguments".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            return record_expr_type(recorder, expr, err_ty.clone());
-                        }
-                        _ => {}
-                    }
-                }
-            }
             let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
                 module_name,
