@@ -1051,7 +1051,7 @@ pub(super) fn check_expr(
                         type_params,
                     )?;
                     if let Ty::Path(ty_name, args) = ret_ty {
-                        if ty_name == "Result" && args.len() == 2 {
+                        if ty_name == "sys.result.Result" && args.len() == 2 {
                             let expected = if name == "Ok" { &args[0] } else { &args[1] };
                             if &arg_ty != expected {
                                 return Err(TypeError::new(
@@ -1066,7 +1066,7 @@ pub(super) fn check_expr(
                         recorder,
                         expr,
                         Ty::Path(
-                        "Result".to_string(),
+                        "sys.result.Result".to_string(),
                         if name == "Ok" {
                             vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
                         } else {
@@ -1289,7 +1289,7 @@ pub(super) fn check_expr(
                 type_params,
             )?;
             if let Ty::Path(name, args) = &receiver_ty {
-                if name == "Result" && args.len() == 2 {
+                if name == "sys.result.Result" && args.len() == 2 {
                     let ok_ty = &args[0];
                     let err_ty = &args[1];
                     match method_call.method.item.as_str() {
@@ -1772,7 +1772,7 @@ pub(super) fn check_expr(
                 type_params,
             )?;
             let (ok_ty, err_ty) = match inner_ty {
-                Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
                     (args[0].clone(), args[1].clone())
                 }
                 _ => {
@@ -1784,7 +1784,7 @@ pub(super) fn check_expr(
             };
 
             let ret_err = match ret_ty {
-                Ty::Path(name, args) if name == "Result" && args.len() == 2 => &args[1],
+                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => &args[1],
                 _ => {
                     return Err(TypeError::new(
                         "the `?` operator can only be used in functions returning Result".to_string(),
@@ -1985,7 +1985,7 @@ pub(super) fn check_expr(
                 // Vec types return Result<T, VecErr>
                 Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString" => {
                     Ok(Ty::Path(
-                        "Result".to_string(),
+                        "sys.result.Result".to_string(),
                         vec![
                             Ty::Builtin(BuiltinType::String),
                             Ty::Path("sys.vec.VecErr".to_string(), vec![]),
@@ -1994,7 +1994,7 @@ pub(super) fn check_expr(
                 }
                 Ty::Path(name, _) if name == "VecI32" || name == "sys.vec.VecI32" => {
                     Ok(Ty::Path(
-                        "Result".to_string(),
+                        "sys.result.Result".to_string(),
                         vec![
                             Ty::Builtin(BuiltinType::I32),
                             Ty::Path("sys.vec.VecErr".to_string(), vec![]),
@@ -2003,7 +2003,7 @@ pub(super) fn check_expr(
                 }
                 Ty::Path(name, _) if name == "VecU8" || name == "sys.vec.VecU8" => {
                     Ok(Ty::Path(
-                        "Result".to_string(),
+                        "sys.result.Result".to_string(),
                         vec![
                             Ty::Builtin(BuiltinType::U8),
                             Ty::Path("sys.vec.VecErr".to_string(), vec![]),
@@ -2268,7 +2268,7 @@ fn check_match_exhaustive(
                 span,
             ));
         }
-        Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+        Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
             let mut seen_ok = false;
             let mut seen_err = false;
             for arm in arms {
@@ -2634,7 +2634,7 @@ fn bind_pattern(
                 .collect::<Vec<_>>()
                 .join(".");
             if let Ty::Path(ty_name, args) = match_ty {
-                if ty_name == "Result" && args.len() == 2 {
+                if ty_name == "sys.result.Result" && args.len() == 2 {
                     let ty = if name == "Ok" {
                         args[0].clone()
                     } else if name == "Err" {

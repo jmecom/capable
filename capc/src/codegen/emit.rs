@@ -588,7 +588,7 @@ fn emit_hir_expr_inner(
         HirExpr::EnumVariant(variant) => {
             // Check if this is a Result type with payload (Ok/Err)
             if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty.ty {
-                if ty_name == "Result" && args.len() == 2 {
+                if ty_name == "sys.result.Result" && args.len() == 2 {
                     let AbiType::Result(ok_abi, err_abi) = &variant.enum_ty.abi else {
                         return Err(CodegenError::Unsupported(
                             abi_quirks::result_abi_mismatch_error().to_string(),
@@ -706,7 +706,7 @@ fn emit_hir_expr_inner(
 
             builder.switch_to_block(err_block);
             let ret_value = match &try_expr.ret_ty.ty {
-                crate::typeck::Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+                crate::typeck::Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
                     let AbiType::Result(ok_abi, _err_abi) = &try_expr.ret_ty.abi else {
                         return Err(CodegenError::Unsupported(
                             abi_quirks::result_abi_mismatch_error().to_string(),
@@ -1648,7 +1648,7 @@ fn store_value_by_ty(
             "generic type parameters must be monomorphized before codegen".to_string(),
         )),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let ValueRepr::Result { tag, ok, err } = value else {
                     return Err(CodegenError::Unsupported("store result".to_string()));
                 };
@@ -1803,7 +1803,7 @@ fn load_value_by_ty(
             "generic type parameters must be monomorphized before codegen".to_string(),
         )),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
                     return Err(CodegenError::Unsupported(
                         abi_quirks::result_abi_mismatch_error().to_string(),
@@ -2436,7 +2436,7 @@ fn hir_match_pattern_cond(
             let val_ty = builder.func.dfg.value_type(match_val);
 
             // Special handling for Result type (built-in, not in enum_index)
-            if qualified == "Result" {
+            if qualified == "sys.result.Result" {
                 let discr = match variant_name.as_str() {
                     "Ok" => 0i64,
                     "Err" => 1i64,
@@ -2662,7 +2662,7 @@ fn zero_value_for_ty(
             "generic type parameters must be monomorphized before codegen".to_string(),
         )),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
                     return Err(CodegenError::Unsupported(
                         abi_quirks::result_abi_mismatch_error().to_string(),

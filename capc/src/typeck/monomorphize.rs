@@ -738,7 +738,7 @@ impl MonoCtx {
             Ty::Ptr(inner) => Ok(Ty::Ptr(Box::new(self.mono_ty(module, inner, subs)?))),
             Ty::Ref(inner) => Ok(Ty::Ref(Box::new(self.mono_ty(module, inner, subs)?))),
             Ty::Path(name, args) => {
-                if name == "Result" {
+                if name == "sys.result.Result" {
                     let args = args
                         .iter()
                         .map(|arg| self.mono_ty(module, arg, subs))
@@ -862,7 +862,7 @@ impl MonoCtx {
                 DUMMY_SPAN,
             )),
             Ty::Path(name, args) => {
-                if name == "Result" && args.len() == 2 {
+                if name == "sys.result.Result" && args.len() == 2 {
                     let ok = self.abi_type_for(module, &args[0])?;
                     let err = self.abi_type_for(module, &args[1])?;
                     return Ok(AbiType::Result(Box::new(ok), Box::new(err)));

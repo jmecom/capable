@@ -19,8 +19,8 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::hir::HirModule;
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
-    "i32", "i64", "u32", "u8", "bool", "string", "unit", "Result",
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 7] = [
+    "i32", "i64", "u32", "u8", "bool", "string", "unit",
 ];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
@@ -754,7 +754,7 @@ fn type_contains_capability_inner(
         Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => false,
         Ty::Param(_) => true,
         Ty::Path(name, args) => {
-            if name == "Result" {
+            if name == "sys.result.Result" {
                 return args
                     .iter()
                     .any(|arg| type_contains_capability_inner(arg, struct_map, enum_map, visiting));
@@ -836,7 +836,7 @@ fn type_kind_inner(
         Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => TypeKind::Unrestricted,
         Ty::Param(_) => TypeKind::Affine,
         Ty::Path(name, args) => {
-            if name == "Result" {
+            if name == "sys.result.Result" {
                 return args.iter().fold(TypeKind::Unrestricted, |acc, arg| {
                     combine_kind(acc, type_kind_inner(arg, struct_map, enum_map, visiting))
                 });
@@ -879,14 +879,7 @@ fn validate_type_args(
         Ty::Builtin(_) | Ty::Param(_) => Ok(()),
         Ty::Ptr(inner) | Ty::Ref(inner) => validate_type_args(inner, struct_map, enum_map, span),
         Ty::Path(name, args) => {
-            if name == "Result" {
-                if args.len() != 2 {
-                    return Err(TypeError::new(
-                        format!("Result expects 2 type arguments, found {}", args.len()),
-                        span,
-                    ));
-                }
-            } else if let Some(info) = struct_map.get(name) {
+            if let Some(info) = struct_map.get(name) {
                 if args.len() != info.type_params.len() {
                     return Err(TypeError::new(
                         format!(

@@ -469,7 +469,7 @@ fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeE
         Ty::Ref(inner) => abi_type_for(inner, ctx, span),
         Ty::Param(_) => Ok(AbiType::Ptr),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let ok = abi_type_for(&args[0], ctx, span)?;
                 let err = abi_type_for(&args[1], ctx, span)?;
                 return Ok(AbiType::Result(Box::new(ok), Box::new(err)));
@@ -674,7 +674,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
             let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
             if let Ty::Path(name, args) = &receiver_ty {
-                if name == "Result" && args.len() == 2 {
+                if name == "sys.result.Result" && args.len() == 2 {
                     match method_call.method.item.as_str() {
                         "unwrap_or" => {
                             let default_expr = lower_expr(&method_call.args[0], ctx, ret_ty)?;
@@ -1136,7 +1136,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             let scrutinee = lower_expr(&try_expr.expr, ctx, ret_ty)?;
             let scrutinee_ty = scrutinee.ty().clone();
             let ok_ty = match &scrutinee_ty.ty {
-                Ty::Path(name, args) if name == "Result" && args.len() == 2 => args[0].clone(),
+                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => args[0].clone(),
                 _ => {
                     return Err(TypeError::new(
                         "the `?` operator expects a Result value".to_string(),
@@ -1278,7 +1278,7 @@ fn lower_pattern(
                 let name = &path.segments[0].item;
                 if name == "Ok" || name == "Err" {
                     if let Ty::Path(ty_name, args) = &match_ty.ty {
-                        if ty_name == "Result" && args.len() == 2 {
+                        if ty_name == "sys.result.Result" && args.len() == 2 {
                             let variant_name = name.clone();
 
                             let binding_info = if let Some(bind_ident) = binding {

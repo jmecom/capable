@@ -222,8 +222,8 @@ impl Parser {
                 }
                 Ok(Item::Impl(self.parse_impl_block(doc)?))
             }
-            Some(_other) => Err(self.error_current(format!(
-                "expected item, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected item, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -656,8 +656,8 @@ impl Parser {
                     span: Span::new(start, end),
                 }))
             }
-            Some(_other) => Err(self.error_current(format!(
-                "expected integer or identifier in range bound, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected integer or identifier in range bound, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -1262,8 +1262,8 @@ impl Parser {
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         match self.peek_kind() {
             Some(k) if k == kind => Ok(self.bump().unwrap()),
-            Some(_other) => Err(self.error_current(format!(
-                "expected {{kind:?}}, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected {kind:?}, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -1272,8 +1272,8 @@ impl Parser {
     fn expect_ident(&mut self) -> Result<Ident, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Ident) => Ok(to_ident(&self.bump().unwrap())),
-            Some(_other) => Err(self.error_current(format!(
-                "expected identifier, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected identifier, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
