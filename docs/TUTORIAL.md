@@ -140,6 +140,16 @@ match flag {
 }
 ```
 
+You can also use `if let` as a single-arm `match`:
+
+```cap
+if let Ok(x) = make() {
+  return x
+} else {
+  return 0
+}
+```
+
 ## 7) Capabilities and attenuation
 
 Capabilities live in `sys.*` and are declared with the `capability` keyword (capability types are opaque). You can only get them from `RootCap`.

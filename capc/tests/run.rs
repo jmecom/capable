@@ -928,3 +928,17 @@ fn run_defer_return() {
     assert_eq!(code, 0);
     assert!(stdout.contains("start\ninner\nouter\n"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_if_let() {
+    let out_dir = make_out_dir("if_let");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_if_let.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("ok\nerr\nif_let ok\n"), "stdout was: {stdout:?}");
+}

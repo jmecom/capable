@@ -469,7 +469,7 @@ impl Parser {
             Some(TokenKind::Break) => Ok(Stmt::Break(self.parse_break()?)),
             Some(TokenKind::Continue) => Ok(Stmt::Continue(self.parse_continue()?)),
             Some(TokenKind::Defer) => Ok(Stmt::Defer(self.parse_defer()?)),
-            Some(TokenKind::If) => Ok(Stmt::If(self.parse_if()?)),
+            Some(TokenKind::If) => self.parse_if_stmt(),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
             Some(TokenKind::For) => Ok(Stmt::For(self.parse_for()?)),
             Some(TokenKind::Ident) => {
@@ -565,18 +565,71 @@ impl Parser {
         })
     }
 
-    fn parse_if(&mut self) -> Result<IfStmt, ParseError> {
-        let start = self.expect(TokenKind::If)?.span.start;
+    fn parse_if_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let if_token = self.expect(TokenKind::If)?;
+        let start = if_token.span.start;
+        if self.peek_kind() == Some(TokenKind::Let) {
+            self.bump();
+            let pattern = self.parse_pattern()?;
+            self.expect(TokenKind::Eq)?;
+            let expr = self.parse_expr_no_struct()?;
+            let then_block = self.parse_block()?;
+            let else_block = if self.peek_kind() == Some(TokenKind::Else) {
+                self.bump();
+                if self.peek_kind() == Some(TokenKind::If) {
+                    let else_if = self.parse_if_stmt()?;
+                    let span = else_if.span();
+                    Some(Block {
+                        stmts: vec![else_if],
+                        span,
+                    })
+                } else {
+                    Some(self.parse_block()?)
+                }
+            } else {
+                None
+            };
+            let end = else_block
+                .as_ref()
+                .map_or(then_block.span.end, |b| b.span.end);
+            let else_body = else_block.unwrap_or(Block {
+                stmts: Vec::new(),
+                span: Span::new(end, end),
+            });
+            let match_expr = MatchExpr {
+                expr: Box::new(expr),
+                arms: vec![
+                    MatchArm {
+                        pattern,
+                        body: then_block,
+                        span: Span::new(start, end),
+                    },
+                    MatchArm {
+                        pattern: Pattern::Wildcard(Span::new(end, end)),
+                        body: else_body,
+                        span: Span::new(start, end),
+                    },
+                ],
+                span: Span::new(start, end),
+                match_span: if_token.span,
+            };
+            return Ok(Stmt::Expr(ExprStmt {
+                expr: Expr::Match(match_expr),
+                span: Span::new(start, end),
+            }));
+        }
+
         // Use parse_expr_no_struct because `{` after condition starts the then-block, not a struct literal
         let cond = self.parse_expr_no_struct()?;
         let then_block = self.parse_block()?;
         let else_block = if self.peek_kind() == Some(TokenKind::Else) {
             self.bump();
             if self.peek_kind() == Some(TokenKind::If) {
-                let else_if = self.parse_if()?;
+                let else_if = self.parse_if_stmt()?;
+                let span = else_if.span();
                 Some(Block {
-                    stmts: vec![Stmt::If(else_if.clone())],
-                    span: else_if.span,
+                    stmts: vec![else_if],
+                    span,
                 })
             } else {
                 Some(self.parse_block()?)
@@ -587,12 +640,12 @@ impl Parser {
         let end = else_block
             .as_ref()
             .map_or(then_block.span.end, |b| b.span.end);
-        Ok(IfStmt {
+        Ok(Stmt::If(IfStmt {
             cond,
             then_block,
             else_block,
             span: Span::new(start, end),
-        })
+        }))
     }
 
     fn parse_while(&mut self) -> Result<WhileStmt, ParseError> {
