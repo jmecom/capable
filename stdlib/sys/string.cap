@@ -5,6 +5,11 @@ use sys::buffer
 use sys::bytes
 use sys::vec
 
+pub struct SplitOnce {
+  left: string,
+  right: string
+}
+
 impl string {
   /// Intrinsic; implemented by the runtime.
   pub fn len(self) -> i32 {
@@ -42,6 +47,11 @@ impl string {
   }
 
   /// Intrinsic; implemented by the runtime.
+  pub fn split_once(self, delim: u8) -> Result<SplitOnce, unit> {
+    return Err(())
+  }
+
+  /// Intrinsic; implemented by the runtime.
   pub fn trim(self) -> string {
     return ""
   }
@@ -53,6 +63,16 @@ impl string {
 
   /// Intrinsic; implemented by the runtime.
   pub fn trim_end(self) -> string {
+    return ""
+  }
+
+  /// Intrinsic; implemented by the runtime.
+  pub fn trim_prefix(self, prefix: string) -> string {
+    return ""
+  }
+
+  /// Intrinsic; implemented by the runtime.
+  pub fn trim_suffix(self, suffix: string) -> string {
     return ""
   }
 

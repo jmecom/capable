@@ -60,19 +60,17 @@ fn sanitize_path(raw_path: string) -> Result<string, unit> {
 }
 
 fn parse_request_line(line: string) -> Result<string, unit> {
-  let parts = line.trim().split(32u8)
-  let method_result = parts[0]
-  match (method_result) {
-    Ok(method) => {
-      if (method != "GET") {
+  let trimmed = line.trim()
+  match (trimmed.split_once(32u8)) {
+    Ok(parts) => {
+      if (parts.left != "GET") {
         return Err(())
       }
+      match (parts.right.split_once(32u8)) {
+        Ok(rest) => { return sanitize_path(strip_query(rest.left)) }
+        Err(_) => { return Err(()) }
+      }
     }
-    Err(_) => { return Err(()) }
-  }
-  let path_result = parts[1]
-  match (path_result) {
-    Ok(raw_path) => { return sanitize_path(strip_query(raw_path)) }
     Err(_) => { return Err(()) }
   }
 }
@@ -99,22 +97,29 @@ fn respond_bad_request(conn: &TcpConn) -> Result<unit, NetErr> {
   return conn.write("HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nbad request\n")
 }
 
-fn handle_request(conn: &TcpConn, readfs: ReadFS, path: string) -> Result<unit, NetErr> {
-  match (readfs.read_to_string(path)) {
-    Ok(body) => { return respond_ok(conn, body) }
-    Err(_) => { return respond_not_found(conn) }
+fn handle_request(conn: &TcpConn, readfs: ReadFS, req: string) -> Result<unit, NetErr> {
+  match (parse_request_path(req)) {
+    Ok(path) => {
+      match (readfs.read_to_string(path)) {
+        Ok(body) => { return respond_ok(conn, body) }
+        Err(_) => { return respond_not_found(conn) }
+      }
+    }
+    Err(_) => { return respond_bad_request(conn) }
   }
 }
 
-fn serve_once(c: Console, net: Net, readfs: ReadFS) -> Result<unit, NetErr> {
+fn serve_forever(c: Console, net: Net, rc: RootCap, root: string) -> Result<unit, NetErr> {
   let listener = net.listen("127.0.0.1", 8080)?
-  let conn = listener.accept()?
-  let req = conn.read(4096)?
-  match (parse_request_path(req)) {
-    Ok(path) => { handle_request(conn, readfs, path)? }
-    Err(_) => { respond_bad_request(conn)? }
+  defer listener.close()
+  while (true) {
+    let conn = listener.accept()?
+    defer conn.close()
+    let req = conn.read_to_string()?
+    let readfs = rc.mint_readfs(root)
+    handle_request(conn, readfs, req)?
+    defer c.println("request complete")
   }
-  conn.close()
   return Ok(())
 }
 
@@ -123,9 +128,8 @@ pub fn main(rc: RootCap) -> i32 {
   let net = rc.mint_net()
   let args = rc.mint_args()
   let root = arg_or_default(args, 1, ".")
-  let readfs = rc.mint_readfs(root)
   c.println("listening on 127.0.0.1:8080")
-  let result = serve_once(c, net, readfs)
+  let result = serve_forever(c, net, rc, root)
   if (result.is_err()) {
     c.println("server error")
   }

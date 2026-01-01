@@ -2,7 +2,7 @@ package unsafe
 module sys::net
 
 pub copy capability struct Net
-pub linear capability struct TcpListener
+pub copy capability struct TcpListener
 pub linear capability struct TcpConn
 
 pub enum NetErr {
@@ -22,7 +22,7 @@ impl Net {
 }
 
 impl TcpListener {
-  pub fn accept(self) -> Result<TcpConn, NetErr> {
+  pub fn accept(self: &TcpListener) -> Result<TcpConn, NetErr> {
     return Err(NetErr::IoError)
   }
 

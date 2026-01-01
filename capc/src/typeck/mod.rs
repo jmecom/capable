@@ -582,10 +582,13 @@ fn validate_impl_method(
 
     let ret_ty = lower_type(&method.ret, use_map, stdlib, type_params)?;
     if receiver_is_ref && type_contains_capability(&ret_ty, struct_map, enum_map) {
-        return Err(TypeError::new(
-            "methods returning capabilities must take `self` by value".to_string(),
-            method.ret.span(),
-        ));
+        let receiver_kind = type_kind(target_ty, struct_map, enum_map);
+        if receiver_kind != TypeKind::Unrestricted {
+            return Err(TypeError::new(
+                "methods returning capabilities must take `self` by value".to_string(),
+                method.ret.span(),
+            ));
+        }
     }
 
     Ok(params)
