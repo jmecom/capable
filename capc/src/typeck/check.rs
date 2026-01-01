@@ -148,6 +148,7 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
                 }
             }
             Stmt::Assign(_) => {}
+            Stmt::Defer(_) => {}
             Stmt::Break(_) => {}
             Stmt::Continue(_) => {}
             Stmt::If(if_stmt) => {
@@ -192,6 +193,7 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
 fn stmt_is_total(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return(ret_stmt) => ret_stmt.expr.is_some(),
+        Stmt::Defer(_) => false,
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
                 match_is_total(match_expr)
@@ -288,6 +290,7 @@ pub(super) fn check_function(
             module_name,
             &type_params,
             false, // not inside a loop at function top level
+            true,  // allow defer only at top level
         )?;
     }
 
@@ -326,6 +329,7 @@ fn check_stmt(
     module_name: &str,
     type_params: &HashSet<String>,
     in_loop: bool,
+    allow_defer: bool,
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
@@ -466,6 +470,37 @@ fn check_stmt(
             }
             scopes.assign(&assign.name.item, expr_ty);
         }
+        Stmt::Defer(defer_stmt) => {
+            if !allow_defer {
+                return Err(TypeError::new(
+                    "defer statements are only allowed at the top level of a function".to_string(),
+                    defer_stmt.span,
+                ));
+            }
+            match &defer_stmt.expr {
+                Expr::Call(_) | Expr::MethodCall(_) => {}
+                _ => {
+                    return Err(TypeError::new(
+                        "defer expects a function or method call".to_string(),
+                        defer_stmt.span,
+                    ))
+                }
+            }
+            let _ = check_expr(
+                &defer_stmt.expr,
+                functions,
+                scopes,
+                UseMode::Move,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+        }
         Stmt::Return(ret_stmt) => {
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
                 check_expr(
@@ -562,6 +597,7 @@ fn check_stmt(
                 module_name,
                 type_params,
                 in_loop,
+                false,
             )?;
             let mut else_scopes = scopes.clone();
             if let Some(block) = &if_stmt.else_block {
@@ -578,6 +614,7 @@ fn check_stmt(
                     module_name,
                     type_params,
                     in_loop,
+                    false,
                 )?;
             }
             merge_branch_states(
@@ -625,6 +662,7 @@ fn check_stmt(
                 module_name,
                 type_params,
                 true, // inside loop, break/continue allowed
+                false,
             )?;
             body_scopes.pop_loop();
             ensure_affine_states_match(
@@ -702,6 +740,7 @@ fn check_stmt(
                 module_name,
                 type_params,
                 true, // inside loop, break/continue allowed
+                false,
             )?;
             body_scopes.pop_loop();
 
@@ -769,6 +808,7 @@ fn check_block(
     module_name: &str,
     type_params: &HashSet<String>,
     in_loop: bool,
+    allow_defer: bool,
 ) -> Result<(), TypeError> {
     scopes.push_scope();
     for stmt in &block.stmts {
@@ -785,6 +825,7 @@ fn check_block(
             module_name,
             type_params,
             in_loop,
+            allow_defer,
         )?;
     }
     ensure_linear_scope_consumed(scopes, struct_map, enum_map, block.span)?;
@@ -2042,6 +2083,7 @@ fn check_match_stmt(
             module_name,
             type_params,
             in_loop,
+            false,
         )?;
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
@@ -2178,6 +2220,7 @@ fn check_match_arm_value(
             module_name,
             type_params,
             in_loop,
+            false,
         )?;
     }
     match last {

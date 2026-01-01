@@ -280,12 +280,18 @@ impl MonoCtx {
             .collect();
         let ret_ty = self.mono_hir_type(module, &func.ret_ty, subs)?;
         let body = self.mono_block(module, &func.body, subs)?;
+        let defers: Result<Vec<HirExpr>, TypeError> = func
+            .defers
+            .iter()
+            .map(|expr| self.mono_expr(module, expr, subs))
+            .collect();
         Ok(HirFunction {
             name: new_name,
             type_params: Vec::new(),
             params: params?,
             ret_ty,
             body,
+            defers: defers?,
         })
     }
 

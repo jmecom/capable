@@ -468,6 +468,7 @@ impl Parser {
             Some(TokenKind::Return) => Ok(Stmt::Return(self.parse_return()?)),
             Some(TokenKind::Break) => Ok(Stmt::Break(self.parse_break()?)),
             Some(TokenKind::Continue) => Ok(Stmt::Continue(self.parse_continue()?)),
+            Some(TokenKind::Defer) => Ok(Stmt::Defer(self.parse_defer()?)),
             Some(TokenKind::If) => Ok(Stmt::If(self.parse_if()?)),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
             Some(TokenKind::For) => Ok(Stmt::For(self.parse_for()?)),
@@ -549,6 +550,18 @@ impl Parser {
             .map_or(token.span.end, |t| t.span.end);
         Ok(ContinueStmt {
             span: Span::new(token.span.start, end),
+        })
+    }
+
+    fn parse_defer(&mut self) -> Result<DeferStmt, ParseError> {
+        let start = self.expect(TokenKind::Defer)?.span.start;
+        let expr = self.parse_expr()?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(expr.span().end, |t| t.span.end);
+        Ok(DeferStmt {
+            expr,
+            span: Span::new(start, end),
         })
     }
 

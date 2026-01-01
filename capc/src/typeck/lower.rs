@@ -35,6 +35,7 @@ struct LoweringCtx<'a> {
     local_types: HashMap<String, Ty>,
     local_counter: usize,
     type_params: HashSet<String>,
+    defers: Vec<HirExpr>,
 }
 
 impl<'a> LoweringCtx<'a> {
@@ -62,6 +63,7 @@ impl<'a> LoweringCtx<'a> {
             local_types: HashMap::new(),
             local_counter: 0,
             type_params: HashSet::new(),
+            defers: Vec::new(),
         }
     }
 
@@ -232,6 +234,7 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     ctx.local_counter = 0;
     ctx.local_map.clear();
     ctx.local_types.clear();
+    ctx.defers.clear();
     ctx.type_table = ctx
         .type_tables
         .and_then(|tables| tables.get(&function_key(ctx.module_name, &func.name.item)));
@@ -262,6 +265,7 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib, &type_params)?;
     let hir_ret_ty = hir_type_for(ret_ty.clone(), ctx, func.ret.span())?;
     let body = lower_block(&func.body, ctx, &ret_ty)?;
+    let defers = std::mem::take(&mut ctx.defers);
 
     Ok(HirFunction {
         name: func.name.item.clone(),
@@ -269,36 +273,37 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         params,
         ret_ty: hir_ret_ty,
         body,
+        defers,
     })
 }
 
 /// Lower a block into HIR.
 fn lower_block(block: &Block, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirBlock, TypeError> {
     ctx.push_scope();
-    let stmts: Result<Vec<HirStmt>, TypeError> = block
-        .stmts
-        .iter()
-        .map(|stmt| lower_stmt(stmt, ctx, ret_ty))
-        .collect();
+    let mut stmts = Vec::new();
+    for stmt in &block.stmts {
+        let lowered = lower_stmt(stmt, ctx, ret_ty)?;
+        stmts.extend(lowered);
+    }
     ctx.pop_scope();
 
-    Ok(HirBlock { stmts: stmts? })
+    Ok(HirBlock { stmts })
 }
 
 /// Lower a statement into HIR.
-fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt, TypeError> {
+fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<Vec<HirStmt>, TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
             let expr = lower_expr(&let_stmt.expr, ctx, ret_ty)?;
             let ty = expr.ty().clone();
             let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.ty.clone());
 
-            Ok(HirStmt::Let(HirLetStmt {
+            Ok(vec![HirStmt::Let(HirLetStmt {
                 local_id,
                 ty,
                 expr,
                 span: let_stmt.span,
-            }))
+            })])
         }
         Stmt::Assign(assign) => {
             let expr = lower_expr(&assign.expr, ctx, ret_ty)?;
@@ -306,28 +311,29 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
                 .get_local(&assign.name.item)
                 .ok_or_else(|| TypeError::new("unknown variable".to_string(), assign.name.span))?;
 
-            Ok(HirStmt::Assign(HirAssignStmt {
+            Ok(vec![HirStmt::Assign(HirAssignStmt {
                 local_id,
                 expr,
                 span: assign.span,
-            }))
+            })])
         }
+        Stmt::Defer(defer_stmt) => lower_defer_stmt(defer_stmt, ctx, ret_ty),
         Stmt::Return(ret) => {
             let expr = ret.expr.as_ref().map(|e| lower_expr(e, ctx, ret_ty)).transpose()?;
-            Ok(HirStmt::Return(HirReturnStmt {
+            Ok(vec![HirStmt::Return(HirReturnStmt {
                 expr,
                 span: ret.span,
-            }))
+            })])
         }
         Stmt::Break(break_stmt) => {
-            Ok(HirStmt::Break(HirBreakStmt {
+            Ok(vec![HirStmt::Break(HirBreakStmt {
                 span: break_stmt.span,
-            }))
+            })])
         }
         Stmt::Continue(continue_stmt) => {
-            Ok(HirStmt::Continue(HirContinueStmt {
+            Ok(vec![HirStmt::Continue(HirContinueStmt {
                 span: continue_stmt.span,
-            }))
+            })])
         }
         Stmt::If(if_stmt) => {
             let cond = lower_expr(&if_stmt.cond, ctx, ret_ty)?;
@@ -338,22 +344,22 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
                 .map(|b| lower_block(b, ctx, ret_ty))
                 .transpose()?;
 
-            Ok(HirStmt::If(HirIfStmt {
+            Ok(vec![HirStmt::If(HirIfStmt {
                 cond,
                 then_block,
                 else_block,
                 span: if_stmt.span,
-            }))
+            })])
         }
         Stmt::While(while_stmt) => {
             let cond = lower_expr(&while_stmt.cond, ctx, ret_ty)?;
             let body = lower_block(&while_stmt.body, ctx, ret_ty)?;
 
-            Ok(HirStmt::While(HirWhileStmt {
+            Ok(vec![HirStmt::While(HirWhileStmt {
                 cond,
                 body,
                 span: while_stmt.span,
-            }))
+            })])
         }
         Stmt::For(for_stmt) => {
             let start = lower_expr(&for_stmt.start, ctx, ret_ty)?;
@@ -367,40 +373,211 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
 
             let body = lower_block(&for_stmt.body, ctx, ret_ty)?;
 
-            Ok(HirStmt::For(HirForStmt {
+            Ok(vec![HirStmt::For(HirForStmt {
                 var_id,
                 start,
                 end,
                 body,
                 span: for_stmt.span,
-            }))
+            })])
         }
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
                 match lower_expr(&expr_stmt.expr, ctx, ret_ty) {
                     Ok(expr) => {
-                        return Ok(HirStmt::Expr(HirExprStmt {
+                        return Ok(vec![HirStmt::Expr(HirExprStmt {
                             expr,
                             span: expr_stmt.span,
-                        }));
+                        })]);
                     }
                     Err(_) => {
                         let expr = lower_match_stmt(match_expr, ctx, ret_ty)?;
-                        return Ok(HirStmt::Expr(HirExprStmt {
+                        return Ok(vec![HirStmt::Expr(HirExprStmt {
                             expr,
                             span: expr_stmt.span,
-                        }));
+                        })]);
                     }
                 }
             }
 
             let expr = lower_expr(&expr_stmt.expr, ctx, ret_ty)?;
-            Ok(HirStmt::Expr(HirExprStmt {
+            Ok(vec![HirStmt::Expr(HirExprStmt {
                 expr,
                 span: expr_stmt.span,
-            }))
+            })])
         }
     }
+}
+
+fn lower_defer_stmt(
+    defer_stmt: &DeferStmt,
+    ctx: &mut LoweringCtx,
+    ret_ty: &Ty,
+) -> Result<Vec<HirStmt>, TypeError> {
+    let mut stmts = Vec::new();
+    let expr_ty = type_of_ast_expr(&defer_stmt.expr, ctx, ret_ty)?;
+    let hir_ret_ty = hir_type_for(expr_ty, ctx, defer_stmt.expr.span())?;
+
+    let deferred = match &defer_stmt.expr {
+        Expr::Call(call) => {
+            let mut args = Vec::with_capacity(call.args.len());
+            for arg in &call.args {
+                args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
+            }
+            let path = call.callee.to_path().ok_or_else(|| {
+                TypeError::new(
+                    "call target must be a function path".to_string(),
+                    call.callee.span(),
+                )
+            })?;
+            lower_defer_call_from_path(&path, &call.type_args, args, hir_ret_ty, ctx)?
+        }
+        Expr::MethodCall(method_call) => {
+            fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
+                    Expr::FieldAccess(fa) => get_leftmost_segment(&fa.object),
+                    _ => None,
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+                ctx.local_types.contains_key(base_name)
+            } else {
+                true
+            };
+
+            let path_call = method_call.receiver.to_path().map(|mut path| {
+                path.segments.push(method_call.method.clone());
+                path.span = Span::new(path.span.start, method_call.method.span.end);
+                path
+            });
+
+            let is_function = if let Some(path) = &path_call {
+                let resolved = super::resolve_path(path, ctx.use_map);
+                let key = resolved.join(".");
+                ctx.functions.contains_key(&key)
+            } else {
+                false
+            };
+
+            if !base_is_local && is_function {
+                let path = path_call.expect("path exists for function call");
+                let mut args = Vec::with_capacity(method_call.args.len());
+                for arg in &method_call.args {
+                    args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
+                }
+                let deferred = lower_defer_call_from_path(
+                    &path,
+                    &method_call.type_args,
+                    args,
+                    hir_ret_ty,
+                    ctx,
+                )?;
+                ctx.defers.push(deferred);
+                return Ok(stmts);
+            }
+
+            let receiver = capture_defer_expr(&method_call.receiver, ctx, ret_ty, &mut stmts)?;
+            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let (method_module, type_name, _) = resolve_method_target(
+                &receiver_ty,
+                ctx.module_name,
+                ctx.structs,
+                ctx.enums,
+                method_call.receiver.span(),
+            )?;
+            let method_fn = format!("{type_name}__{}", method_call.method.item);
+            let key = format!("{method_module}.{method_fn}");
+            let symbol = format!("capable_{}", key.replace('.', "_"));
+
+            let mut args = Vec::with_capacity(method_call.args.len() + 1);
+            args.push(receiver);
+            for arg in &method_call.args {
+                args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
+            }
+
+            HirExpr::Call(HirCall {
+                callee: ResolvedCallee::Function {
+                    module: method_module,
+                    name: method_fn,
+                    symbol,
+                },
+                type_args: lower_call_type_args(&method_call.type_args, ctx)?,
+                args,
+                ret_ty: hir_ret_ty,
+                span: method_call.span,
+            })
+        }
+        _ => {
+            return Err(TypeError::new(
+                "defer expects a function or method call".to_string(),
+                defer_stmt.span,
+            ))
+        }
+    };
+
+    ctx.defers.push(deferred);
+    Ok(stmts)
+}
+
+fn lower_defer_call_from_path(
+    path: &Path,
+    type_args: &[Type],
+    args: Vec<HirExpr>,
+    ret_ty: HirType,
+    ctx: &mut LoweringCtx,
+) -> Result<HirExpr, TypeError> {
+
+    if path.segments.len() == 1 {
+        let name = &path.segments[0].item;
+        if name == "drop" || name == "panic" || name == "Ok" || name == "Err" {
+            return Err(TypeError::new(
+                "defer expects a function or method call".to_string(),
+                path.span,
+            ));
+        }
+    }
+
+    let mut resolved = super::resolve_path(&path, ctx.use_map);
+    if resolved.len() == 1 {
+        resolved.insert(0, ctx.module_name.to_string());
+    }
+    let key = resolved.join(".");
+    let module = resolved[..resolved.len() - 1].join(".");
+    let name = resolved.last().unwrap().clone();
+    let symbol = format!("capable_{}", key.replace('.', "_"));
+
+    Ok(HirExpr::Call(HirCall {
+        callee: ResolvedCallee::Function { module, name, symbol },
+        type_args: lower_call_type_args(type_args, ctx)?,
+        args,
+        ret_ty,
+        span: path.span,
+    }))
+}
+
+fn capture_defer_expr(
+    expr: &Expr,
+    ctx: &mut LoweringCtx,
+    ret_ty: &Ty,
+    stmts: &mut Vec<HirStmt>,
+) -> Result<HirExpr, TypeError> {
+    let hir_expr = lower_expr(expr, ctx, ret_ty)?;
+    let ty = hir_expr.ty().clone();
+    let local_name = format!("__defer_{}", ctx.local_counter);
+    let local_id = ctx.fresh_local(local_name, ty.ty.clone());
+    stmts.push(HirStmt::Let(HirLetStmt {
+        local_id,
+        ty: ty.clone(),
+        expr: hir_expr,
+        span: expr.span(),
+    }));
+    Ok(HirExpr::Local(HirLocal {
+        local_id,
+        ty,
+        span: expr.span(),
+    }))
 }
 
 /// Helper to get the type of an AST expression using the existing typechecker.

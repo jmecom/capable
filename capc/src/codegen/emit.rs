@@ -50,6 +50,7 @@ pub(super) fn emit_hir_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
+    defers: &[crate::hir::HirExpr],
 ) -> Result<Flow, CodegenError> {
     emit_hir_stmt_inner(
         builder,
@@ -61,6 +62,7 @@ pub(super) fn emit_hir_stmt(
         module,
         data_counter,
         loop_target,
+        defers,
     )
     .map_err(|err| err.with_span(stmt.span()))
 }
@@ -75,6 +77,7 @@ fn emit_hir_stmt_inner(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
+    defers: &[crate::hir::HirExpr],
 ) -> Result<Flow, CodegenError> {
     use crate::hir::HirStmt;
 
@@ -193,6 +196,16 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                 )?;
+                emit_defer_calls(
+                    builder,
+                    defers,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                )?;
                 match value {
                     ValueRepr::Unit => builder.ins().return_(&[]),
                     ValueRepr::Single(val) => builder.ins().return_(&[val]),
@@ -202,6 +215,16 @@ fn emit_hir_stmt_inner(
                     }
                 };
             } else {
+                emit_defer_calls(
+                    builder,
+                    defers,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                )?;
                 builder.ins().return_(&[]);
             }
             return Ok(Flow::Terminated);
@@ -236,6 +259,7 @@ fn emit_hir_stmt_inner(
                         module,
                         data_counter,
                         loop_target,
+                        defers,
                     )?;
                     if diverged {
                         return Ok(Flow::Terminated);
@@ -297,6 +321,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     loop_target,
+                    defers,
                 )?;
                 if flow == Flow::Terminated {
                     then_terminated = true;
@@ -324,6 +349,7 @@ fn emit_hir_stmt_inner(
                         module,
                         data_counter,
                         loop_target,
+                        defers,
                     )?;
                     if flow == Flow::Terminated {
                         else_terminated = true;
@@ -391,6 +417,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     body_loop_target,
+                    defers,
                 )?;
                 if flow == Flow::Terminated {
                     body_terminated = true;
@@ -495,6 +522,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     body_loop_target,
+                    defers,
                 )?;
                 if flow == Flow::Terminated {
                     body_terminated = true;
@@ -537,6 +565,31 @@ fn emit_hir_stmt_inner(
         }
     }
     Ok(Flow::Continues)
+}
+
+pub(super) fn emit_defer_calls(
+    builder: &mut FunctionBuilder,
+    defers: &[crate::hir::HirExpr],
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<(), CodegenError> {
+    for defer_expr in defers.iter().rev() {
+        let _ = emit_hir_expr(
+            builder,
+            defer_expr,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            module,
+            data_counter,
+        )?;
+    }
+    Ok(())
 }
 
 /// Emit a single HIR expression and return its lowered value representation.
@@ -1102,6 +1155,7 @@ fn emit_hir_expr_inner(
                     module,
                     data_counter,
                     None, // break/continue not supported in expression-context matches
+                    &[],
                 )?;
                 Ok(ValueRepr::Unit)
             } else {
@@ -2074,6 +2128,7 @@ fn emit_hir_match_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
+    defers: &[crate::hir::HirExpr],
 ) -> Result<bool, CodegenError> {
     // Emit the scrutinee expression
     let value = emit_hir_expr(
@@ -2157,6 +2212,7 @@ fn emit_hir_match_stmt(
                 module,
                 data_counter,
                 loop_target,
+                defers,
             )?;
             if flow == Flow::Terminated {
                 arm_terminated = true;
@@ -2277,6 +2333,7 @@ fn emit_hir_match_expr(
                 module,
                 data_counter,
                 None, // break/continue not allowed in value-producing match
+                &[],
             )?;
             if flow == Flow::Terminated {
                 prefix_terminated = true;

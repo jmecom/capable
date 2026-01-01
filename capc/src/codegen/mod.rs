@@ -28,7 +28,10 @@ mod abi_quirks;
 mod intrinsics;
 mod layout;
 
-use emit::{emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local, value_from_params};
+use emit::{
+    emit_defer_calls, emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local,
+    value_from_params,
+};
 use layout::{build_enum_index, build_struct_layout_index};
 
 #[derive(Debug, Error, Diagnostic)]
@@ -345,6 +348,7 @@ pub fn build_object(
                     &mut module,
                     &mut data_counter,
                     None, // no loop context at function top level
+                    &func.defers,
                 )?;
                 if flow == Flow::Terminated {
                     terminated = true;
@@ -353,6 +357,16 @@ pub fn build_object(
             }
 
             if info.sig.ret == AbiType::Unit && !terminated {
+                emit_defer_calls(
+                    &mut builder,
+                    &func.defers,
+                    &locals,
+                    &fn_map,
+                    &enum_index,
+                    &struct_layouts,
+                    &mut module,
+                    &mut data_counter,
+                )?;
                 builder.ins().return_(&[]);
             }
 

@@ -39,7 +39,7 @@ pub fn main() -> i32 {
 }
 ```
 
-- Statements: `let`, assignment, `if`, `while`, `return`, `match`.
+- Statements: `let`, assignment, `if`, `while`, `return`, `match`, `defer`.
 - Expressions: literals, calls, binary ops, unary ops, method calls.
 - Modules + imports: `module ...` and `use ...` (aliases by last path segment).
 - If a function returns `unit`, you can omit the `-> unit` annotation.
@@ -58,7 +58,25 @@ enum Color { Red, Green, Blue }
 
 Structs and enums are nominal types. Enums are currently unit variants only.
 
-## 4) Methods
+## 4) Defer
+
+`defer` schedules a function or method call to run when the current function
+returns (LIFO order). Arguments are evaluated at the defer site.
+
+```cap
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  c.println("start")
+  defer c.println("cleanup")
+  c.println("end")
+  return 0
+}
+```
+
+Current restrictions: `defer` is only allowed at the top level of a function
+body, and the deferred expression must be a call.
+
+## 5) Methods
 
 Methods are defined in `impl` blocks and lower to `Type__method` at compile time.
 
@@ -76,7 +94,7 @@ impl Pair {
 
 Method receivers can be `self` (move) or `self: &T` (borrow‑lite, read‑only).
 
-## 5) Results, match, and `?`
+## 6) Results, match, and `?`
 
 ```cap
 module results
@@ -123,7 +141,7 @@ match flag {
 }
 ```
 
-## 6) Capabilities and attenuation
+## 7) Capabilities and attenuation
 
 Capabilities live in `sys.*` and are declared with the `capability` keyword (capability types are opaque). You can only get them from `RootCap`.
 
@@ -171,7 +189,7 @@ Why this is rejected:
 
 So methods that return capabilities must take `self` by value, which consumes the old capability.
 
-## 7) Capability, opaque, copy, affine, linear
+## 8) Capability, opaque, copy, affine, linear
 
 `capability struct` is the explicit “this is an authority token” marker. Capability types are always opaque (no public fields, no user construction) and default to affine unless marked `copy` or `linear`. This exists so the capability surface is obvious in code and the compiler can enforce one‑way attenuation (methods returning capabilities must take `self` by value).
 
@@ -198,7 +216,7 @@ In the current stdlib:
 - `capability` (affine): `ReadFS`, `Filesystem`, `Dir`, `Stdin`
 - `linear capability`: `FileRead`
 
-## 8) Moves and use-after-move
+## 9) Moves and use-after-move
 
 ```cap
 module moves
@@ -215,7 +233,7 @@ pub fn main() -> i32 {
 
 Affine and linear values cannot be used after move. If you move in one branch, it's moved after the join.
 
-## 9) Linear must be consumed
+## 10) Linear must be consumed
 
 ```cap
 module linear
@@ -231,7 +249,7 @@ pub fn main() -> i32 {
 
 Linear values must be consumed along every path. You can consume them with a terminal method (like `FileRead.close()` or `read_to_string()`), or with `drop(x)` as a last resort.
 
-## 10) Borrow-lite: &T parameters
+## 11) Borrow-lite: &T parameters
 
 There is a small borrow feature for read-only access in function parameters and locals.
 
@@ -261,7 +279,7 @@ Rules:
 
 This avoids a full borrow checker while making non-consuming observers ergonomic.
 
-## 11) Safety boundary
+## 12) Safety boundary
 
 `package safe` is default. Raw pointers and extern calls require `package unsafe`.
 
@@ -272,7 +290,7 @@ module ffi
 extern fn some_ffi(x: i32) -> i32
 ```
 
-## 12) Raw pointers and unsafe
+## 13) Raw pointers and unsafe
 
 Raw pointers are available as `*T`, but **only** in `package unsafe`.
 
@@ -290,7 +308,7 @@ pub fn main(rc: RootCap) -> i32 {
 
 There is no borrow checker for pointers. Use them only inside `package unsafe`.
 
-## 13) What exists today (quick list)
+## 14) What exists today (quick list)
 
 - Methods, modules, enums, match, while, if
 - Opaque capability handles in `sys.*`

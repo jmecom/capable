@@ -50,6 +50,7 @@ pub struct HirFunction {
     pub params: Vec<HirParam>,
     pub ret_ty: HirType,
     pub body: HirBlock,
+    pub defers: Vec<HirExpr>,
 }
 
 #[derive(Debug, Clone)]

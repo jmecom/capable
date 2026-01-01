@@ -880,3 +880,20 @@ fn run_result_ok_err() {
     assert_eq!(code, 0);
     assert!(stdout.contains("ok_err ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_defer() {
+    let out_dir = make_out_dir("defer");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_defer.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("start\nend\nsecond\nfirst\n"),
+        "stdout was: {stdout:?}"
+    );
+}

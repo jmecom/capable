@@ -141,6 +141,7 @@ pub struct Block {
 pub enum Stmt {
     Let(LetStmt),
     Assign(AssignStmt),
+    Defer(DeferStmt),
     Return(ReturnStmt),
     Break(BreakStmt),
     Continue(ContinueStmt),
@@ -211,11 +212,18 @@ pub struct AssignStmt {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeferStmt {
+    pub expr: Expr,
+    pub span: Span,
+}
+
 impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Stmt::Let(s) => s.span,
             Stmt::Assign(s) => s.span,
+            Stmt::Defer(s) => s.span,
             Stmt::Return(s) => s.span,
             Stmt::Break(s) => s.span,
             Stmt::Continue(s) => s.span,
