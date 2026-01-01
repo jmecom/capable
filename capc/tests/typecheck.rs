@@ -131,6 +131,22 @@ fn typecheck_result_unwrap_or_mismatch_fails() {
 }
 
 #[test]
+fn typecheck_result_is_ok_is_err() {
+    let source = load_program("should_pass_result_is_ok_is_err.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_result_ok_err() {
+    let source = load_program("should_pass_result_ok_err.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_match_expr_ok() {
     let source = load_program("match_expr.cap");
     let module = parse_module(&source).expect("parse module");

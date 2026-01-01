@@ -206,6 +206,7 @@ pub enum HirExpr {
     Binary(HirBinary),
     Match(HirMatch),
     Try(HirTry),
+    Trap(HirTrap),
 }
 
 impl HirExpr {
@@ -222,6 +223,7 @@ impl HirExpr {
             HirExpr::Binary(e) => e.span,
             HirExpr::Match(e) => e.span,
             HirExpr::Try(e) => e.span,
+            HirExpr::Trap(e) => e.span,
         }
     }
 
@@ -238,6 +240,7 @@ impl HirExpr {
             HirExpr::Binary(e) => &e.ty,
             HirExpr::Match(e) => &e.result_ty,
             HirExpr::Try(e) => &e.ok_ty,
+            HirExpr::Trap(e) => &e.ty,
         }
     }
 }
@@ -357,6 +360,15 @@ pub struct HirTry {
     pub expr: Box<HirExpr>,
     pub ok_ty: HirType,
     pub ret_ty: HirType,
+    pub span: Span,
+}
+
+/// Unconditional trap/panic. Used for unreachable code paths like
+/// calling .ok() on an Err variant.
+#[derive(Debug, Clone)]
+pub struct HirTrap {
+    /// The type this expression would have produced (for type checking).
+    pub ty: HirType,
     pub span: Span,
 }
 

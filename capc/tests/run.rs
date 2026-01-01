@@ -852,3 +852,31 @@ fn run_generic_and_index() {
     assert_eq!(code, 0);
     assert!(stdout.contains("generic_and_index ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_result_is_ok_is_err() {
+    let out_dir = make_out_dir("result_is_ok_is_err");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_result_is_ok_is_err.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("is_ok_is_err ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_result_ok_err() {
+    let out_dir = make_out_dir("result_ok_err");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_result_ok_err.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("ok_err ok"), "stdout was: {stdout:?}");
+}

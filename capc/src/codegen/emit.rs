@@ -741,6 +741,13 @@ fn emit_hir_expr_inner(
 
             Ok(*ok)
         }
+        HirExpr::Trap(_trap) => {
+            builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
+            // Return a dummy value - the block is now filled so no more
+            // instructions can be added. The match handler will detect this
+            // and skip value storage.
+            Ok(ValueRepr::Unit)
+        }
         HirExpr::Call(call) => {
             // HIR calls are already fully resolved - no path resolution needed!
             let (module_path, func_name, _symbol) = match &call.callee {
@@ -1449,6 +1456,7 @@ fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
         crate::hir::HirExpr::Binary(binary) => &binary.ty,
         crate::hir::HirExpr::Match(m) => &m.result_ty,
         crate::hir::HirExpr::Try(t) => &t.ok_ty,
+        crate::hir::HirExpr::Trap(t) => &t.ty,
     };
     if crate::typeck::is_unsigned_type(&ty.ty) {
         unsigned
@@ -2271,17 +2279,22 @@ fn emit_hir_match_expr(
         }
 
         // Last statement should be an expression
-        let arm_value = match last {
-            HirStmt::Expr(expr_stmt) => emit_hir_expr(
-                builder,
-                &expr_stmt.expr,
-                &arm_locals,
-                fn_map,
-                enum_index,
-                struct_layouts,
-                module,
-                data_counter,
-            )?,
+        let (arm_value, arm_diverges) = match last {
+            HirStmt::Expr(expr_stmt) => {
+                // Check if this arm ends with a Trap - if so, it diverges
+                let diverges = matches!(&expr_stmt.expr, crate::hir::HirExpr::Trap(_));
+                let value = emit_hir_expr(
+                    builder,
+                    &expr_stmt.expr,
+                    &arm_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                )?;
+                (value, diverges)
+            }
             _ => {
                 return Err(CodegenError::Unsupported(
                     "match arm must end with expression".to_string(),
@@ -2289,55 +2302,58 @@ fn emit_hir_match_expr(
             }
         };
 
-        let values = match &arm_value {
-            ValueRepr::Single(val) => vec![*val],
-            ValueRepr::Pair(a, b) => vec![*a, *b],
-            ValueRepr::Unit => vec![],
-            ValueRepr::Result { .. } => {
-                return Err(CodegenError::Unsupported("match result value".to_string()))
-            }
-        };
+        // If the arm diverges (e.g., with a trap), skip value storage
+        if arm_diverges {
+            builder.seal_block(arm_block);
+        } else {
+            let values = match &arm_value {
+                ValueRepr::Single(val) => vec![*val],
+                ValueRepr::Pair(a, b) => vec![*a, *b],
+                ValueRepr::Unit => vec![],
+                ValueRepr::Result { .. } => {
+                    return Err(CodegenError::Unsupported("match result value".to_string()))
+                }
+            };
 
-        // Set up result shape and stack slots on first arm
-        if result_shape.is_none() {
-            let mut types = Vec::new();
-            let mut slots = Vec::new();
-            for val in &values {
-                let ty = builder.func.dfg.value_type(*val);
-                let size = ty.bytes() as u32;
-                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    size.max(1),
-                ));
-                types.push(ty);
-                slots.push(slot);
+            // Set up result shape and stack slots on first non-terminated arm
+            if result_shape.is_none() {
+                let mut types = Vec::new();
+                let mut slots = Vec::new();
+                for val in &values {
+                    let ty = builder.func.dfg.value_type(*val);
+                    let size = ty.bytes() as u32;
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        size.max(1),
+                    ));
+                    types.push(ty);
+                    slots.push(slot);
+                }
+                result_shape = Some(ResultShape {
+                    kind: match &arm_value {
+                        ValueRepr::Unit => ResultKind::Unit,
+                        ValueRepr::Single(_) => ResultKind::Single,
+                        ValueRepr::Pair(_, _) => ResultKind::Pair,
+                        _ => ResultKind::Single,
+                    },
+                    slots,
+                    types,
+                });
             }
-            result_shape = Some(ResultShape {
-                kind: match &arm_value {
-                    ValueRepr::Unit => ResultKind::Unit,
-                    ValueRepr::Single(_) => ResultKind::Single,
-                    ValueRepr::Pair(_, _) => ResultKind::Pair,
-                    _ => ResultKind::Single,
-                },
-                slots,
-                types,
-            });
-        }
 
-        // Store values to stack slots
-        let shape = result_shape
-            .as_ref()
-            .ok_or_else(|| CodegenError::Codegen("missing match result shape".to_string()))?;
-        if values.len() != shape.types.len() {
-            eprintln!("DEBUG: arm value mismatch - values: {:?}, expected: {:?}", values.len(), shape.types.len());
-            eprintln!("DEBUG: arm_value = {:?}", arm_value);
-            return Err(CodegenError::Unsupported("mismatched match arm".to_string()));
+            // Store values to stack slots
+            let shape = result_shape
+                .as_ref()
+                .ok_or_else(|| CodegenError::Codegen("missing match result shape".to_string()))?;
+            if values.len() != shape.types.len() {
+                return Err(CodegenError::Unsupported("mismatched match arm".to_string()));
+            }
+            for (idx, val) in values.iter().enumerate() {
+                builder.ins().stack_store(*val, shape.slots[idx], 0);
+            }
+            builder.ins().jump(merge_block, &[]);
+            builder.seal_block(arm_block);
         }
-        for (idx, val) in values.iter().enumerate() {
-            builder.ins().stack_store(*val, shape.slots[idx], 0);
-        }
-        builder.ins().jump(merge_block, &[]);
-        builder.seal_block(arm_block);
 
         if is_last {
             break;

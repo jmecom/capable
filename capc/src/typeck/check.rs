@@ -1355,6 +1355,50 @@ pub(super) fn check_expr(
                             }
                             return record_expr_type(recorder, expr, err_ty.clone());
                         }
+                        "is_ok" => {
+                            if !method_call.args.is_empty() {
+                                return Err(TypeError::new(
+                                    "is_ok takes no arguments".to_string(),
+                                    method_call.span,
+                                ));
+                            }
+                            return record_expr_type(
+                                recorder,
+                                expr,
+                                Ty::Builtin(BuiltinType::Bool),
+                            );
+                        }
+                        "is_err" => {
+                            if !method_call.args.is_empty() {
+                                return Err(TypeError::new(
+                                    "is_err takes no arguments".to_string(),
+                                    method_call.span,
+                                ));
+                            }
+                            return record_expr_type(
+                                recorder,
+                                expr,
+                                Ty::Builtin(BuiltinType::Bool),
+                            );
+                        }
+                        "ok" => {
+                            if !method_call.args.is_empty() {
+                                return Err(TypeError::new(
+                                    "ok takes no arguments".to_string(),
+                                    method_call.span,
+                                ));
+                            }
+                            return record_expr_type(recorder, expr, ok_ty.clone());
+                        }
+                        "err" => {
+                            if !method_call.args.is_empty() {
+                                return Err(TypeError::new(
+                                    "err takes no arguments".to_string(),
+                                    method_call.span,
+                                ));
+                            }
+                            return record_expr_type(recorder, expr, err_ty.clone());
+                        }
                         _ => {}
                     }
                 }

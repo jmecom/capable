@@ -638,6 +638,10 @@ impl MonoCtx {
                     span: t.span,
                 }))
             }
+            HirExpr::Trap(t) => Ok(HirExpr::Trap(HirTrap {
+                ty: self.mono_hir_type(module, &t.ty, subs)?,
+                span: t.span,
+            })),
             HirExpr::Index(idx) => {
                 let object = self.mono_expr(module, &idx.object, subs)?;
                 let index = self.mono_expr(module, &idx.index, subs)?;
