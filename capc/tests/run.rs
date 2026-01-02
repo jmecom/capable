@@ -374,6 +374,49 @@ fn run_option_basic() {
 }
 
 #[test]
+fn run_enum_payload_basic() {
+    let out_dir = make_out_dir("enum_payload_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/enum_payload_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("some"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("none"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_enum_payload_struct() {
+    let out_dir = make_out_dir("enum_payload_struct");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/enum_payload_struct.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("pair"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_enum_payload_string() {
+    let out_dir = make_out_dir("enum_payload_string");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/enum_payload_string.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("left"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_buffer_push_safe() {
     let out_dir = make_out_dir("buffer_push_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

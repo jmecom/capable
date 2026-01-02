@@ -2494,7 +2494,12 @@ fn check_match_exhaustive(
             };
             let mut seen = HashSet::new();
             for arm in arms {
-                if let Pattern::Path(path) = &arm.pattern {
+                let path = match &arm.pattern {
+                    Pattern::Path(path) => Some(path),
+                    Pattern::Call { path, .. } => Some(path),
+                    _ => None,
+                };
+                if let Some(path) = path {
                     if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
                         if same_type_constructor(&ty, match_ty) {
                             if let Some(seg) = path.segments.last() {
@@ -2807,9 +2812,6 @@ fn bind_pattern(
 ) -> Result<(), TypeError> {
     match pattern {
         Pattern::Call { path, binding, .. } => {
-            let Some(binding) = binding else {
-                return Ok(());
-            };
             let name = path
                 .segments
                 .iter()
@@ -2818,19 +2820,64 @@ fn bind_pattern(
                 .join(".");
             if let Ty::Path(ty_name, args) = match_ty {
                 if ty_name == "sys.result.Result" && args.len() == 2 {
-                    let ty = if name == "Ok" {
-                        args[0].clone()
-                    } else if name == "Err" {
-                        args[1].clone()
-                    } else {
-                        return Ok(());
-                    };
-                    scopes.insert_local(binding.item.clone(), ty);
+                    if let Some(binding) = binding {
+                        let ty = if name == "Ok" {
+                            args[0].clone()
+                        } else if name == "Err" {
+                            args[1].clone()
+                        } else {
+                            return Ok(());
+                        };
+                        scopes.insert_local(binding.item.clone(), ty);
+                    }
                     return Ok(());
                 }
             }
+            if let Some(Ty::Path(enum_name, _)) =
+                resolve_enum_variant(path, use_map, enum_map, module_name)
+            {
+                let Ty::Path(match_name, match_args) = match_ty else {
+                    return Err(TypeError::new(
+                        format!("pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"),
+                        path.span,
+                    ));
+                };
+                if match_name != &enum_name {
+                    return Err(TypeError::new(
+                        format!("pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"),
+                        path.span,
+                    ));
+                }
+                if let Some(binding) = binding {
+                    let Some(info) = enum_map.get(&enum_name) else {
+                        return Err(TypeError::new("unknown enum variant".to_string(), path.span));
+                    };
+                    let variant = path
+                        .segments
+                        .last()
+                        .map(|s| s.item.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let payload = info.payloads.get(&variant).cloned().unwrap_or(None);
+                    let Some(payload_ty) = payload else {
+                        return Err(TypeError::new(
+                            format!("variant `{name}` has no payload"),
+                            path.span,
+                        ));
+                    };
+                    if info.type_params.len() != match_args.len() {
+                        return Err(TypeError::new(
+                            "pattern type mismatch".to_string(),
+                            path.span,
+                        ));
+                    }
+                    let payload_ty =
+                        apply_enum_type_args(&payload_ty, &info.type_params, match_args);
+                    scopes.insert_local(binding.item.clone(), payload_ty);
+                }
+                return Ok(());
+            }
             Err(TypeError::new(
-                "pattern binding requires a Result match".to_string(),
+                "pattern binding requires an enum match".to_string(),
                 path.span,
             ))
         }

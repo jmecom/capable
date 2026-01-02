@@ -1,0 +1,36 @@
+module enum_payload_string
+use sys::system
+
+enum Either<T, E> {
+  Left(T),
+  Right(E)
+}
+
+fn pick(flag: bool) -> Either<string, i32> {
+  if (flag) {
+    return Either::Left("hello")
+  }
+  return Either::Right(4)
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  match pick(true) {
+    Either::Left(s) => {
+      c.assert(s.len() == 5)
+      c.println("left")
+    }
+    Either::Right(_) => {
+      c.assert(false)
+    }
+  }
+  match pick(false) {
+    Either::Left(_) => {
+      c.assert(false)
+    }
+    Either::Right(n) => {
+      c.assert(n == 4)
+    }
+  }
+  return 0
+}
