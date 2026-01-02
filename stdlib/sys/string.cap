@@ -5,14 +5,17 @@ use sys::buffer
 use sys::bytes
 use sys::vec
 
+pub copy struct string {
+  bytes: Slice<u8>
+}
+
 pub struct SplitOnce {
   left: string,
   right: string
 }
 
-/// Intrinsic; implemented by the runtime.
 pub fn from_bytes(bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {
-  return Err(buffer::AllocErr::Oom)
+  return Ok(string { bytes: bytes })
 }
 
 fn build_range(s: string, start: i32, end: i32) -> string {
@@ -104,19 +107,16 @@ fn upper_ascii_byte(b: u8) -> u8 {
 }
 
 impl string {
-  /// Intrinsic; implemented by the runtime.
   pub fn len(self) -> i32 {
-    return 0
+    return self.bytes.len()
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn byte_at(self, index: i32) -> u8 {
-    return 0u8
+    return self.bytes.at(index)
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn as_slice(self) -> Slice<u8> {
-    return ()
+    return self.bytes
   }
 
   /// bytes() is an alias for as_slice().
@@ -124,14 +124,64 @@ impl string {
     return self.as_slice()
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn split_whitespace(self) -> Vec<string> {
-    return ()
+    let out = buffer::vec_string_new()
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let i = 0
+    while (i < len) {
+      while (i < len && bytes.at(i).is_whitespace()) {
+        i = i + 1
+      }
+      if (i >= len) {
+        break
+      }
+      let start = i
+      while (i < len && !bytes.at(i).is_whitespace()) {
+        i = i + 1
+      }
+      let part = build_range(self, start, i)
+      match (out.push(part)) {
+        Ok(_) => { }
+        Err(_) => { panic() }
+      }
+    }
+    return out
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn lines(self) -> Vec<string> {
-    return ()
+    let out = buffer::vec_string_new()
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let start = 0
+    let i = 0
+    while (i < len) {
+      if (bytes.at(i) == '\n') {
+        let end = i
+        if (end > start && bytes.at(end - 1) == '\r') {
+          end = end - 1
+        }
+        let part = build_range(self, start, end)
+        match (out.push(part)) {
+          Ok(_) => { }
+          Err(_) => { panic() }
+        }
+        start = i + 1
+      }
+      i = i + 1
+    }
+    if (start < len) {
+      let end = len
+      if (end > start && bytes.at(end - 1) == '\r') {
+        end = end - 1
+      }
+      let part = build_range(self, start, end)
+      match (out.push(part)) {
+        Ok(_) => { }
+        Err(_) => { panic() }
+      }
+    }
+    return out
   }
 
   pub fn split(self, delim: u8) -> Vec<string> {

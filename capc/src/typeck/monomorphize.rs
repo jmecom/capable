@@ -859,7 +859,6 @@ impl MonoCtx {
                 BuiltinType::U32 => Ok(AbiType::U32),
                 BuiltinType::U8 => Ok(AbiType::U8),
                 BuiltinType::Bool => Ok(AbiType::Bool),
-                BuiltinType::String => Ok(AbiType::String),
                 BuiltinType::Unit => Ok(AbiType::Unit),
                 BuiltinType::Never => Ok(AbiType::Unit),
             },
@@ -1068,7 +1067,6 @@ fn mangle_type(ty: &Ty) -> String {
             crate::typeck::BuiltinType::U32 => "u32".to_string(),
             crate::typeck::BuiltinType::U8 => "u8".to_string(),
             crate::typeck::BuiltinType::Bool => "bool".to_string(),
-            crate::typeck::BuiltinType::String => "string".to_string(),
             crate::typeck::BuiltinType::Unit => "unit".to_string(),
             crate::typeck::BuiltinType::Never => "never".to_string(),
         },
@@ -1076,6 +1074,9 @@ fn mangle_type(ty: &Ty) -> String {
         Ty::Ref(inner) => format!("ref_{}", mangle_type(inner)),
         Ty::Param(name) => format!("param_{name}"),
         Ty::Path(name, args) => {
+            if name == "sys.string.string" || name == "string" {
+                return "string".to_string();
+            }
             let mut base = name.replace('.', "_");
             if !args.is_empty() {
                 let suffix = args

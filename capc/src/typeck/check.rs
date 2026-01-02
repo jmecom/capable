@@ -4,10 +4,11 @@ use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    build_type_params, is_affine_type, is_numeric_type, is_orderable_type, lower_type,
-    resolve_enum_variant, resolve_method_target, resolve_path, resolve_type_name, type_contains_ref,
-    type_kind, validate_type_args, BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes,
-    SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable, UseMap, UseMode,
+    build_type_params, is_affine_type, is_numeric_type, is_orderable_type, is_string_ty,
+    lower_type, resolve_enum_variant, resolve_method_target, resolve_path, resolve_type_name,
+    stdlib_string_ty, type_contains_ref, type_kind, validate_type_args, BuiltinType, EnumInfo,
+    FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable,
+    UseMap, UseMode,
 };
 
 /// Optional recorder for expression types during checking.
@@ -1040,7 +1041,7 @@ pub(super) fn check_expr(
         Expr::Literal(lit) => match &lit.value {
             Literal::Int(_) => Ok(Ty::Builtin(BuiltinType::I32)),
             Literal::U8(_) => Ok(Ty::Builtin(BuiltinType::U8)),
-            Literal::String(_) => Ok(Ty::Builtin(BuiltinType::String)),
+            Literal::String(_) => Ok(stdlib_string_ty(stdlib)),
             Literal::Bool(_) => Ok(Ty::Builtin(BuiltinType::Bool)),
             Literal::Unit => Ok(Ty::Builtin(BuiltinType::Unit)),
         },
@@ -1951,7 +1952,7 @@ pub(super) fn check_expr(
 
             // Determine element type based on object type
             match &object_ty {
-                Ty::Builtin(BuiltinType::String) => Ok(Ty::Builtin(BuiltinType::U8)),
+                ty if is_string_ty(ty) => Ok(Ty::Builtin(BuiltinType::U8)),
                 Ty::Path(name, args) if name == "Slice" || name == "sys.buffer.Slice" => {
                     if args.len() != 1 {
                         return Err(TypeError::new(
@@ -1987,7 +1988,7 @@ pub(super) fn check_expr(
                     Ok(Ty::Path(
                         "sys.result.Result".to_string(),
                         vec![
-                            Ty::Builtin(BuiltinType::String),
+                            stdlib_string_ty(stdlib),
                             Ty::Path("sys.vec.VecErr".to_string(), vec![]),
                         ],
                     ))

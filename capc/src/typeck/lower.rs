@@ -640,7 +640,6 @@ fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeE
             BuiltinType::U32 => Ok(AbiType::U32),
             BuiltinType::U8 => Ok(AbiType::U8),
             BuiltinType::Bool => Ok(AbiType::Bool),
-            BuiltinType::String => Ok(AbiType::String),
             BuiltinType::Unit => Ok(AbiType::Unit),
             BuiltinType::Never => Ok(AbiType::Unit),
         },
