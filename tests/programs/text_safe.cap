@@ -1,0 +1,32 @@
+package safe
+module text_safe
+use sys::system
+use sys::string
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let text = string::text_new_with(alloc)
+  match (text.push_byte('a')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+  }
+  match (text.push_byte('b')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+  }
+  match (text.push_byte('c')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+  }
+  let slice = text.as_slice()
+  let len = slice.len()
+  c.assert(len == 3)
+  if (len == 3) {
+    c.println("text ok")
+  } else {
+    c.println("text bad")
+  }
+  text.free(alloc)
+  return 0
+}

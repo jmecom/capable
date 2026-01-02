@@ -1,5 +1,6 @@
-/// UTF-8-ish string view backed by a byte slice.
-/// This is a lightweight view, not an owning string.
+/// UTF-8-ish string types.
+/// `string` is a lightweight view backed by a byte slice.
+/// `Text` is an owned, growable UTF-8 buffer backed by Vec<u8>.
 package safe
 module sys::string
 
@@ -10,6 +11,12 @@ use sys::vec
 /// String view backed by a byte slice handle.
 pub copy struct string {
   bytes: Slice<u8>
+}
+
+/// Owned UTF-8 text backed by a Vec<u8>.
+/// Text is a growable, heap-backed string builder.
+pub struct Text {
+  bytes: vec::Vec<u8>
 }
 
 /// Result payload for split_once.
@@ -29,26 +36,31 @@ pub fn from_bytes_copy(bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {
   return Ok(string { bytes: owned })
 }
 
+/// Allocate a new empty Text using the default allocator.
+pub fn text_new() -> Text {
+  return Text { bytes: buffer::vec_u8_new() }
+}
+
+/// Allocate a new empty Text using the provided allocator.
+pub fn text_new_with(alloc: buffer::Alloc) -> Text {
+  return Text { bytes: alloc.vec_u8_new() }
+}
+
 fn build_range(s: string, start: i32, end: i32) -> string {
   if (end <= start) {
     return ""
   }
-  let buf_result = buffer::new(0)
-  match (buf_result) {
-    Ok(buf) => {
-      let i = start
-      while (i < end) {
-        match (buf.push(s.byte_at(i))) {
-          Ok(_) => { }
-          Err(_) => { panic() }
-        }
-        i = i + 1
-      }
-      match (buf.to_string()) {
-        Ok(out) => { return out }
-        Err(_) => { panic() }
-      }
+  let buf = text_new()
+  let i = start
+  while (i < end) {
+    match (buf.push_byte(s.byte_at(i))) {
+      Ok(_) => { }
+      Err(_) => { panic() }
     }
+    i = i + 1
+  }
+  match (buf.to_string()) {
+    Ok(out) => { return out }
     Err(_) => { panic() }
   }
 }
@@ -114,6 +126,61 @@ fn upper_ascii_byte(b: u8) -> u8 {
     'y' => { return 'Y' }
     'z' => { return 'Z' }
     _ => { return b }
+  }
+}
+
+impl Text {
+  /// Current length in bytes.
+  pub fn len(self) -> i32 {
+    return self.bytes.len()
+  }
+
+  /// True if empty.
+  pub fn is_empty(self) -> bool {
+    return self.bytes.is_empty()
+  }
+
+  /// Append a single byte.
+  pub fn push_byte(self, b: u8) -> Result<unit, buffer::AllocErr> {
+    return self.bytes.push(b)
+  }
+
+  /// Append bytes from a slice.
+  pub fn extend_slice(self, data: Slice<u8>) -> Result<unit, buffer::AllocErr> {
+    return self.bytes.extend_slice(data)
+  }
+
+  /// Append bytes from a Vec<u8>.
+  pub fn extend_vec(self, data: vec::Vec<u8>) -> Result<unit, buffer::AllocErr> {
+    return self.extend_slice(data.as_slice())
+  }
+
+  /// Append bytes from a string view.
+  pub fn push_str(self, s: string) -> Result<unit, buffer::AllocErr> {
+    return self.extend_slice(s.as_slice())
+  }
+
+  /// Borrow as a byte slice view (no copy).
+  pub fn as_slice(self) -> Slice<u8> {
+    return self.bytes.as_slice()
+  }
+
+  /// Borrow as a string view (no copy).
+  /// The view is invalid after freeing this Text.
+  pub fn as_string(self) -> string {
+    return string { bytes: self.as_slice() }
+  }
+
+  /// Copy contents into a new string view.
+  pub fn to_string(self) -> Result<string, buffer::AllocErr> {
+    let owned = buffer::copy_slice(self.as_slice())?
+    return from_bytes(owned)
+  }
+
+  /// Free the underlying Vec<u8>.
+  pub fn free(self, alloc: buffer::Alloc) -> unit {
+    alloc.vec_u8_free(self.bytes)
+    return ()
   }
 }
 
@@ -539,24 +606,19 @@ impl string {
   pub fn to_lower_ascii(self) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
-    let buf_result = buffer::new(0)
-    match (buf_result) {
-      Ok(buf) => {
-        let i = 0
-        while (i < len) {
-          let b = bytes.at(i)
-          let lower = lower_ascii_byte(b)
-          match (buf.push(lower)) {
-            Ok(_) => { }
-            Err(_) => { panic() }
-          }
-          i = i + 1
-        }
-        match (buf.to_string()) {
-          Ok(out) => { return out }
-          Err(_) => { panic() }
-        }
+    let buf = text_new()
+    let i = 0
+    while (i < len) {
+      let b = bytes.at(i)
+      let lower = lower_ascii_byte(b)
+      match (buf.push_byte(lower)) {
+        Ok(_) => { }
+        Err(_) => { panic() }
       }
+      i = i + 1
+    }
+    match (buf.to_string()) {
+      Ok(out) => { return out }
       Err(_) => { panic() }
     }
   }
@@ -565,24 +627,19 @@ impl string {
   pub fn to_upper_ascii(self) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
-    let buf_result = buffer::new(0)
-    match (buf_result) {
-      Ok(buf) => {
-        let i = 0
-        while (i < len) {
-          let b = bytes.at(i)
-          let upper = upper_ascii_byte(b)
-          match (buf.push(upper)) {
-            Ok(_) => { }
-            Err(_) => { panic() }
-          }
-          i = i + 1
-        }
-        match (buf.to_string()) {
-          Ok(out) => { return out }
-          Err(_) => { panic() }
-        }
+    let buf = text_new()
+    let i = 0
+    while (i < len) {
+      let b = bytes.at(i)
+      let upper = upper_ascii_byte(b)
+      match (buf.push_byte(upper)) {
+        Ok(_) => { }
+        Err(_) => { panic() }
       }
+      i = i + 1
+    }
+    match (buf.to_string()) {
+      Ok(out) => { return out }
       Err(_) => { panic() }
     }
   }

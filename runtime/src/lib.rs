@@ -34,8 +34,6 @@ static TCP_CONNS: LazyLock<Mutex<HashMap<Handle, TcpStream>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static SLICES: LazyLock<Mutex<HashMap<Handle, SliceState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-static BUFFERS: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 static VECS_U8: LazyLock<Mutex<HashMap<Handle, Vec<u8>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static VECS_I32: LazyLock<Mutex<HashMap<Handle, Vec<i32>>>> =
@@ -1055,179 +1053,6 @@ pub extern "C" fn capable_rt_mut_slice_at(slice: Handle, index: i32) -> u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_buffer_new(
-    _alloc: Handle,
-    initial_len: i32,
-    out_ok: *mut Handle,
-    out_err: *mut i32,
-) -> u8 {
-    if initial_len < 0 {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
-            }
-        }
-        return 1;
-    }
-    let len = initial_len as usize;
-    let mut data = Vec::new();
-    if data.try_reserve(len).is_err() {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
-            }
-        }
-        return 1;
-    }
-    data.resize(len, 0);
-    let handle = new_handle();
-    with_table(&BUFFERS, "buffer table", |table| {
-        table.insert(handle, data);
-    });
-    unsafe {
-        if !out_ok.is_null() {
-            *out_ok = handle;
-        }
-    }
-    0
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_new_default(
-    initial_len: i32,
-    out_ok: *mut Handle,
-    out_err: *mut i32,
-) -> u8 {
-    capable_rt_buffer_new(0, initial_len, out_ok, out_err)
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_len(buffer: Handle) -> i32 {
-    with_table(&BUFFERS, "buffer table", |table| {
-        table
-            .get(&buffer)
-            .map(|data| data.len().min(i32::MAX as usize) as i32)
-            .unwrap_or(0)
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_push(
-    buffer: Handle,
-    value: u8,
-    out_err: *mut i32,
-) -> u8 {
-    with_table(&BUFFERS, "buffer table", |table| {
-        let Some(data) = table.get_mut(&buffer) else {
-            unsafe {
-                if !out_err.is_null() {
-                    *out_err = 0;
-                }
-            }
-            return 1;
-        };
-        if data.try_reserve(1).is_err() {
-            unsafe {
-                if !out_err.is_null() {
-                    *out_err = 0;
-                }
-            }
-            return 1;
-        }
-        data.push(value);
-        0
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_extend(
-    buffer: Handle,
-    slice: Handle,
-    out_err: *mut i32,
-) -> u8 {
-    let slice_state = with_table(&SLICES, "slice table", |table| table.get(&slice).copied());
-    let Some(slice_state) = slice_state else {
-        unsafe {
-            if !out_err.is_null() {
-                *out_err = 0;
-            }
-        }
-        return 1;
-    };
-    let bytes = unsafe { std::slice::from_raw_parts(slice_state.ptr as *const u8, slice_state.len) };
-    with_table(&BUFFERS, "buffer table", |table| {
-        let Some(data) = table.get_mut(&buffer) else {
-            unsafe {
-                if !out_err.is_null() {
-                    *out_err = 0;
-                }
-            }
-            return 1;
-        };
-        if data.try_reserve(bytes.len()).is_err() {
-            unsafe {
-                if !out_err.is_null() {
-                    *out_err = 0;
-                }
-            }
-            return 1;
-        }
-        data.extend_from_slice(bytes);
-        0
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_is_empty(buffer: Handle) -> u8 {
-    with_table(&BUFFERS, "buffer table", |table| {
-        u8::from(table.get(&buffer).map(|data| data.is_empty()).unwrap_or(true))
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_free(_alloc: Handle, buffer: Handle) {
-    with_table(&BUFFERS, "buffer table", |table| {
-        table.remove(&buffer);
-    });
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_as_slice(buffer: Handle) -> Handle {
-    let Some((ptr, len)) = with_table(&BUFFERS, "buffer table", |table| {
-        let Some(data) = table.get(&buffer) else {
-            return None;
-        };
-        let ptr = if data.is_empty() { 0 } else { data.as_ptr() as usize };
-        Some((ptr, data.len()))
-    }) else {
-        return 0;
-    };
-    let handle = new_handle();
-    with_table(&SLICES, "slice table", |table| {
-        table.insert(handle, SliceState { ptr, len });
-    });
-    handle
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_buffer_as_mut_slice(buffer: Handle) -> Handle {
-    let Some((ptr, len)) = with_table(&BUFFERS, "buffer table", |table| {
-        let Some(data) = table.get_mut(&buffer) else {
-            return None;
-        };
-        let ptr = if data.is_empty() { 0 } else { data.as_mut_ptr() as usize };
-        Some((ptr, data.len()))
-    }) else {
-        return 0;
-    };
-    let handle = new_handle();
-    with_table(&SLICES, "slice table", |table| {
-        table.insert(handle, SliceState { ptr, len });
-    });
-    handle
-}
-
-#[no_mangle]
 pub extern "C" fn capable_rt_slice_copy(
     slice: Handle,
     out_ok: *mut Handle,
@@ -1266,6 +1091,11 @@ pub extern "C" fn capable_rt_vec_u8_new(_alloc: Handle) -> Handle {
         table.insert(handle, Vec::new());
     });
     handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_new_default() -> Handle {
+    capable_rt_vec_u8_new(0)
 }
 
 #[no_mangle]

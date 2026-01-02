@@ -5,6 +5,7 @@ package safe
 module sys::vec
 
 use sys::buffer
+use sys::string
 
 /// Generic Vec marker type (owned, heap-backed container).
 pub copy opaque struct Vec<T>
@@ -188,13 +189,19 @@ impl Vec<u8> {
   pub fn as_slice(self) -> Slice<u8> {
     return ()
   }
+
+  /// Copy contents into a new string view.
+  pub fn to_string(self) -> Result<string, buffer::AllocErr> {
+    let owned = buffer::copy_slice(self.as_slice())?
+    return string::from_bytes(owned)
+  }
 }
 
 impl Vec<string> {
   /// Join elements with a separator.
   pub fn join(self, sep: string) -> Result<string, buffer::AllocErr> {
     let len = self.len()
-    let buf = buffer::new(0)?
+    let buf = string::text_new()
     let i = 0
     while (i < len) {
       let part = match (self.get(i)) {

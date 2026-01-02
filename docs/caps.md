@@ -81,7 +81,7 @@ impl Dir {
 }
 ```
 
-Not every opaque handle is a capability. Use `capability` for authority-bearing tokens (filesystem, console, stdin); use `opaque` for unforgeable data handles (buffers, slices, vectors).
+Not every opaque handle is a capability. Use `capability` for authority-bearing tokens (filesystem, console, stdin); use `opaque` for unforgeable data handles (slices, vectors).
 
 ### 3) Root authority comes from `RootCap`
 The entrypoint receives a root capability:

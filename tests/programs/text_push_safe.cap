@@ -1,0 +1,57 @@
+package safe
+module text_push_safe
+use sys::system
+use sys::string
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let text = string::text_new_with(alloc)
+  match text.push_byte('\x00') {
+    Ok(u) => { u }
+    Err(e) => {
+      c.assert(false)
+      text.free(alloc)
+      return 1
+    }
+  }
+  match text.push_byte('\x07') {
+    Ok(u) => { u }
+    Err(e) => {
+      c.assert(false)
+      text.free(alloc)
+      return 1
+    }
+  }
+  let v = alloc.vec_u8_new()
+  match v.push('\t') {
+    Ok(u) => { u }
+    Err(e) => {
+      c.assert(false)
+      alloc.vec_u8_free(v)
+      text.free(alloc)
+      return 1
+    }
+  }
+  let slice = v.as_slice()
+  match text.extend_slice(slice) {
+    Ok(u) => { u }
+    Err(e) => {
+      c.assert(false)
+      alloc.vec_u8_free(v)
+      text.free(alloc)
+      return 1
+    }
+  }
+  let len = text.len()
+  c.assert(len == 3)
+  c.assert(!text.is_empty())
+  if (len == 3) {
+    c.println("push ok")
+  } else {
+    c.println("push bad")
+  }
+  alloc.vec_u8_free(v)
+  text.free(alloc)
+  return 0
+}

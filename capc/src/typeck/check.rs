@@ -141,7 +141,7 @@ fn enforce_vec_method_constraints(
     let is_i32 = matches!(elem, Ty::Builtin(BuiltinType::I32));
     let is_string = is_string_ty(elem);
     match method {
-        "as_slice" | "slice" | "extend_slice" => {
+        "as_slice" | "slice" | "extend_slice" | "to_string" => {
             if !is_u8 {
                 return Err(TypeError::new(
                     format!("Vec<{elem:?}> does not support `{method}`"),

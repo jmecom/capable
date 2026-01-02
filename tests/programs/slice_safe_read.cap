@@ -5,22 +5,19 @@ use sys::system
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
-  match alloc.buffer_new(1) {
-    Ok(b) => {
-      let slice = b.as_slice()
-      let v = slice.at(0)
-      c.assert(v == '\x00')
-      if (v == '\x00') {
-        c.println("slice read ok")
-      } else {
-        c.println("slice read bad")
-      }
-      alloc.buffer_free(b)
-      return 0
-    }
-    Err(e) => {
-      c.println("buffer err")
-      return 1
-    }
+  let v = alloc.vec_u8_new()
+  match (v.push('\x00')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); alloc.vec_u8_free(v); return 1 }
   }
+  let slice = v.as_slice()
+  let b = slice.at(0)
+  c.assert(b == '\x00')
+  if (b == '\x00') {
+    c.println("slice read ok")
+  } else {
+    c.println("slice read bad")
+  }
+  alloc.vec_u8_free(v)
+  return 0
 }

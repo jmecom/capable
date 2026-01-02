@@ -1,5 +1,4 @@
-/// Buffer, slice, and allocation utilities.
-/// Buffer owns growable bytes (heap-backed, runtime-managed).
+/// Slice and allocation utilities.
 /// Slice/MutSlice are lightweight, non-owning views into existing bytes.
 package safe
 module sys::buffer
@@ -8,9 +7,6 @@ use sys::string
 
 /// Alloc capability for heap operations (heap-backed allocations).
 pub copy opaque struct Alloc
-/// Growable byte buffer (heap-backed, owned).
-/// Use Buffer when building strings/bytes incrementally.
-pub copy opaque struct Buffer
 /// Immutable slice view (non-owning).
 pub copy opaque struct Slice<T>
 /// Mutable slice view (non-owning).
@@ -22,17 +18,16 @@ pub enum AllocErr {
   Oom
 }
 
-/// Allocate a new buffer with an initial length of zero or more bytes.
-/// Intrinsic; implemented by the runtime.
-/// This uses the default allocator and returns a heap-backed Buffer.
-pub fn new(initial_len: i32) -> Result<Buffer, AllocErr> {
-  return Err(AllocErr::Oom)
-}
-
 /// Copy a slice into a new owned slice.
 /// Intrinsic; implemented by the runtime.
 pub fn copy_slice(data: Slice<u8>) -> Result<Slice<u8>, AllocErr> {
   return Err(AllocErr::Oom)
+}
+
+/// Create a new Vec<u8> without an Alloc handle.
+/// Intrinsic; implemented by the runtime.
+pub fn vec_u8_new() -> vec::Vec<u8> {
+  return ()
 }
 
 /// Create a new Vec<string> without an Alloc handle.
@@ -72,16 +67,6 @@ impl Alloc {
     return ()
   }
 
-  /// Allocate a new buffer with an Alloc handle (heap-backed).
-  pub fn buffer_new(self, initial_len: i32) -> Result<Buffer, AllocErr> {
-    return Err(AllocErr::Oom)
-  }
-
-  /// Free a buffer created with this Alloc.
-  pub fn buffer_free(self, b: Buffer) -> unit {
-    return ()
-  }
-
   /// Create a Vec<u8> with this Alloc (heap-backed).
   pub fn vec_u8_new(self) -> vec::Vec<u8> {
     return ()
@@ -110,65 +95,6 @@ impl Alloc {
   /// Free a Vec<string> created with this Alloc.
   pub fn vec_string_free(self, v: vec::Vec<string>) -> unit {
     return ()
-  }
-}
-
-impl Buffer {
-  /// Current length in bytes.
-  pub fn len(self) -> i32 {
-    return 0
-  }
-
-  /// Append a single byte.
-  pub fn push(self, x: u8) -> Result<unit, AllocErr> {
-    return Err(AllocErr::Oom)
-  }
-
-  /// Append bytes from a slice.
-  pub fn extend(self, data: Slice<u8>) -> Result<unit, AllocErr> {
-    return Err(AllocErr::Oom)
-  }
-
-  /// Append bytes from a slice (alias).
-  pub fn push_bytes(self, data: Slice<u8>) -> Result<unit, AllocErr> {
-    return self.extend(data)
-  }
-
-  /// Append bytes from a string view.
-  pub fn push_str(self, s: string) -> Result<unit, AllocErr> {
-    return self.extend(s.as_slice())
-  }
-
-  /// Append bytes from a Vec<u8>.
-  pub fn extend_vec(self, v: vec::Vec<u8>) -> Result<unit, AllocErr> {
-    return self.extend(v.as_slice())
-  }
-
-  /// Append a line and a trailing newline.
-  pub fn push_line(self, s: string) -> Result<unit, AllocErr> {
-    self.push_str(s)?
-    return self.push('\n')
-  }
-
-  /// Return true if empty.
-  pub fn is_empty(self) -> bool {
-    return false
-  }
-
-  /// Borrow the buffer as an immutable slice.
-  pub fn as_slice(self) -> Slice<u8> {
-    return ()
-  }
-
-  /// Borrow the buffer as a mutable slice.
-  pub fn as_mut_slice(self) -> MutSlice<u8> {
-    return ()
-  }
-
-  /// Copy buffer contents into an owned string.
-  pub fn to_string(self) -> Result<string, AllocErr> {
-    let owned = copy_slice(self.as_slice())?
-    return string::from_bytes(owned)
   }
 }
 

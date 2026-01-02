@@ -1,26 +1,25 @@
 package safe
-module buffer_to_string
+module text_to_string
 use sys::system
-use sys::buffer
+use sys::string
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let buf = match (buffer::new(0)) {
-    Ok(b) => { b }
-    Err(_) => { panic() }
-  }
-  match (buf.push('h')) {
+  let alloc = rc.mint_alloc_default()
+  let text = string::text_new_with(alloc)
+  match (text.push_byte('h')) {
     Ok(_) => { }
     Err(_) => { panic() }
   }
-  match (buf.push('i')) {
+  match (text.push_byte('i')) {
     Ok(_) => { }
     Err(_) => { panic() }
   }
-  let s = match (buf.to_string()) {
+  let s = match (text.to_string()) {
     Ok(v) => { v }
     Err(_) => { panic() }
   }
   c.println(s)
+  text.free(alloc)
   return 0
 }

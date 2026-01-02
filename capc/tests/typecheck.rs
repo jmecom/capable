@@ -206,7 +206,7 @@ fn typecheck_console_as_alloc_fails() {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     assert!(err
         .to_string()
-        .contains("unknown method `sys.console.Console__buffer_new`"));
+        .contains("unknown method `sys.console.Console__vec_u8_new`"));
 }
 
 #[test]
@@ -707,8 +707,8 @@ fn typecheck_slice_unsafe_ok() {
 }
 
 #[test]
-fn typecheck_buffer_safe_ok() {
-    let source = load_program("buffer_safe.cap");
+fn typecheck_text_safe_ok() {
+    let source = load_program("text_safe.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     type_check_program(&module, &stdlib, &[]).expect("typecheck module");
@@ -723,8 +723,8 @@ fn typecheck_slice_safe_read_ok() {
 }
 
 #[test]
-fn typecheck_buffer_push_safe_ok() {
-    let source = load_program("buffer_push_safe.cap");
+fn typecheck_text_push_safe_ok() {
+    let source = load_program("text_push_safe.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     type_check_program(&module, &stdlib, &[]).expect("typecheck module");

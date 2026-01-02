@@ -316,61 +316,61 @@ fn run_slice_unsafe() {
 }
 
 #[test]
-fn run_buffer_unsafe() {
-    let out_dir = make_out_dir("buffer_unsafe");
+fn run_text_unsafe() {
+    let out_dir = make_out_dir("text_unsafe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_unsafe.cap",
+        "tests/programs/text_unsafe.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("buffer ok"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("text ok"), "stdout was: {stdout:?}");
     assert!(stdout.contains("slice ok"), "stdout was: {stdout:?}");
 }
 
 #[test]
-fn run_buffer_safe() {
-    let out_dir = make_out_dir("buffer_safe");
+fn run_text_safe() {
+    let out_dir = make_out_dir("text_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_safe.cap",
+        "tests/programs/text_safe.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("buffer ok"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("text ok"), "stdout was: {stdout:?}");
 }
 
 #[test]
-fn run_buffer_to_string() {
-    let out_dir = make_out_dir("buffer_to_string");
+fn run_text_to_string() {
+    let out_dir = make_out_dir("text_to_string");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_to_string.cap",
+        "tests/programs/text_to_string.cap",
     ]);
     assert_eq!(code, 0);
     assert!(stdout.contains("hi"), "stdout was: {stdout:?}");
 }
 
 #[test]
-fn run_buffer_helpers_more() {
-    let out_dir = make_out_dir("buffer_helpers_more");
+fn run_text_helpers_more() {
+    let out_dir = make_out_dir("text_helpers_more");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_helpers_more.cap",
+        "tests/programs/text_helpers_more.cap",
     ]);
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("buffer helpers ok"),
+        stdout.contains("text helpers ok"),
         "stdout was: {stdout:?}"
     );
 }
@@ -434,14 +434,14 @@ fn run_enum_payload_string() {
 }
 
 #[test]
-fn run_buffer_push_safe() {
-    let out_dir = make_out_dir("buffer_push_safe");
+fn run_text_push_safe() {
+    let out_dir = make_out_dir("text_push_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_push_safe.cap",
+        "tests/programs/text_push_safe.cap",
     ]);
     assert_eq!(code, 0);
     assert!(stdout.contains("push ok"), "stdout was: {stdout:?}");
