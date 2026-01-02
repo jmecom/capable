@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use cranelift_codegen::ir::Type;
 
 use super::{
-    abi_quirks, CodegenError, EnumIndex, StructFieldLayout, StructLayout, StructLayoutIndex,
-    TypeLayout,
+    abi_quirks, CodegenError, EnumIndex, EnumLayout, StructFieldLayout, StructLayout,
+    StructLayoutIndex, TypeLayout,
 };
 use crate::abi::AbiType;
 
@@ -17,8 +17,12 @@ pub(super) fn build_enum_index(
     entry: &crate::hir::HirModule,
     user_modules: &[crate::hir::HirModule],
     stdlib: &[crate::hir::HirModule],
-) -> EnumIndex {
+    struct_layouts: &StructLayoutIndex,
+    ptr_ty: Type,
+) -> Result<EnumIndex, CodegenError> {
     let mut variants = HashMap::new();
+    let mut payloads = HashMap::new();
+    let mut layouts = HashMap::new();
     let entry_name = &entry.name;
     let modules = stdlib
         .iter()
@@ -28,17 +32,53 @@ pub(super) fn build_enum_index(
         let module_name = &module.name;
         for en in &module.enums {
             let mut map = HashMap::new();
+            let mut payload_map = HashMap::new();
+            let mut payload_size = 0u32;
+            let mut payload_align = 1u32;
+            let mut has_payload = false;
             for (idx, variant) in en.variants.iter().enumerate() {
                 map.insert(variant.name.clone(), idx as i32);
+                payload_map.insert(variant.name.clone(), variant.payload.clone());
+                if let Some(payload_ty) = &variant.payload {
+                    let layout = type_layout_from_index(payload_ty, struct_layouts, ptr_ty)?;
+                    payload_size = payload_size.max(layout.size);
+                    payload_align = payload_align.max(layout.align);
+                    has_payload = true;
+                }
             }
             let qualified = format!("{}.{}", module_name, en.name);
-            variants.insert(qualified, map.clone());
+            variants.insert(qualified.clone(), map.clone());
+            payloads.insert(qualified.clone(), payload_map.clone());
+            if has_payload {
+                let tag_size = 4u32;
+                let tag_align = 4u32;
+                let payload_offset = align_to(tag_size, payload_align);
+                let align = tag_align.max(payload_align);
+                let size = align_to(payload_offset.saturating_add(payload_size), align);
+                layouts.insert(
+                    qualified.clone(),
+                    EnumLayout {
+                        payload_offset,
+                        payload_size,
+                        size,
+                        align,
+                    },
+                );
+            }
             if module_name == entry_name {
                 variants.insert(en.name.clone(), map);
+                payloads.insert(en.name.clone(), payload_map.clone());
+                if let Some(layout) = layouts.get(&qualified).cloned() {
+                    layouts.insert(en.name.clone(), layout);
+                }
             }
         }
     }
-    EnumIndex { variants }
+    Ok(EnumIndex {
+        variants,
+        payloads,
+        layouts,
+    })
 }
 
 /// Compute struct layouts for all non-opaque structs.
@@ -262,6 +302,21 @@ pub(super) fn type_layout_for_abi(
             abi_quirks::result_lowering_layout_error().to_string(),
         )),
     }
+}
+
+/// Lookup a layout for a resolved HIR type from the struct layout index.
+pub(super) fn type_layout_from_index(
+    ty: &crate::hir::HirType,
+    struct_layouts: &StructLayoutIndex,
+    ptr_ty: Type,
+) -> Result<TypeLayout, CodegenError> {
+    if let Some(layout) = resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts) {
+        return Ok(TypeLayout {
+            size: layout.size,
+            align: layout.align,
+        });
+    }
+    type_layout_for_abi(&ty.abi, ptr_ty)
 }
 
 /// Resolve a struct layout by name (qualified or unqualified).

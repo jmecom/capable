@@ -37,6 +37,84 @@ fn record_expr_type(
     Ok(ty)
 }
 
+fn infer_enum_args(template: &Ty, actual: &Ty, inferred: &mut HashMap<String, Ty>) -> bool {
+    match template {
+        Ty::Param(name) => match inferred.get(name) {
+            Some(existing) => existing == actual,
+            None => {
+                inferred.insert(name.clone(), actual.clone());
+                true
+            }
+        },
+        Ty::Builtin(b) => matches!(actual, Ty::Builtin(other) if other == b),
+        Ty::Ptr(inner) => matches!(actual, Ty::Ptr(other) if infer_enum_args(inner, other, inferred)),
+        Ty::Ref(inner) => matches!(actual, Ty::Ref(other) if infer_enum_args(inner, other, inferred)),
+        Ty::Path(name, args) => match actual {
+            Ty::Path(other_name, other_args) if other_name == name && args.len() == other_args.len() => {
+                args.iter()
+                    .zip(other_args.iter())
+                    .all(|(a, b)| infer_enum_args(a, b, inferred))
+            }
+            _ => false,
+        },
+    }
+}
+
+fn resolve_enum_type_args(
+    enum_name: &str,
+    type_params: &[String],
+    inferred: &HashMap<String, Ty>,
+    ret_ty: &Ty,
+) -> Vec<Ty> {
+    if type_params.is_empty() {
+        return Vec::new();
+    }
+    let ret_args = match ret_ty {
+        Ty::Path(ret_name, args) if ret_name == enum_name && args.len() == type_params.len() => {
+            Some(args)
+        }
+        _ => None,
+    };
+    type_params
+        .iter()
+        .enumerate()
+        .map(|(idx, param)| {
+            if let Some(ty) = inferred.get(param) {
+                return ty.clone();
+            }
+            if let Some(args) = ret_args {
+                return args[idx].clone();
+            }
+            Ty::Builtin(BuiltinType::Unit)
+        })
+        .collect()
+}
+
+fn apply_enum_type_args(ty: &Ty, type_params: &[String], type_args: &[Ty]) -> Ty {
+    match ty {
+        Ty::Param(name) => {
+            if let Some(idx) = type_params.iter().position(|p| p == name) {
+                return type_args.get(idx).cloned().unwrap_or_else(|| ty.clone());
+            }
+            ty.clone()
+        }
+        Ty::Builtin(_) => ty.clone(),
+        Ty::Ptr(inner) => Ty::Ptr(Box::new(apply_enum_type_args(inner, type_params, type_args))),
+        Ty::Ref(inner) => Ty::Ref(Box::new(apply_enum_type_args(inner, type_params, type_args))),
+        Ty::Path(name, args) => Ty::Path(
+            name.clone(),
+            args.iter()
+                .map(|arg| apply_enum_type_args(arg, type_params, type_args))
+                .collect(),
+        ),
+    }
+}
+
+fn enum_payload_matches(payload: &Ty, arg_ty: &Ty, type_params: &[String], type_args: &[Ty]) -> bool {
+    let expected = apply_enum_type_args(payload, type_params, type_args);
+    &expected == arg_ty
+}
+
 /// Safe packages cannot mention externs or raw pointer types anywhere.
 pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
     if module.package != PackageSafety::Safe {
@@ -1062,8 +1140,29 @@ pub(super) fn check_expr(
                     return record_expr_type(recorder, expr, ty);
                 }
             }
-            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
-                return record_expr_type(recorder, expr, ty);
+            if let Some(Ty::Path(enum_name, _)) =
+                resolve_enum_variant(path, use_map, enum_map, module_name)
+            {
+                if let Some(info) = enum_map.get(&enum_name) {
+                    let ty = if info.type_params.is_empty() {
+                        Ty::Path(enum_name, Vec::new())
+                    } else if let Ty::Path(ret_name, ret_args) = ret_ty {
+                        if ret_name == &enum_name && ret_args.len() == info.type_params.len() {
+                            Ty::Path(enum_name, ret_args.clone())
+                        } else {
+                            Ty::Path(
+                                enum_name,
+                                vec![Ty::Builtin(BuiltinType::Unit); info.type_params.len()],
+                            )
+                        }
+                    } else {
+                        Ty::Path(
+                            enum_name,
+                            vec![Ty::Builtin(BuiltinType::Unit); info.type_params.len()],
+                        )
+                    };
+                    return record_expr_type(recorder, expr, ty);
+                }
             }
             Err(TypeError::new(
                 format!("unknown value `{path}`"),
@@ -1150,15 +1249,94 @@ pub(super) fn check_expr(
                         recorder,
                         expr,
                         Ty::Path(
-                        "sys.result.Result".to_string(),
-                        if name == "Ok" {
-                            vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
-                        } else {
-                            vec![Ty::Builtin(BuiltinType::Unit), arg_ty]
-                        },
+                            "sys.result.Result".to_string(),
+                            if name == "Ok" {
+                                vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
+                            } else {
+                                vec![Ty::Builtin(BuiltinType::Unit), arg_ty]
+                            },
                         ),
                     );
                 }
+            }
+
+            if let Some(Ty::Path(enum_name, _)) =
+                resolve_enum_variant(&path, use_map, enum_map, module_name)
+            {
+                let Some(info) = enum_map.get(&enum_name) else {
+                    return Err(TypeError::new(
+                        "unknown enum variant".to_string(),
+                        call.span,
+                    ));
+                };
+                let variant = path
+                    .segments
+                    .last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let payload = info.payloads.get(&variant).cloned().unwrap_or(None);
+
+                if payload.is_none() && !call.args.is_empty() {
+                    return Err(TypeError::new(
+                        format!("{variant} takes no arguments"),
+                        call.span,
+                    ));
+                }
+                if payload.is_some() && call.args.len() != 1 {
+                    return Err(TypeError::new(
+                        format!("{variant} takes exactly one argument"),
+                        call.span,
+                    ));
+                }
+
+                let mut inferred: HashMap<String, Ty> = HashMap::new();
+                let arg_ty = if let Some(payload_ty) = payload.clone() {
+                    let arg_ty = check_expr(
+                        &call.args[0],
+                        functions,
+                        scopes,
+                        UseMode::Move,
+                        recorder,
+                        use_map,
+                        struct_map,
+                        enum_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                        type_params,
+                    )?;
+                    if !infer_enum_args(&payload_ty, &arg_ty, &mut inferred) {
+                        return Err(TypeError::new(
+                            format!(
+                                "variant argument type mismatch: expected {payload_ty:?}, got {arg_ty:?}"
+                            ),
+                            call.args[0].span(),
+                        ));
+                    }
+                    Some(arg_ty)
+                } else {
+                    None
+                };
+
+                let type_args = resolve_enum_type_args(
+                    &enum_name,
+                    &info.type_params,
+                    &inferred,
+                    ret_ty,
+                );
+
+                if let Some(payload_ty) = payload {
+                    if let Some(arg_ty) = arg_ty {
+                        if !enum_payload_matches(&payload_ty, &arg_ty, &info.type_params, &type_args) {
+                            return Err(TypeError::new(
+                                "variant argument type mismatch".to_string(),
+                                call.args[0].span(),
+                            ));
+                        }
+                    }
+                }
+
+                return record_expr_type(recorder, expr, Ty::Path(enum_name, type_args));
             }
 
             let resolved = resolve_path(&path, use_map);

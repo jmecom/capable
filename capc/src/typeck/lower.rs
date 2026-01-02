@@ -770,6 +770,31 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 }
             }
 
+            if resolve_enum_variant(&path, ctx.use_map, ctx.enums, ctx.module_name).is_some() {
+                if call.args.len() > 1 {
+                    return Err(TypeError::new(
+                        "enum variant takes at most one argument".to_string(),
+                        call.span,
+                    ));
+                }
+                let variant_name = path
+                    .segments
+                    .last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| String::from("unknown"));
+                let payload = if call.args.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(lower_expr(&call.args[0], ctx, ret_ty)?))
+                };
+                return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                    enum_ty: hir_ty.clone(),
+                    variant_name,
+                    payload,
+                    span: call.span,
+                }));
+            }
+
             let mut resolved = super::resolve_path(&path, ctx.use_map);
 
             if resolved.len() == 1 {

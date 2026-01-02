@@ -1,0 +1,19 @@
+module option_basic
+use sys::system
+use sys::option
+
+fn get(flag: bool) -> option::Option<string> {
+  if (flag) {
+    return option::Option::Some("ok")
+  }
+  return option::Option::None
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  c.assert(get(true).is_some())
+  c.assert(get(false).is_none())
+  c.println(get(true).unwrap_or("bad"))
+  c.println(get(false).unwrap_or("default"))
+  return 0
+}

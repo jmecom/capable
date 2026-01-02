@@ -359,6 +359,21 @@ fn run_buffer_to_string() {
 }
 
 #[test]
+fn run_option_basic() {
+    let out_dir = make_out_dir("option_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/option_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("ok"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("default"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_buffer_push_safe() {
     let out_dir = make_out_dir("buffer_push_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

@@ -535,7 +535,7 @@ impl MonoCtx {
                             let (new_name, symbol, type_args) = self.mono_callee(
                                 module,
                                 &func,
-                                &args,
+                                &call.args,
                                 &call.type_args,
                                 subs,
                             )?;
@@ -556,7 +556,7 @@ impl MonoCtx {
                             let (new_name, symbol, type_args) = self.mono_callee(
                                 module,
                                 &func,
-                                &args,
+                                &call.args,
                                 &call.type_args,
                                 subs,
                             )?;
@@ -684,8 +684,8 @@ impl MonoCtx {
 
         let explicit_args: Vec<Ty> = explicit_type_args
             .iter()
-            .map(|arg| self.mono_ty(module, arg, subs))
-            .collect::<Result<_, _>>()?;
+            .map(|arg| substitute_ty(arg, subs))
+            .collect();
 
         let mut inferred = HashMap::new();
         if !explicit_args.is_empty() {
@@ -694,7 +694,8 @@ impl MonoCtx {
             }
         }
         for (param, arg) in func.params().iter().zip(args.iter()) {
-            match_type_params(&param.ty.ty, &arg.ty().ty, &mut inferred, DUMMY_SPAN)?;
+            let actual = substitute_ty(&arg.ty().ty, subs);
+            match_type_params(&param.ty.ty, &actual, &mut inferred, DUMMY_SPAN)?;
         }
         for name in func.type_params() {
             if !inferred.contains_key(name) {
@@ -884,7 +885,10 @@ impl MonoCtx {
                     });
                 }
                 if let Some(info) = self.enums.get(&qualified) {
-                    let _ = info;
+                    let has_payload = info.variants.iter().any(|variant| variant.payload.is_some());
+                    if has_payload {
+                        return Ok(AbiType::Ptr);
+                    }
                     return Ok(AbiType::I32);
                 }
                 Err(TypeError::new(
@@ -978,6 +982,19 @@ fn build_substitution(
         map.insert(param.clone(), arg.clone());
     }
     Ok(map)
+}
+
+fn substitute_ty(ty: &Ty, subs: &HashMap<String, Ty>) -> Ty {
+    match ty {
+        Ty::Param(name) => subs.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::Builtin(_) => ty.clone(),
+        Ty::Ptr(inner) => Ty::Ptr(Box::new(substitute_ty(inner, subs))),
+        Ty::Ref(inner) => Ty::Ref(Box::new(substitute_ty(inner, subs))),
+        Ty::Path(name, args) => Ty::Path(
+            name.clone(),
+            args.iter().map(|arg| substitute_ty(arg, subs)).collect(),
+        ),
+    }
 }
 
 fn match_type_params(
