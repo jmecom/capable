@@ -19,8 +19,8 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::hir::HirModule;
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
-    "i32", "i64", "u32", "u8", "bool", "string", "unit", "never",
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 7] = [
+    "i32", "i64", "u32", "u8", "bool", "unit", "never",
 ];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
@@ -88,7 +88,6 @@ pub enum BuiltinType {
     U32,
     U8,
     Bool,
-    String,
     Unit,
     Never,
 }
@@ -382,13 +381,6 @@ fn resolve_method_target(
     };
     let (receiver_name, receiver_args) = match base_ty {
         Ty::Path(name, args) => (name.as_str(), args),
-        Ty::Builtin(BuiltinType::String) => {
-            return Ok((
-                "sys.string".to_string(),
-                "string".to_string(),
-                Vec::new(),
-            ));
-        }
         Ty::Builtin(BuiltinType::U8) => {
             return Ok((
                 "sys.bytes".to_string(),
@@ -499,7 +491,6 @@ fn resolve_impl_target(
                 ));
             }
         }
-        Ty::Builtin(BuiltinType::String) => ("sys.string".to_string(), "string".to_string()),
         Ty::Builtin(BuiltinType::U8) => ("sys.bytes".to_string(), "u8".to_string()),
         _ => {
             return Err(TypeError::new(
@@ -713,7 +704,6 @@ fn lower_type(
                     "u32" => Some(BuiltinType::U32),
                     "u8" => Some(BuiltinType::U8),
                     "bool" => Some(BuiltinType::Bool),
-                    "string" => Some(BuiltinType::String),
                     "unit" => Some(BuiltinType::Unit),
                     "never" => Some(BuiltinType::Never),
                     _ => None,
@@ -739,7 +729,7 @@ fn lower_type(
                     let vec_name = match elem {
                         Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
                         Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
-                        Ty::Builtin(BuiltinType::String) => "sys.vec.VecString",
+                        _ if is_string_ty(elem) => "sys.vec.VecString",
                         _ => {
                             return Err(TypeError::new(
                                 "Vec only supports u8, i32, and string element types".to_string(),
@@ -763,7 +753,7 @@ fn lower_type(
                 let vec_name = match elem {
                     Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
                     Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
-                    Ty::Builtin(BuiltinType::String) => "sys.vec.VecString",
+                    _ if is_string_ty(elem) => "sys.vec.VecString",
                     _ => {
                         return Err(TypeError::new(
                             "Vec only supports u8, i32, and string element types".to_string(),
@@ -820,6 +810,19 @@ fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> Str
         }
     }
     resolved.join(".")
+}
+
+pub(super) fn is_string_ty(ty: &Ty) -> bool {
+    matches!(ty, Ty::Path(name, _) if name == "sys.string.string" || name == "string")
+}
+
+fn stdlib_string_ty(stdlib: &StdlibIndex) -> Ty {
+    let name = stdlib
+        .types
+        .get("string")
+        .cloned()
+        .unwrap_or_else(|| "sys.string.string".to_string());
+    Ty::Path(name, Vec::new())
 }
 
 fn type_contains_ref(ty: &Type) -> Option<Span> {

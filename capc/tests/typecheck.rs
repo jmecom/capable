@@ -256,7 +256,7 @@ fn typecheck_reserved_type_name_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("type name `string` is reserved"));
+    assert!(err.to_string().contains("type name `i32` is reserved"));
 }
 
 #[test]

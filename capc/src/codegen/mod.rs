@@ -159,7 +159,6 @@ struct TypeLayout {
 enum ValueRepr {
     Unit,
     Single(ir::Value),
-    Pair(ir::Value, ir::Value),
     Result {
         tag: ir::Value,
         ok: Box<ValueRepr>,
@@ -188,7 +187,6 @@ struct ResultShape {
 enum ResultKind {
     Unit,
     Single,
-    Pair,
 }
 
 /// Build and write the object file for a fully-checked HIR program.
@@ -314,11 +312,18 @@ pub fn build_object(
 
             if info.runtime_symbol.is_some() {
                 let args = builder.block_params(block).to_vec();
-                let value = emit_runtime_wrapper_call(&mut builder, &mut module, &info, args)?;
+                let value = emit_runtime_wrapper_call(
+                    &mut builder,
+                    &mut module,
+                    &info,
+                    args,
+                    &func.ret_ty,
+                    &struct_layouts,
+                )?;
                 match value {
                     ValueRepr::Unit => builder.ins().return_(&[]),
                     ValueRepr::Single(val) => builder.ins().return_(&[val]),
-                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                    ValueRepr::Result { .. } => {
                         let values = flatten_value(&value);
                         builder.ins().return_(&values)
                     }
@@ -488,10 +493,6 @@ fn sig_to_clif(sig: &FnSig, ptr_ty: Type, call_conv: CallConv) -> Signature {
 fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
         AbiType::Unit => {}
-        AbiType::String => {
-            signature.params.push(AbiParam::new(ptr_ty));
-            signature.params.push(AbiParam::new(ir::types::I64));
-        }
         AbiType::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
         AbiType::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
@@ -511,11 +512,6 @@ fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
                 signature.params.push(AbiParam::new(ptr_ty));
             }
         }
-        AbiType::ResultString => {
-            signature.params.push(AbiParam::new(ptr_ty));
-            signature.params.push(AbiParam::new(ptr_ty));
-            signature.params.push(AbiParam::new(ptr_ty));
-        }
     }
 }
 
@@ -529,19 +525,12 @@ fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
         AbiType::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
         AbiType::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
         AbiType::Ptr => signature.returns.push(AbiParam::new(ptr_ty)),
-        AbiType::String => {
-            signature.returns.push(AbiParam::new(ptr_ty));
-            signature.returns.push(AbiParam::new(ir::types::I64));
-        }
         AbiType::Result(ok, err) => {
             signature.returns.push(AbiParam::new(ir::types::I8));
             append_ty_returns(signature, ok, ptr_ty);
             append_ty_returns(signature, err, ptr_ty);
         }
         AbiType::ResultOut(_, _) => {
-            signature.returns.push(AbiParam::new(ir::types::I8));
-        }
-        AbiType::ResultString => {
             signature.returns.push(AbiParam::new(ir::types::I8));
         }
     }
