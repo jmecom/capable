@@ -23,6 +23,7 @@ SKIP_DIRS = {
 }
 
 INCLUDE_EXTS = {".cap"}
+INCLUDE_ROOTS = [Path("stdlib/sys")]
 
 
 def should_skip_dir(path: Path) -> bool:
@@ -40,6 +41,10 @@ def collect_files(root: Path) -> list[Path]:
         if should_skip_dir(rel_dir):
             dirnames[:] = []
             continue
+        if not any(str(rel_dir).replace("\\", "/").startswith(str(base)) for base in INCLUDE_ROOTS):
+            if rel_dir != Path("."):
+                dirnames[:] = []
+                continue
         dirnames[:] = [
             d for d in dirnames if not should_skip_dir(rel_dir / d)
         ]
@@ -220,6 +225,7 @@ def render_index(modules: list[dict]) -> str:
       background: var(--panel);
       padding: 1rem;
       overflow: auto;
+      max-height: calc(100vh - 52px);
     }}
     main {{
       padding: 1.5rem var(--page-pad) 3rem;
@@ -265,12 +271,9 @@ def render_index(modules: list[dict]) -> str:
     }}
     h2 {{
       margin: 2rem 0 0.75rem;
-      font-size: 1rem;
+      font-size: 1.25rem;
+      font-weight: 700;
       color: var(--ink);
-      display: inline-block;
-      padding: 0.1rem 0.8rem;
-      background: rgba(186, 204, 212, 0.9);
-      color: #10121c;
     }}
     .doc {{
       color: var(--ink);
