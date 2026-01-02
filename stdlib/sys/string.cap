@@ -429,6 +429,75 @@ impl string {
     return Err(())
   }
 
+  /// Return the index of a substring if present.
+  pub fn index_of(self, needle: string) -> Result<i32, unit> {
+    let hay = self.as_slice()
+    let hay_len = hay.len()
+    let needle_bytes = needle.as_slice()
+    let needle_len = needle_bytes.len()
+    if (needle_len == 0) {
+      return Ok(0)
+    }
+    if (needle_len > hay_len) {
+      return Err(())
+    }
+    let i = 0
+    while (i <= hay_len - needle_len) {
+      let j = 0
+      while (j < needle_len) {
+        if (hay.at(i + j) != needle_bytes.at(j)) {
+          break
+        }
+        j = j + 1
+      }
+      if (j == needle_len) {
+        return Ok(i)
+      }
+      i = i + 1
+    }
+    return Err(())
+  }
+
+  /// Return the last index of a substring if present.
+  pub fn last_index_of(self, needle: string) -> Result<i32, unit> {
+    let hay = self.as_slice()
+    let hay_len = hay.len()
+    let needle_bytes = needle.as_slice()
+    let needle_len = needle_bytes.len()
+    if (needle_len == 0) {
+      return Ok(hay_len)
+    }
+    if (needle_len > hay_len) {
+      return Err(())
+    }
+    let i = hay_len - needle_len
+    while (true) {
+      let j = 0
+      while (j < needle_len) {
+        if (hay.at(i + j) != needle_bytes.at(j)) {
+          break
+        }
+        j = j + 1
+      }
+      if (j == needle_len) {
+        return Ok(i)
+      }
+      if (i == 0) {
+        break
+      }
+      i = i - 1
+    }
+    return Err(())
+  }
+
+  /// True if the substring is present.
+  pub fn contains(self, needle: string) -> bool {
+    match (self.index_of(needle)) {
+      Ok(_) => { return true }
+      Err(_) => { return false }
+    }
+  }
+
   /// True if the byte is present.
   pub fn contains_byte(self, needle: u8) -> bool {
     match (self.index_of_byte(needle)) {

@@ -35,6 +35,8 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(!"a".is_empty())
   c.assert("abc".contains_byte('b'))
   c.assert(!"abc".contains_byte('x'))
+  c.assert("abc".contains("b"))
+  c.assert(!"abc".contains("x"))
   match ("abc".index_of_byte('c')) {
     Ok(i) => { c.assert(i == 2) }
     Err(_) => { c.assert(false) }
@@ -48,6 +50,22 @@ pub fn main(rc: RootCap) -> i32 {
     Err(_) => { c.assert(false) }
   }
   match ("abca".rfind_byte('a')) {
+    Ok(i) => { c.assert(i == 3) }
+    Err(_) => { c.assert(false) }
+  }
+  match ("ababa".index_of("ba")) {
+    Ok(i) => { c.assert(i == 1) }
+    Err(_) => { c.assert(false) }
+  }
+  match ("ababa".last_index_of("ba")) {
+    Ok(i) => { c.assert(i == 3) }
+    Err(_) => { c.assert(false) }
+  }
+  match ("abc".index_of("")) {
+    Ok(i) => { c.assert(i == 0) }
+    Err(_) => { c.assert(false) }
+  }
+  match ("abc".last_index_of("")) {
     Ok(i) => { c.assert(i == 3) }
     Err(_) => { c.assert(false) }
   }
