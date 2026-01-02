@@ -1,6 +1,8 @@
+/// Byte helpers and predicates.
 package safe
 module sys::bytes
 impl u8 {
+  /// True if the byte is ASCII whitespace.
   pub fn is_whitespace(self) -> bool {
     if (self == 32u8 || self == 9u8 || self == 10u8 || self == 13u8) {
       return true

@@ -1,3 +1,5 @@
+/// UTF-8-ish string view backed by a byte slice.
+/// This is a lightweight view, not an owning string.
 package safe
 module sys::string
 
@@ -5,17 +7,26 @@ use sys::buffer
 use sys::bytes
 use sys::vec
 
+/// String view backed by a byte slice handle.
 pub copy struct string {
   bytes: Slice<u8>
 }
 
+/// Result payload for split_once.
 pub struct SplitOnce {
   left: string,
   right: string
 }
 
+/// Wrap a slice as a string view (no copy).
 pub fn from_bytes(bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {
   return Ok(string { bytes: bytes })
+}
+
+/// Copy a slice into an owned string view.
+pub fn from_bytes_copy(bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {
+  let owned = buffer::copy_slice(bytes)?
+  return Ok(string { bytes: owned })
 }
 
 fn build_range(s: string, start: i32, end: i32) -> string {
@@ -107,14 +118,17 @@ fn upper_ascii_byte(b: u8) -> u8 {
 }
 
 impl string {
+  /// Return the length in bytes.
   pub fn len(self) -> i32 {
     return self.bytes.len()
   }
 
+  /// Index into the string by byte.
   pub fn byte_at(self, index: i32) -> u8 {
     return self.bytes.at(index)
   }
 
+  /// Borrow the underlying byte slice.
   pub fn as_slice(self) -> Slice<u8> {
     return self.bytes
   }
@@ -124,6 +138,7 @@ impl string {
     return self.as_slice()
   }
 
+  /// Split on ASCII whitespace.
   pub fn split_whitespace(self) -> Vec<string> {
     let out = buffer::vec_string_new()
     let bytes = self.as_slice()
@@ -209,6 +224,7 @@ impl string {
     return out
   }
 
+  /// Split once on the first matching delimiter.
   pub fn split_once(self, delim: u8) -> Result<SplitOnce, unit> {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -227,11 +243,13 @@ impl string {
     return Err(())
   }
 
+  /// Trim ASCII whitespace from both ends.
   pub fn trim(self) -> string {
     let start_trimmed = self.trim_start()
     return start_trimmed.trim_end()
   }
 
+  /// Trim ASCII whitespace from the start.
   pub fn trim_start(self) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -248,6 +266,7 @@ impl string {
     return build_range(self, i, len)
   }
 
+  /// Trim ASCII whitespace from the end.
   pub fn trim_end(self) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -270,6 +289,7 @@ impl string {
     return build_range(self, 0, i)
   }
 
+  /// Remove a leading prefix if present.
   pub fn trim_prefix(self, prefix: string) -> string {
     if (self.starts_with(prefix)) {
       return build_range(self, prefix.len(), self.len())
@@ -277,6 +297,7 @@ impl string {
     return self
   }
 
+  /// Remove a trailing suffix if present.
   pub fn trim_suffix(self, suffix: string) -> string {
     if (self.ends_with(suffix)) {
       return build_range(self, 0, self.len() - suffix.len())
@@ -289,6 +310,7 @@ impl string {
     return self.lines()
   }
 
+  /// True if the string starts with the prefix.
   pub fn starts_with(self, prefix: string) -> bool {
     let self_len = self.len()
     let prefix_len = prefix.len()
@@ -305,6 +327,7 @@ impl string {
     return true
   }
 
+  /// True if the string ends with the suffix.
   pub fn ends_with(self, suffix: string) -> bool {
     let self_len = self.len()
     let suffix_len = suffix.len()
@@ -322,6 +345,7 @@ impl string {
     return true
   }
 
+  /// True if the first byte matches.
   pub fn starts_with_byte(self, prefix: u8) -> bool {
     if (self.len() == 0) {
       return false
@@ -329,6 +353,7 @@ impl string {
     return self.byte_at(0) == prefix
   }
 
+  /// True if the last byte matches.
   pub fn ends_with_byte(self, suffix: u8) -> bool {
     let len = self.len()
     if (len == 0) {
@@ -337,6 +362,7 @@ impl string {
     return self.byte_at(len - 1) == suffix
   }
 
+  /// Byte-wise equality.
   pub fn eq(self, other: string) -> bool {
     let self_len = self.len()
     let other_len = other.len()
@@ -353,10 +379,12 @@ impl string {
     return true
   }
 
+  /// True if empty.
   pub fn is_empty(self) -> bool {
     return self.len() == 0
   }
 
+  /// Checked byte access.
   pub fn byte_at_checked(self, index: i32) -> Result<u8, unit> {
     if (index < 0) {
       return Err(())
@@ -367,6 +395,7 @@ impl string {
     return Ok(self.byte_at(index))
   }
 
+  /// Find the first matching byte.
   pub fn index_of_byte(self, needle: u8) -> Result<i32, unit> {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -380,6 +409,7 @@ impl string {
     return Err(())
   }
 
+  /// Find the last matching byte.
   pub fn last_index_of_byte(self, needle: u8) -> Result<i32, unit> {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -399,6 +429,7 @@ impl string {
     return Err(())
   }
 
+  /// True if the byte is present.
   pub fn contains_byte(self, needle: u8) -> bool {
     match (self.index_of_byte(needle)) {
       Ok(_) => { return true }
@@ -406,6 +437,7 @@ impl string {
     }
   }
 
+  /// Count occurrences of a byte.
   pub fn count_byte(self, needle: u8) -> i32 {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -420,6 +452,7 @@ impl string {
     return count
   }
 
+  /// True if all bytes are ASCII.
   pub fn is_ascii(self) -> bool {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -433,6 +466,7 @@ impl string {
     return true
   }
 
+  /// Lowercase ASCII letters.
   pub fn to_lower_ascii(self) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -458,6 +492,7 @@ impl string {
     }
   }
 
+  /// Uppercase ASCII letters.
   pub fn to_upper_ascii(self) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -483,14 +518,17 @@ impl string {
     }
   }
 
+  /// Trim ASCII whitespace (alias of trim()).
   pub fn trim_ascii(self) -> string {
     return self.trim()
   }
 
+  /// Alias for index_of_byte.
   pub fn find_byte(self, needle: u8) -> Result<i32, unit> {
     return self.index_of_byte(needle)
   }
 
+  /// Alias for last_index_of_byte.
   pub fn rfind_byte(self, needle: u8) -> Result<i32, unit> {
     return self.last_index_of_byte(needle)
   }

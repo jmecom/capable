@@ -334,6 +334,17 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
     };
+    let mem_slice_copy = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let mem_slice_copy_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
     let mem_buffer_free = FnSig {
         params: vec![AbiType::Handle, AbiType::Handle],
         ret: AbiType::Unit,
@@ -1211,6 +1222,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: mem_buffer_as_mut_slice,
             abi_sig: None,
             symbol: "capable_rt_buffer_as_mut_slice".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.copy_slice".to_string(),
+        FnInfo {
+            sig: mem_slice_copy,
+            abi_sig: Some(mem_slice_copy_abi),
+            symbol: "capable_rt_slice_copy".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

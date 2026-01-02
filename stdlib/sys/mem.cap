@@ -1,2 +1,3 @@
+/// Memory helpers (reserved for future use).
 package unsafe
 module sys::mem

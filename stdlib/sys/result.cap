@@ -1,12 +1,17 @@
+/// Result enum and helpers.
 package safe
 module sys::result
 
+/// Result for fallible operations.
 pub enum Result<T, E> {
+  /// Success value.
   Ok(T),
+  /// Error value.
   Err(E)
 }
 
 impl<T, E> Result<T, E> {
+  /// True if Ok.
   pub fn is_ok(self) -> bool {
     match self {
       Result::Ok(_) => { return true }
@@ -14,6 +19,7 @@ impl<T, E> Result<T, E> {
     }
   }
 
+  /// True if Err.
   pub fn is_err(self) -> bool {
     match self {
       Result::Ok(_) => { return false }
@@ -21,6 +27,7 @@ impl<T, E> Result<T, E> {
     }
   }
 
+  /// Return Ok value or a default.
   pub fn unwrap_or(self, default: T) -> T {
     match self {
       Result::Ok(val) => { return val }
@@ -28,6 +35,7 @@ impl<T, E> Result<T, E> {
     }
   }
 
+  /// Return Err value or a default.
   pub fn unwrap_err_or(self, default: E) -> E {
     match self {
       Result::Ok(_) => { return default }
@@ -35,6 +43,7 @@ impl<T, E> Result<T, E> {
     }
   }
 
+  /// Unwrap Ok or panic.
   pub fn ok(self) -> T {
     match self {
       Result::Ok(val) => { return val }
@@ -42,6 +51,7 @@ impl<T, E> Result<T, E> {
     }
   }
 
+  /// Unwrap Err or panic.
   pub fn err(self) -> E {
     match self {
       Result::Ok(_) => { panic() }

@@ -1,17 +1,23 @@
+/// Program argument access.
 package safe
 module sys::args
 
+/// Capability for reading argv.
 pub copy capability struct Args
 
+/// Argument lookup errors.
 pub enum ArgsErr {
+  /// Index was out of range.
   OutOfRange
 }
 
 impl Args {
+  /// Number of arguments.
   pub fn len(self) -> i32 {
     return 0
   }
 
+  /// Get an argument by index.
   pub fn at(self, index: i32) -> Result<string, ArgsErr> {
     return Err(ArgsErr::OutOfRange)
   }

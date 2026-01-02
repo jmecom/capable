@@ -132,8 +132,8 @@ fn with_table<T, R>(
     f(&mut table)
 }
 
-fn to_slice_handle(value: String) -> Handle {
-    let bytes = value.into_bytes().into_boxed_slice();
+fn to_slice_handle_bytes(bytes: Vec<u8>) -> Handle {
+    let bytes = bytes.into_boxed_slice();
     let len = bytes.len();
     let ptr = Box::into_raw(bytes) as *mut u8;
     let handle = new_handle();
@@ -147,6 +147,10 @@ fn to_slice_handle(value: String) -> Handle {
         );
     });
     handle
+}
+
+fn to_slice_handle(value: String) -> Handle {
+    to_slice_handle_bytes(value.into_bytes())
 }
 
 fn write_handle_result(
@@ -1221,6 +1225,38 @@ pub extern "C" fn capable_rt_buffer_as_mut_slice(buffer: Handle) -> Handle {
         table.insert(handle, SliceState { ptr, len });
     });
     handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_copy(
+    slice: Handle,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    let slice_state = with_table(&SLICES, "slice table", |table| table.get(&slice).copied());
+    let Some(slice_state) = slice_state else {
+        unsafe {
+            if !out_ok.is_null() {
+                *out_ok = 0;
+            }
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    };
+    let bytes =
+        unsafe { std::slice::from_raw_parts(slice_state.ptr as *const u8, slice_state.len) };
+    let handle = to_slice_handle_bytes(bytes.to_vec());
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = handle;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    0
 }
 
 #[no_mangle]

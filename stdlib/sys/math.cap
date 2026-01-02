@@ -1,14 +1,24 @@
+/// Wrapping arithmetic helpers.
 package safe
 module sys::math
 
+/// Wrapping add for i32.
 pub fn add_wrap_i32(a: i32, b: i32) -> i32 { return 0 }
+/// Wrapping subtract for i32.
 pub fn sub_wrap_i32(a: i32, b: i32) -> i32 { return 0 }
+/// Wrapping multiply for i32.
 pub fn mul_wrap_i32(a: i32, b: i32) -> i32 { return 0 }
 
+/// Wrapping add for u32.
 pub fn add_wrap_u32(a: u32, b: u32) -> u32 { return 0 }
+/// Wrapping subtract for u32.
 pub fn sub_wrap_u32(a: u32, b: u32) -> u32 { return 0 }
+/// Wrapping multiply for u32.
 pub fn mul_wrap_u32(a: u32, b: u32) -> u32 { return 0 }
 
+/// Wrapping add for u8.
 pub fn add_wrap_u8(a: u8, b: u8) -> u8 { return 0 }
+/// Wrapping subtract for u8.
 pub fn sub_wrap_u8(a: u8, b: u8) -> u8 { return 0 }
+/// Wrapping multiply for u8.
 pub fn mul_wrap_u8(a: u8, b: u8) -> u8 { return 0 }

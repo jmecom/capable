@@ -1,130 +1,172 @@
+/// Buffer, slice, and allocation utilities.
+/// Buffer owns growable bytes; Slice/MutSlice are lightweight views.
 package safe
 module sys::buffer
 use sys::vec
 use sys::string
 
+/// Alloc capability for heap operations.
 pub copy opaque struct Alloc
+/// Growable byte buffer.
 pub copy opaque struct Buffer
+/// Immutable slice view.
 pub copy opaque struct Slice<T>
+/// Mutable slice view.
 pub copy opaque struct MutSlice<T>
 
+/// Allocation errors.
 pub enum AllocErr {
+  /// Out of memory.
   Oom
 }
 
+/// Allocate a new buffer with an initial length of zero or more bytes.
 /// Intrinsic; implemented by the runtime.
 pub fn new(initial_len: i32) -> Result<Buffer, AllocErr> {
   return Err(AllocErr::Oom)
 }
 
+/// Copy a slice into a new owned slice.
+/// Intrinsic; implemented by the runtime.
+pub fn copy_slice(data: Slice<u8>) -> Result<Slice<u8>, AllocErr> {
+  return Err(AllocErr::Oom)
+}
+
+/// Create a new Vec<string> without an Alloc handle.
 /// Intrinsic; implemented by the runtime.
 pub fn vec_string_new() -> vec::Vec<string> {
   return ()
 }
 
 impl Alloc {
+  /// Allocate raw bytes.
   pub fn malloc(self, size: i32) -> *u8 {
     return ()
   }
 
+  /// Free raw bytes.
   pub fn free(self, ptr: *u8) -> unit {
     return ()
   }
 
+  /// Reinterpret a *u8 as *u32.
   pub fn cast_u8_to_u32(self, ptr: *u8) -> *u32 {
     return ()
   }
 
+  /// Reinterpret a *u32 as *u8.
   pub fn cast_u32_to_u8(self, ptr: *u32) -> *u8 {
     return ()
   }
 
+  /// Create an immutable slice from a raw pointer.
   pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice<u8> {
     return ()
   }
 
+  /// Create a mutable slice from a raw pointer.
   pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice<u8> {
     return ()
   }
 
+  /// Allocate a new buffer with an Alloc handle.
   pub fn buffer_new(self, initial_len: i32) -> Result<Buffer, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
+  /// Free a buffer created with this Alloc.
   pub fn buffer_free(self, b: Buffer) -> unit {
     return ()
   }
 
+  /// Create a Vec<u8> with this Alloc.
   pub fn vec_u8_new(self) -> vec::Vec<u8> {
     return ()
   }
 
+  /// Free a Vec<u8> created with this Alloc.
   pub fn vec_u8_free(self, v: vec::Vec<u8>) -> unit {
     return ()
   }
 
+  /// Create a Vec<i32> with this Alloc.
   pub fn vec_i32_new(self) -> vec::Vec<i32> {
     return ()
   }
 
+  /// Free a Vec<i32> created with this Alloc.
   pub fn vec_i32_free(self, v: vec::Vec<i32>) -> unit {
     return ()
   }
 
+  /// Create a Vec<string> with this Alloc.
   pub fn vec_string_new(self) -> vec::Vec<string> {
     return ()
   }
 
+  /// Free a Vec<string> created with this Alloc.
   pub fn vec_string_free(self, v: vec::Vec<string>) -> unit {
     return ()
   }
 }
 
 impl Buffer {
+  /// Current length in bytes.
   pub fn len(self) -> i32 {
     return 0
   }
 
+  /// Append a single byte.
   pub fn push(self, x: u8) -> Result<unit, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
+  /// Append bytes from a slice.
   pub fn extend(self, data: Slice<u8>) -> Result<unit, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
+  /// Append bytes from a string view.
   pub fn push_str(self, s: string) -> Result<unit, AllocErr> {
     return self.extend(s.as_slice())
   }
 
+  /// Return true if empty.
   pub fn is_empty(self) -> bool {
     return false
   }
 
+  /// Borrow the buffer as an immutable slice.
   pub fn as_slice(self) -> Slice<u8> {
     return ()
   }
 
+  /// Borrow the buffer as a mutable slice.
   pub fn as_mut_slice(self) -> MutSlice<u8> {
     return ()
   }
 
+  /// Copy buffer contents into an owned string.
   pub fn to_string(self) -> Result<string, AllocErr> {
-    return string::from_bytes(self.as_slice())
+    let owned = copy_slice(self.as_slice())?
+    return string::from_bytes(owned)
   }
 }
 
 impl Slice<u8> {
+  /// Length in bytes.
   pub fn len(self) -> i32 {
     return 0
   }
 
+  /// Index into the slice.
   pub fn at(self, i: i32) -> u8 {
     return 0
   }
 }
 
 impl MutSlice<u8> {
+  /// Index into the mutable slice.
   pub fn at(self, i: i32) -> u8 {
     return 0
   }
