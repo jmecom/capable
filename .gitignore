@@ -3,3 +3,5 @@ target/
 .hermit/
 vscode/node_modules/
 vscode/package-lock.json
+docs/code-browser/index.html
+docs/code-browser/files/
