@@ -16,7 +16,7 @@ fn arg_or_default(args: Args, index: i32, default: string) -> string {
 }
 
 fn strip_query(raw_path: string) -> string {
-  return raw_path.split(63u8)[0].unwrap_or("")
+  return raw_path.split('?')[0].unwrap_or("")
 }
 
 fn sanitize_segment(parts: Vec<string>, i: i32, acc: string, seg: string) -> Result<string, unit> {
@@ -47,7 +47,7 @@ fn sanitize_parts(parts: Vec<string>, i: i32, acc: string) -> Result<string, uni
 }
 
 fn sanitize_path(raw_path: string) -> Result<string, unit> {
-  let result = sanitize_parts(raw_path.split(47u8), 0, "")
+  let result = sanitize_parts(raw_path.split('/'), 0, "")
   match (result) {
     Ok(path) => {
       if (path.len() == 0) {
@@ -61,12 +61,12 @@ fn sanitize_path(raw_path: string) -> Result<string, unit> {
 
 fn parse_request_line(line: string) -> Result<string, unit> {
   let trimmed = line.trim()
-  match (trimmed.split_once(32u8)) {
+  match (trimmed.split_once(' ')) {
     Ok(parts) => {
       if (parts.left != "GET") {
         return Err(())
       }
-      match (parts.right.split_once(32u8)) {
+      match (parts.right.split_once(' ')) {
         Ok(rest) => { return sanitize_path(strip_query(rest.left)) }
         Err(_) => { return Err(()) }
       }

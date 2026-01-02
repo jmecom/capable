@@ -7,7 +7,7 @@ pub fn main(rc: RootCap) -> i32 {
   let alloc = rc.mint_alloc_default()
   match alloc.buffer_new(1) {
     Ok(b) => {
-      let ok = match b.push(42u8) {
+      let ok = match b.push('*') {
         Ok(unit_val) => { 1 }
         Err(e) => { 0 }
       }

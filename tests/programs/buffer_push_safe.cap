@@ -7,7 +7,7 @@ pub fn main(rc: RootCap) -> i32 {
   let alloc = rc.mint_alloc_default()
   match alloc.buffer_new(1) {
     Ok(b) => {
-      match b.push(7u8) {
+      match b.push('\x07') {
         Ok(u) => { u }
         Err(e) => {
           c.println("push err")
@@ -16,7 +16,7 @@ pub fn main(rc: RootCap) -> i32 {
         }
       }
       let v = alloc.vec_u8_new()
-      match v.push(9u8) {
+      match v.push('\t') {
         Ok(u) => { u }
         Err(e) => {
           c.println("vec err")

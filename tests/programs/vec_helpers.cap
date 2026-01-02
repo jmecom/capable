@@ -7,15 +7,15 @@ pub fn main(rc: RootCap) -> i32 {
   let alloc = rc.mint_alloc_default()
   let v = alloc.vec_u8_new()
   let extra = alloc.vec_u8_new()
-  match v.push(65u8) {
+  match v.push('A') {
     Ok(x) => {}
     Err(e) => { c.println("vec bad"); return 1 }
   }
-  match v.push(66u8) {
+  match v.push('B') {
     Ok(x) => {}
     Err(e) => { c.println("vec bad"); return 1 }
   }
-  match extra.push(67u8) {
+  match extra.push('C') {
     Ok(x) => {}
     Err(e) => { c.println("vec bad"); return 1 }
   }
@@ -25,15 +25,15 @@ pub fn main(rc: RootCap) -> i32 {
   }
   let len = v.len()
   let b = v.get(1)
-  let filtered = v.filter(66u8)
-  let mapped = v.map_add(1u8)
+  let filtered = v.filter('B')
+  let mapped = v.map_add('\x01')
   let slice = v.slice(1, 2)
   match (b) {
     Ok(x) => {
-      c.assert(len == 3 && x == 66u8)
+      c.assert(len == 3 && x == 'B')
       c.assert(filtered.len() == 1)
       match (mapped.get(0)) {
-        Ok(v0) => { c.assert(v0 == 66u8) }
+        Ok(v0) => { c.assert(v0 == 'B') }
         Err(e) => { c.println("vec bad"); return 1 }
       }
       match (slice) {

@@ -22,7 +22,7 @@ fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, VecErr> {
     return Ok(())
   }
 
-  let parts = line.split(61u8)
+  let parts = line.split('=')
   if (parts.len() == 2) {
     let key = parts[0]?
     let val = parts[1]?

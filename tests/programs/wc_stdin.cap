@@ -17,7 +17,7 @@ pub fn main(rc: RootCap) -> i32 {
       let lines: i32 = 0
       while (i < bytes) {
         let b = buf.at(i)
-        if (b == 10u8) {
+        if (b == '\n') {
           lines = lines + 1
         }
         i = i + 1
