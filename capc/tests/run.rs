@@ -345,6 +345,20 @@ fn run_buffer_safe() {
 }
 
 #[test]
+fn run_buffer_to_string() {
+    let out_dir = make_out_dir("buffer_to_string");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/buffer_to_string.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("hi"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_buffer_push_safe() {
     let out_dir = make_out_dir("buffer_push_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

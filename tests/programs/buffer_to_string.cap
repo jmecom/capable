@@ -1,0 +1,26 @@
+package safe
+module buffer_to_string
+use sys::system
+use sys::buffer
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let buf = match (buffer::new(0)) {
+    Ok(b) => { b }
+    Err(_) => { panic() }
+  }
+  match (buf.push('h')) {
+    Ok(_) => { }
+    Err(_) => { panic() }
+  }
+  match (buf.push('i')) {
+    Ok(_) => { }
+    Err(_) => { panic() }
+  }
+  let s = match (buf.to_string()) {
+    Ok(v) => { v }
+    Err(_) => { panic() }
+  }
+  c.println(s)
+  return 0
+}
