@@ -1,0 +1,22 @@
+module for_nested
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Nested for loops: count total iterations
+  let count = 0
+  for i in 0..3 {
+    for j in 0..4 {
+      count = count + 1
+    }
+  }
+
+  // Should be 3 * 4 = 12
+  if count == 12 {
+    c.println("for_nested ok")
+  }
+
+  return 0
+}

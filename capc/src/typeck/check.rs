@@ -4,10 +4,11 @@ use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    build_type_params, is_affine_type, is_numeric_type, is_orderable_type, lower_type,
-    resolve_enum_variant, resolve_method_target, resolve_path, resolve_type_name, type_contains_ref,
-    type_kind, validate_type_args, BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes,
-    SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable, UseMap, UseMode,
+    build_type_params, is_affine_type, is_numeric_type, is_orderable_type, is_string_ty,
+    lower_type, resolve_enum_variant, resolve_method_target, resolve_path, resolve_type_name,
+    stdlib_string_ty, type_contains_ref, type_kind, validate_type_args, BuiltinType, EnumInfo,
+    FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable,
+    UseMap, UseMode,
 };
 
 /// Optional recorder for expression types during checking.
@@ -148,6 +149,9 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
                 }
             }
             Stmt::Assign(_) => {}
+            Stmt::Defer(_) => {}
+            Stmt::Break(_) => {}
+            Stmt::Continue(_) => {}
             Stmt::If(if_stmt) => {
                 if let Some(span) = block_contains_ptr(&if_stmt.then_block) {
                     return Some(span);
@@ -162,6 +166,11 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
             }
             Stmt::While(while_stmt) => {
                 if let Some(span) = block_contains_ptr(&while_stmt.body) {
+                    return Some(span);
+                }
+            }
+            Stmt::For(for_stmt) => {
+                if let Some(span) = block_contains_ptr(&for_stmt.body) {
                     return Some(span);
                 }
             }
@@ -185,6 +194,7 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
 fn stmt_is_total(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return(ret_stmt) => ret_stmt.expr.is_some(),
+        Stmt::Defer(_) => false,
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
                 match_is_total(match_expr)
@@ -280,6 +290,7 @@ pub(super) fn check_function(
             stdlib,
             module_name,
             &type_params,
+            false, // not inside a loop at function top level
         )?;
     }
 
@@ -317,6 +328,7 @@ fn check_stmt(
     stdlib: &StdlibIndex,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<(), TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
@@ -376,7 +388,10 @@ fn check_stmt(
                 } else {
                     false
                 };
-                if annot_ty != expr_ty && !matches_ref {
+                if annot_ty != expr_ty
+                    && !matches_ref
+                    && !matches!(expr_ty, Ty::Builtin(BuiltinType::Never))
+                {
                     return Err(TypeError::new(
                         format!("type mismatch: expected {annot_ty:?}, found {expr_ty:?}"),
                         let_stmt.span,
@@ -444,7 +459,7 @@ fn check_stmt(
                 module_name,
                 type_params,
             )?;
-            if expr_ty != existing {
+            if expr_ty != existing && !matches!(expr_ty, Ty::Builtin(BuiltinType::Never)) {
                 return Err(TypeError::new(
                     format!(
                         "assignment type mismatch: expected {existing:?}, found {expr_ty:?}"
@@ -453,6 +468,31 @@ fn check_stmt(
                 ));
             }
             scopes.assign(&assign.name.item, expr_ty);
+        }
+        Stmt::Defer(defer_stmt) => {
+            match &defer_stmt.expr {
+                Expr::Call(_) | Expr::MethodCall(_) => {}
+                _ => {
+                    return Err(TypeError::new(
+                        "defer expects a function or method call".to_string(),
+                        defer_stmt.span,
+                    ))
+                }
+            }
+            let _ = check_expr(
+                &defer_stmt.expr,
+                functions,
+                scopes,
+                UseMode::Move,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
         }
         Stmt::Return(ret_stmt) => {
             let expr_ty = if let Some(expr) = &ret_stmt.expr {
@@ -474,12 +514,46 @@ fn check_stmt(
                 Ty::Builtin(BuiltinType::Unit)
             };
             if &expr_ty != ret_ty {
+                if matches!(expr_ty, Ty::Builtin(BuiltinType::Never)) {
+                    ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
+                    return Ok(());
+                }
                 return Err(TypeError::new(
                     format!("return type mismatch: expected {ret_ty:?}, found {expr_ty:?}"),
                     ret_stmt.span,
                 ));
             }
             ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
+        }
+        Stmt::Break(break_stmt) => {
+            if !in_loop {
+                return Err(TypeError::new(
+                    "break statement outside of loop".to_string(),
+                    break_stmt.span,
+                ));
+            }
+            let depth = scopes.current_loop_depth().ok_or_else(|| {
+                TypeError::new("break statement outside of loop".to_string(), break_stmt.span)
+            })?;
+            ensure_linear_scopes_consumed_from(scopes, depth, struct_map, enum_map, break_stmt.span)?;
+        }
+        Stmt::Continue(continue_stmt) => {
+            if !in_loop {
+                return Err(TypeError::new(
+                    "continue statement outside of loop".to_string(),
+                    continue_stmt.span,
+                ));
+            }
+            let depth = scopes.current_loop_depth().ok_or_else(|| {
+                TypeError::new("continue statement outside of loop".to_string(), continue_stmt.span)
+            })?;
+            ensure_linear_scopes_consumed_from(
+                scopes,
+                depth,
+                struct_map,
+                enum_map,
+                continue_stmt.span,
+            )?;
         }
         Stmt::If(if_stmt) => {
             let cond_ty = check_expr(
@@ -515,6 +589,7 @@ fn check_stmt(
                 stdlib,
                 module_name,
                 type_params,
+                in_loop,
             )?;
             let mut else_scopes = scopes.clone();
             if let Some(block) = &if_stmt.else_block {
@@ -530,6 +605,7 @@ fn check_stmt(
                     stdlib,
                     module_name,
                     type_params,
+                    in_loop,
                 )?;
             }
             merge_branch_states(
@@ -563,6 +639,7 @@ fn check_stmt(
                 ));
             }
             let mut body_scopes = scopes.clone();
+            body_scopes.push_loop();
             check_block(
                 &while_stmt.body,
                 ret_ty,
@@ -575,13 +652,96 @@ fn check_stmt(
                 stdlib,
                 module_name,
                 type_params,
+                true, // inside loop, break/continue allowed
             )?;
+            body_scopes.pop_loop();
             ensure_affine_states_match(
                 scopes,
                 &body_scopes,
                 struct_map,
                 enum_map,
                 while_stmt.span,
+            )?;
+        }
+        Stmt::For(for_stmt) => {
+            // Check start expression - must be i32
+            let start_ty = check_expr(
+                &for_stmt.start,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+            if start_ty != Ty::Builtin(BuiltinType::I32) {
+                return Err(TypeError::new(
+                    "for loop range start must be i32".to_string(),
+                    for_stmt.start.span(),
+                ));
+            }
+
+            // Check end expression - must be i32
+            let end_ty = check_expr(
+                &for_stmt.end,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+            if end_ty != Ty::Builtin(BuiltinType::I32) {
+                return Err(TypeError::new(
+                    "for loop range end must be i32".to_string(),
+                    for_stmt.end.span(),
+                ));
+            }
+
+            // Create body scope with loop variable bound
+            let mut body_scopes = scopes.clone();
+            body_scopes.push_scope();
+            body_scopes.insert_local(
+                for_stmt.var.item.clone(),
+                Ty::Builtin(BuiltinType::I32),
+            );
+
+            body_scopes.push_loop();
+            check_block(
+                &for_stmt.body,
+                ret_ty,
+                functions,
+                &mut body_scopes,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                module_name,
+                type_params,
+                true, // inside loop, break/continue allowed
+            )?;
+            body_scopes.pop_loop();
+
+            // Pop the loop variable scope before checking affine states
+            body_scopes.pop_scope();
+
+            ensure_affine_states_match(
+                scopes,
+                &body_scopes,
+                struct_map,
+                enum_map,
+                for_stmt.span,
             )?;
         }
         Stmt::Expr(expr_stmt) => {
@@ -599,6 +759,7 @@ fn check_stmt(
                     ret_ty,
                     module_name,
                     type_params,
+                    in_loop,
                 )?;
             } else {
                 check_expr(
@@ -635,6 +796,7 @@ fn check_block(
     stdlib: &StdlibIndex,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<(), TypeError> {
     scopes.push_scope();
     for stmt in &block.stmts {
@@ -650,6 +812,7 @@ fn check_block(
             stdlib,
             module_name,
             type_params,
+            in_loop,
         )?;
     }
     ensure_linear_scope_consumed(scopes, struct_map, enum_map, block.span)?;
@@ -738,6 +901,29 @@ fn ensure_linear_scope_consumed(
     span: Span,
 ) -> Result<(), TypeError> {
     if let Some(scope) = scopes.stack.last() {
+        for (name, info) in scope {
+            if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
+                && info.state != MoveState::Moved
+            {
+                return Err(TypeError::new(
+                    format!("linear value `{name}` not consumed"),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Enforce that linear locals in scopes starting at a depth are consumed.
+fn ensure_linear_scopes_consumed_from(
+    scopes: &Scopes,
+    depth: usize,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    for scope in scopes.stack.iter().skip(depth) {
         for (name, info) in scope {
             if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
                 && info.state != MoveState::Moved
@@ -855,7 +1041,7 @@ pub(super) fn check_expr(
         Expr::Literal(lit) => match &lit.value {
             Literal::Int(_) => Ok(Ty::Builtin(BuiltinType::I32)),
             Literal::U8(_) => Ok(Ty::Builtin(BuiltinType::U8)),
-            Literal::String(_) => Ok(Ty::Builtin(BuiltinType::String)),
+            Literal::String(_) => Ok(stdlib_string_ty(stdlib)),
             Literal::Bool(_) => Ok(Ty::Builtin(BuiltinType::Bool)),
             Literal::Unit => Ok(Ty::Builtin(BuiltinType::Unit)),
         },
@@ -917,6 +1103,16 @@ pub(super) fn check_expr(
                     )?;
                     return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
                 }
+                if name == "panic" {
+                    if !call.args.is_empty() {
+                        return Err(TypeError::new(
+                            "panic takes no arguments".to_string(),
+                            call.span,
+                        ));
+                    }
+                    // panic() is a diverging expression - it never returns.
+                    return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Never));
+                }
                 if name == "Ok" || name == "Err" {
                     if call.args.len() != 1 {
                         return Err(TypeError::new(
@@ -939,7 +1135,7 @@ pub(super) fn check_expr(
                         type_params,
                     )?;
                     if let Ty::Path(ty_name, args) = ret_ty {
-                        if ty_name == "Result" && args.len() == 2 {
+                        if ty_name == "sys.result.Result" && args.len() == 2 {
                             let expected = if name == "Ok" { &args[0] } else { &args[1] };
                             if &arg_ty != expected {
                                 return Err(TypeError::new(
@@ -954,7 +1150,7 @@ pub(super) fn check_expr(
                         recorder,
                         expr,
                         Ty::Path(
-                        "Result".to_string(),
+                        "sys.result.Result".to_string(),
                         if name == "Ok" {
                             vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
                         } else {
@@ -1040,7 +1236,10 @@ pub(super) fn check_expr(
                 } else {
                     false
                 };
-                if &arg_ty != expected_inner && !matches_ref {
+                if &arg_ty != expected_inner
+                    && !matches_ref
+                    && !matches!(arg_ty, Ty::Builtin(BuiltinType::Never))
+                {
                     return Err(TypeError::new(
                         format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
                         arg.span(),
@@ -1150,7 +1349,10 @@ pub(super) fn check_expr(
                     } else {
                         false
                     };
-                    if &arg_ty != expected_inner && !matches_ref {
+                    if &arg_ty != expected_inner
+                        && !matches_ref
+                        && !matches!(arg_ty, Ty::Builtin(BuiltinType::Never))
+                    {
                         return Err(TypeError::new(
                             format!(
                                 "argument type mismatch: expected {expected:?}, found {arg_ty:?}"
@@ -1176,81 +1378,11 @@ pub(super) fn check_expr(
                 module_name,
                 type_params,
             )?;
-            if let Ty::Path(name, args) = &receiver_ty {
-                if name == "Result" && args.len() == 2 {
-                    let ok_ty = &args[0];
-                    let err_ty = &args[1];
-                    match method_call.method.item.as_str() {
-                        "unwrap_or" => {
-                            if method_call.args.len() != 1 {
-                                return Err(TypeError::new(
-                                    "unwrap_or expects one argument".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            let arg_ty = check_expr(
-                                &method_call.args[0],
-                                functions,
-                                scopes,
-                                UseMode::Move,
-                                recorder,
-                                use_map,
-                                struct_map,
-                                enum_map,
-                                stdlib,
-                                ret_ty,
-                                module_name,
-                                type_params,
-                            )?;
-                            if &arg_ty != ok_ty {
-                                return Err(TypeError::new(
-                                    format!(
-                                        "unwrap_or type mismatch: expected {ok_ty:?}, found {arg_ty:?}"
-                                    ),
-                                    method_call.args[0].span(),
-                                ));
-                            }
-                            return record_expr_type(recorder, expr, ok_ty.clone());
-                        }
-                        "unwrap_err_or" => {
-                            if method_call.args.len() != 1 {
-                                return Err(TypeError::new(
-                                    "unwrap_err_or expects one argument".to_string(),
-                                    method_call.span,
-                                ));
-                            }
-                            let arg_ty = check_expr(
-                                &method_call.args[0],
-                                functions,
-                                scopes,
-                                UseMode::Move,
-                                recorder,
-                                use_map,
-                                struct_map,
-                                enum_map,
-                                stdlib,
-                                ret_ty,
-                                module_name,
-                                type_params,
-                            )?;
-                            if &arg_ty != err_ty {
-                                return Err(TypeError::new(
-                                    format!(
-                                        "unwrap_err_or type mismatch: expected {err_ty:?}, found {arg_ty:?}"
-                                    ),
-                                    method_call.args[0].span(),
-                                ));
-                            }
-                            return record_expr_type(recorder, expr, err_ty.clone());
-                        }
-                        _ => {}
-                    }
-                }
-            }
             let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
                 module_name,
                 struct_map,
+                enum_map,
                 method_call.receiver.span(),
             )?;
             let method_fn = format!("{type_name}__{}", method_call.method.item);
@@ -1429,7 +1561,10 @@ pub(super) fn check_expr(
                 } else {
                     false
                 };
-                if &arg_ty != expected_inner && !matches_ref {
+                if &arg_ty != expected_inner
+                    && !matches_ref
+                    && !matches!(arg_ty, Ty::Builtin(BuiltinType::Never))
+                {
                     return Err(TypeError::new(
                         format!("argument type mismatch: expected {expected:?}, found {arg_ty:?}"),
                         arg.span(),
@@ -1529,6 +1664,10 @@ pub(super) fn check_expr(
                         || left == Ty::Builtin(BuiltinType::I64))
                     {
                         Ok(left)
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
+                        Ok(Ty::Builtin(BuiltinType::Never))
                     } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
                         Err(TypeError::new(
                             "implicit numeric conversions are not allowed".to_string(),
@@ -1544,6 +1683,10 @@ pub(super) fn check_expr(
                 BinaryOp::Eq | BinaryOp::Neq => {
                     if left == right {
                         Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
+                        Ok(Ty::Builtin(BuiltinType::Bool))
                     } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
                         Err(TypeError::new(
                             "implicit numeric conversions are not allowed".to_string(),
@@ -1558,6 +1701,10 @@ pub(super) fn check_expr(
                 }
                 BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => {
                     if left == right && is_orderable_type(&left) {
+                        Ok(Ty::Builtin(BuiltinType::Bool))
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
                         Ok(Ty::Builtin(BuiltinType::Bool))
                     } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
                         Err(TypeError::new(
@@ -1598,6 +1745,7 @@ pub(super) fn check_expr(
             ret_ty,
             module_name,
             type_params,
+            false, // break/continue not allowed in value-producing match
         ),
         Expr::Try(try_expr) => {
             let inner_ty = check_expr(
@@ -1615,7 +1763,7 @@ pub(super) fn check_expr(
                 type_params,
             )?;
             let (ok_ty, err_ty) = match inner_ty {
-                Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
                     (args[0].clone(), args[1].clone())
                 }
                 _ => {
@@ -1627,7 +1775,7 @@ pub(super) fn check_expr(
             };
 
             let ret_err = match ret_ty {
-                Ty::Path(name, args) if name == "Result" && args.len() == 2 => &args[1],
+                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => &args[1],
                 _ => {
                     return Err(TypeError::new(
                         "the `?` operator can only be used in functions returning Result".to_string(),
@@ -1762,6 +1910,113 @@ pub(super) fn check_expr(
             }
             Ok(field_ty)
         }
+        Expr::Index(index_expr) => {
+            // Type check the object (must be string, Slice[T], or MutSlice[T])
+            let object_ty = check_expr(
+                &index_expr.object,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+
+            // Type check the index (must be i32)
+            let index_ty = check_expr(
+                &index_expr.index,
+                functions,
+                scopes,
+                UseMode::Read,
+                recorder,
+                use_map,
+                struct_map,
+                enum_map,
+                stdlib,
+                ret_ty,
+                module_name,
+                type_params,
+            )?;
+
+            if index_ty != Ty::Builtin(BuiltinType::I32) {
+                return Err(TypeError::new(
+                    format!("index must be i32, found {:?}", index_ty),
+                    index_expr.index.span(),
+                ));
+            }
+
+            // Determine element type based on object type
+            match &object_ty {
+                ty if is_string_ty(ty) => Ok(Ty::Builtin(BuiltinType::U8)),
+                Ty::Path(name, args) if name == "Slice" || name == "sys.buffer.Slice" => {
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
+                            "Slice requires exactly one type argument".to_string(),
+                            index_expr.span,
+                        ));
+                    }
+                    if args[0] != Ty::Builtin(BuiltinType::U8) {
+                        return Err(TypeError::new(
+                            "Slice indexing is only supported for Slice<u8>".to_string(),
+                            index_expr.span,
+                        ));
+                    }
+                    Ok(Ty::Builtin(BuiltinType::U8))
+                }
+                Ty::Path(name, args) if name == "MutSlice" || name == "sys.buffer.MutSlice" => {
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
+                            "MutSlice requires exactly one type argument".to_string(),
+                            index_expr.span,
+                        ));
+                    }
+                    if args[0] != Ty::Builtin(BuiltinType::U8) {
+                        return Err(TypeError::new(
+                            "MutSlice indexing is only supported for MutSlice<u8>".to_string(),
+                            index_expr.span,
+                        ));
+                    }
+                    Ok(Ty::Builtin(BuiltinType::U8))
+                }
+                // Vec types return Result<T, VecErr>
+                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString" => {
+                    Ok(Ty::Path(
+                        "sys.result.Result".to_string(),
+                        vec![
+                            stdlib_string_ty(stdlib),
+                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
+                        ],
+                    ))
+                }
+                Ty::Path(name, _) if name == "VecI32" || name == "sys.vec.VecI32" => {
+                    Ok(Ty::Path(
+                        "sys.result.Result".to_string(),
+                        vec![
+                            Ty::Builtin(BuiltinType::I32),
+                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
+                        ],
+                    ))
+                }
+                Ty::Path(name, _) if name == "VecU8" || name == "sys.vec.VecU8" => {
+                    Ok(Ty::Path(
+                        "sys.result.Result".to_string(),
+                        vec![
+                            Ty::Builtin(BuiltinType::U8),
+                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
+                        ],
+                    ))
+                }
+                _ => Err(TypeError::new(
+                    format!("cannot index into type {:?}; only string, Slice[T], MutSlice[T], and Vec types are indexable", object_ty),
+                    index_expr.span,
+                )),
+            }
+        }
     }?;
     recorder.record(expr, &ty);
     Ok(ty)
@@ -1781,6 +2036,7 @@ fn check_match_stmt(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
@@ -1813,6 +2069,7 @@ fn check_match_stmt(
             stdlib,
             module_name,
             type_params,
+            in_loop,
         )?;
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
@@ -1843,6 +2100,7 @@ fn check_match_expr_value(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
@@ -1876,11 +2134,16 @@ fn check_match_expr_value(
             ret_ty,
             module_name,
             type_params,
+            in_loop,
         )?;
         arm_scope.pop_scope();
         arm_scopes.push(arm_scope);
         if let Some(prev) = &result_ty {
-            if prev != &arm_ty {
+            if matches!(prev, Ty::Builtin(BuiltinType::Never)) {
+                result_ty = Some(arm_ty);
+            } else if matches!(arm_ty, Ty::Builtin(BuiltinType::Never)) {
+                // Keep the previous type; never can coerce to any type.
+            } else if prev != &arm_ty {
                 return Err(TypeError::new(
                     format!("match arm type mismatch: expected {prev:?}, found {arm_ty:?}"),
                     arm.body.span,
@@ -1915,6 +2178,7 @@ fn check_match_arm_value(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let Some((last, prefix)) = block.stmts.split_last() else {
         return Err(TypeError::new(
@@ -1941,6 +2205,7 @@ fn check_match_arm_value(
             stdlib,
             module_name,
             type_params,
+            in_loop,
         )?;
     }
     match last {
@@ -2008,7 +2273,7 @@ fn check_match_exhaustive(
                 span,
             ));
         }
-        Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+        Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
             let mut seen_ok = false;
             let mut seen_err = false;
             for arm in arms {
@@ -2374,7 +2639,7 @@ fn bind_pattern(
                 .collect::<Vec<_>>()
                 .join(".");
             if let Ty::Path(ty_name, args) = match_ty {
-                if ty_name == "Result" && args.len() == 2 {
+                if ty_name == "sys.result.Result" && args.len() == 2 {
                     let ty = if name == "Ok" {
                         args[0].clone()
                     } else if name == "Err" {

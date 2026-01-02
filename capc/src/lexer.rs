@@ -39,6 +39,16 @@ pub enum TokenKind {
     Else,
     #[token("while")]
     While,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
+    #[token("defer")]
+    Defer,
     #[token("return")]
     Return,
     #[token("struct")]
@@ -118,6 +128,8 @@ pub enum TokenKind {
     Colon,
     #[token(",")]
     Comma,
+    #[token("..", priority = 3)]
+    DotDot,
     #[token(".")]
     Dot,
     #[token(";")]
@@ -131,6 +143,8 @@ pub enum TokenKind {
     Int,
     #[regex(r#"\"([^\"\\]|\\.)*\""#)]
     Str,
+    #[regex(r#"'([^'\\]|\\x[0-9a-fA-F]{2}|\\.)'"#)]
+    Char,
 
     Error,
 }

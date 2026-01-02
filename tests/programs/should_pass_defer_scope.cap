@@ -1,0 +1,21 @@
+module should_pass_defer_scope
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  c.println("start")
+  if (true) {
+    defer c.println("if defer")
+    c.println("in if")
+  }
+  c.println("after if")
+  let i = 0
+  while (i < 1) {
+    defer c.println("loop defer")
+    c.println("in loop")
+    break
+  }
+  c.println("after loop")
+  return 0
+}

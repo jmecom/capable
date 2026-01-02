@@ -1,0 +1,18 @@
+module should_fail_break_in_function
+use sys::system
+use sys::console
+
+fn helper() -> i32 {
+  break
+  return 0
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let i = 0
+  while (i < 10) {
+    let x = helper()
+    i = i + 1
+  }
+  return 0
+}

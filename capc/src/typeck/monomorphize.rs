@@ -409,6 +409,13 @@ impl MonoCtx {
                     span: assign.span,
                 }))
             }
+            HirStmt::Defer(defer_stmt) => {
+                let expr = self.mono_expr(module, &defer_stmt.expr, subs)?;
+                Ok(HirStmt::Defer(HirDeferStmt {
+                    expr,
+                    span: defer_stmt.span,
+                }))
+            }
             HirStmt::Return(ret) => {
                 let expr = ret
                     .expr
@@ -420,6 +427,12 @@ impl MonoCtx {
                     span: ret.span,
                 }))
             }
+            HirStmt::Break(break_stmt) => Ok(HirStmt::Break(HirBreakStmt {
+                span: break_stmt.span,
+            })),
+            HirStmt::Continue(continue_stmt) => Ok(HirStmt::Continue(HirContinueStmt {
+                span: continue_stmt.span,
+            })),
             HirStmt::If(if_stmt) => {
                 let cond = self.mono_expr(module, &if_stmt.cond, subs)?;
                 let then_block = self.mono_block(module, &if_stmt.then_block, subs)?;
@@ -442,6 +455,18 @@ impl MonoCtx {
                     cond,
                     body,
                     span: while_stmt.span,
+                }))
+            }
+            HirStmt::For(for_stmt) => {
+                let start = self.mono_expr(module, &for_stmt.start, subs)?;
+                let end = self.mono_expr(module, &for_stmt.end, subs)?;
+                let body = self.mono_block(module, &for_stmt.body, subs)?;
+                Ok(HirStmt::For(HirForStmt {
+                    var_id: for_stmt.var_id,
+                    start,
+                    end,
+                    body,
+                    span: for_stmt.span,
                 }))
             }
             HirStmt::Expr(expr_stmt) => {
@@ -620,6 +645,20 @@ impl MonoCtx {
                     span: t.span,
                 }))
             }
+            HirExpr::Trap(t) => Ok(HirExpr::Trap(HirTrap {
+                ty: self.mono_hir_type(module, &t.ty, subs)?,
+                span: t.span,
+            })),
+            HirExpr::Index(idx) => {
+                let object = self.mono_expr(module, &idx.object, subs)?;
+                let index = self.mono_expr(module, &idx.index, subs)?;
+                Ok(HirExpr::Index(crate::hir::HirIndex {
+                    object: Box::new(object),
+                    index: Box::new(index),
+                    elem_ty: self.mono_hir_type(module, &idx.elem_ty, subs)?,
+                    span: idx.span,
+                }))
+            }
         }
     }
 
@@ -706,7 +745,7 @@ impl MonoCtx {
             Ty::Ptr(inner) => Ok(Ty::Ptr(Box::new(self.mono_ty(module, inner, subs)?))),
             Ty::Ref(inner) => Ok(Ty::Ref(Box::new(self.mono_ty(module, inner, subs)?))),
             Ty::Path(name, args) => {
-                if name == "Result" {
+                if name == "sys.result.Result" {
                     let args = args
                         .iter()
                         .map(|arg| self.mono_ty(module, arg, subs))
@@ -820,8 +859,8 @@ impl MonoCtx {
                 BuiltinType::U32 => Ok(AbiType::U32),
                 BuiltinType::U8 => Ok(AbiType::U8),
                 BuiltinType::Bool => Ok(AbiType::Bool),
-                BuiltinType::String => Ok(AbiType::String),
                 BuiltinType::Unit => Ok(AbiType::Unit),
+                BuiltinType::Never => Ok(AbiType::Unit),
             },
             Ty::Ptr(_) => Ok(AbiType::Ptr),
             Ty::Ref(inner) => self.abi_type_for(module, inner),
@@ -830,7 +869,7 @@ impl MonoCtx {
                 DUMMY_SPAN,
             )),
             Ty::Path(name, args) => {
-                if name == "Result" && args.len() == 2 {
+                if name == "sys.result.Result" && args.len() == 2 {
                     let ok = self.abi_type_for(module, &args[0])?;
                     let err = self.abi_type_for(module, &args[1])?;
                     return Ok(AbiType::Result(Box::new(ok), Box::new(err)));
@@ -1028,13 +1067,16 @@ fn mangle_type(ty: &Ty) -> String {
             crate::typeck::BuiltinType::U32 => "u32".to_string(),
             crate::typeck::BuiltinType::U8 => "u8".to_string(),
             crate::typeck::BuiltinType::Bool => "bool".to_string(),
-            crate::typeck::BuiltinType::String => "string".to_string(),
             crate::typeck::BuiltinType::Unit => "unit".to_string(),
+            crate::typeck::BuiltinType::Never => "never".to_string(),
         },
         Ty::Ptr(inner) => format!("ptr_{}", mangle_type(inner)),
         Ty::Ref(inner) => format!("ref_{}", mangle_type(inner)),
         Ty::Param(name) => format!("param_{name}"),
         Ty::Path(name, args) => {
+            if name == "sys.string.string" || name == "string" {
+                return "string".to_string();
+            }
             let mut base = name.replace('.', "_");
             if !args.is_empty() {
                 let suffix = args

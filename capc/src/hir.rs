@@ -106,9 +106,13 @@ pub struct HirBlock {
 pub enum HirStmt {
     Let(HirLetStmt),
     Assign(HirAssignStmt),
+    Defer(HirDeferStmt),
     Return(HirReturnStmt),
+    Break(HirBreakStmt),
+    Continue(HirContinueStmt),
     If(HirIfStmt),
     While(HirWhileStmt),
+    For(HirForStmt),
     Expr(HirExprStmt),
 }
 
@@ -117,9 +121,13 @@ impl HirStmt {
         match self {
             HirStmt::Let(s) => s.span,
             HirStmt::Assign(s) => s.span,
+            HirStmt::Defer(s) => s.span,
             HirStmt::Return(s) => s.span,
+            HirStmt::Break(s) => s.span,
+            HirStmt::Continue(s) => s.span,
             HirStmt::If(s) => s.span,
             HirStmt::While(s) => s.span,
+            HirStmt::For(s) => s.span,
             HirStmt::Expr(s) => s.span,
         }
     }
@@ -141,8 +149,24 @@ pub struct HirAssignStmt {
 }
 
 #[derive(Debug, Clone)]
+pub struct HirDeferStmt {
+    pub expr: HirExpr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct HirReturnStmt {
     pub expr: Option<HirExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirBreakStmt {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirContinueStmt {
     pub span: Span,
 }
 
@@ -162,6 +186,15 @@ pub struct HirWhileStmt {
 }
 
 #[derive(Debug, Clone)]
+pub struct HirForStmt {
+    pub var_id: LocalId,
+    pub start: HirExpr,
+    pub end: HirExpr,
+    pub body: HirBlock,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct HirExprStmt {
     pub expr: HirExpr,
     pub span: Span,
@@ -175,11 +208,13 @@ pub enum HirExpr {
     EnumVariant(HirEnumVariantExpr),
     Call(HirCall),
     FieldAccess(HirFieldAccess),
+    Index(HirIndex),
     StructLiteral(HirStructLiteral),
     Unary(HirUnary),
     Binary(HirBinary),
     Match(HirMatch),
     Try(HirTry),
+    Trap(HirTrap),
 }
 
 impl HirExpr {
@@ -190,11 +225,13 @@ impl HirExpr {
             HirExpr::EnumVariant(e) => e.span,
             HirExpr::Call(e) => e.span,
             HirExpr::FieldAccess(e) => e.span,
+            HirExpr::Index(e) => e.span,
             HirExpr::StructLiteral(e) => e.span,
             HirExpr::Unary(e) => e.span,
             HirExpr::Binary(e) => e.span,
             HirExpr::Match(e) => e.span,
             HirExpr::Try(e) => e.span,
+            HirExpr::Trap(e) => e.span,
         }
     }
 
@@ -205,11 +242,13 @@ impl HirExpr {
             HirExpr::EnumVariant(e) => &e.enum_ty,
             HirExpr::Call(e) => &e.ret_ty,
             HirExpr::FieldAccess(e) => &e.field_ty,
+            HirExpr::Index(e) => &e.elem_ty,
             HirExpr::StructLiteral(e) => &e.struct_ty,
             HirExpr::Unary(e) => &e.ty,
             HirExpr::Binary(e) => &e.ty,
             HirExpr::Match(e) => &e.result_ty,
             HirExpr::Try(e) => &e.ok_ty,
+            HirExpr::Trap(e) => &e.ty,
         }
     }
 }
@@ -279,6 +318,14 @@ pub struct HirFieldAccess {
 }
 
 #[derive(Debug, Clone)]
+pub struct HirIndex {
+    pub object: Box<HirExpr>,
+    pub index: Box<HirExpr>,
+    pub elem_ty: HirType,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct HirStructLiteral {
     pub struct_ty: HirType,
     pub fields: Vec<HirStructLiteralField>,
@@ -321,6 +368,15 @@ pub struct HirTry {
     pub expr: Box<HirExpr>,
     pub ok_ty: HirType,
     pub ret_ty: HirType,
+    pub span: Span,
+}
+
+/// Unconditional trap/panic. Used for unreachable code paths like
+/// calling .ok() on an Err variant.
+#[derive(Debug, Clone)]
+pub struct HirTrap {
+    /// The type this expression would have produced (for type checking).
+    pub ty: HirType,
     pub span: Span,
 }
 

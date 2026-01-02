@@ -12,7 +12,7 @@ impl Args {
     return 0
   }
 
-  pub fn at(self, index: i32) -> Result[string, ArgsErr] {
+  pub fn at(self, index: i32) -> Result<string, ArgsErr> {
     return Err(ArgsErr::OutOfRange)
   }
 }

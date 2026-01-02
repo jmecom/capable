@@ -1,0 +1,12 @@
+package safe
+module should_fail_for_loop_move
+
+capability struct Cap
+
+pub fn main() -> i32 {
+  let c = Cap{}
+  for i in 0..5 {
+    let x = c
+  }
+  return 0
+}

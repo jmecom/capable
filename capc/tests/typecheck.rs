@@ -127,7 +127,23 @@ fn typecheck_result_unwrap_or_mismatch_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("unwrap_or type mismatch"));
+    assert!(err.to_string().contains("argument type mismatch"));
+}
+
+#[test]
+fn typecheck_result_is_ok_is_err() {
+    let source = load_program("should_pass_result_is_ok_is_err.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_result_ok_err() {
+    let source = load_program("should_pass_result_ok_err.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
 }
 
 #[test]
@@ -221,7 +237,7 @@ fn typecheck_console_wrong_type() {
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let text = err.to_string();
-    assert!(text.contains("method receiver must be a struct value"));
+    assert!(text.contains("method receiver must be a struct or enum value"));
 }
 
 #[test]
@@ -231,7 +247,7 @@ fn typecheck_mint_without_system() {
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     let text = err.to_string();
-    assert!(text.contains("method receiver must be a struct value"));
+    assert!(text.contains("method receiver must be a struct or enum value"));
 }
 
 #[test]
@@ -240,7 +256,7 @@ fn typecheck_reserved_type_name_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("type name `string` is reserved"));
+    assert!(err.to_string().contains("type name `i32` is reserved"));
 }
 
 #[test]
@@ -880,4 +896,58 @@ fn typecheck_impl_wrong_module() {
         msg.contains("impl blocks must be declared in the defining module"),
         "expected error about impl module, got: {msg}"
     );
+}
+
+#[test]
+fn typecheck_break_outside_loop_fails() {
+    let source = load_program("should_fail_break_outside_loop.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("break statement outside of loop"));
+}
+
+#[test]
+fn typecheck_continue_outside_loop_fails() {
+    let source = load_program("should_fail_continue_outside_loop.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("continue statement outside of loop"));
+}
+
+#[test]
+fn typecheck_break_in_function_fails() {
+    let source = load_program("should_fail_break_in_function.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("break statement outside of loop"));
+}
+
+#[test]
+fn typecheck_for_non_i32_start_fails() {
+    let source = load_program("should_fail_for_non_i32_start.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("for loop range start must be i32"));
+}
+
+#[test]
+fn typecheck_for_non_i32_end_fails() {
+    let source = load_program("should_fail_for_non_i32_end.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("for loop range end must be i32"));
+}
+
+#[test]
+fn typecheck_for_loop_move_fails() {
+    let source = load_program("should_fail_for_loop_move.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err.to_string().contains("moved inside loop"));
 }

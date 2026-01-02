@@ -4,11 +4,12 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::abi::AbiType;
 use crate::hir::{
-    HirAssignStmt, HirBinary, HirBlock, HirCall, HirEnum, HirEnumVariant, HirEnumVariantExpr,
-    HirExpr, HirExprStmt, HirExternFunction, HirField, HirFieldAccess, HirFunction, HirIfStmt,
-    HirLetStmt, HirLiteral, HirLocal, HirMatch, HirMatchArm, HirParam, HirPattern, HirReturnStmt,
-    HirStmt, HirStruct, HirStructLiteral, HirStructLiteralField, HirType, HirUnary, HirWhileStmt,
-    IntrinsicId, LocalId, ResolvedCallee,
+    HirAssignStmt, HirBinary, HirBlock, HirBreakStmt, HirCall, HirContinueStmt, HirDeferStmt,
+    HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirExternFunction, HirField,
+    HirFieldAccess, HirForStmt, HirFunction, HirIfStmt, HirLetStmt, HirLiteral, HirLocal, HirMatch,
+    HirMatchArm, HirParam, HirPattern, HirReturnStmt, HirStmt, HirStruct, HirStructLiteral,
+    HirStructLiteralField, HirTrap, HirType, HirUnary, HirWhileStmt, IntrinsicId, LocalId,
+    ResolvedCallee,
 };
 
 use super::{
@@ -274,30 +275,30 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
 /// Lower a block into HIR.
 fn lower_block(block: &Block, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirBlock, TypeError> {
     ctx.push_scope();
-    let stmts: Result<Vec<HirStmt>, TypeError> = block
-        .stmts
-        .iter()
-        .map(|stmt| lower_stmt(stmt, ctx, ret_ty))
-        .collect();
+    let mut stmts = Vec::new();
+    for stmt in &block.stmts {
+        let lowered = lower_stmt(stmt, ctx, ret_ty)?;
+        stmts.extend(lowered);
+    }
     ctx.pop_scope();
 
-    Ok(HirBlock { stmts: stmts? })
+    Ok(HirBlock { stmts })
 }
 
 /// Lower a statement into HIR.
-fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt, TypeError> {
+fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<Vec<HirStmt>, TypeError> {
     match stmt {
         Stmt::Let(let_stmt) => {
             let expr = lower_expr(&let_stmt.expr, ctx, ret_ty)?;
             let ty = expr.ty().clone();
             let local_id = ctx.fresh_local(let_stmt.name.item.clone(), ty.ty.clone());
 
-            Ok(HirStmt::Let(HirLetStmt {
+            Ok(vec![HirStmt::Let(HirLetStmt {
                 local_id,
                 ty,
                 expr,
                 span: let_stmt.span,
-            }))
+            })])
         }
         Stmt::Assign(assign) => {
             let expr = lower_expr(&assign.expr, ctx, ret_ty)?;
@@ -305,18 +306,29 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
                 .get_local(&assign.name.item)
                 .ok_or_else(|| TypeError::new("unknown variable".to_string(), assign.name.span))?;
 
-            Ok(HirStmt::Assign(HirAssignStmt {
+            Ok(vec![HirStmt::Assign(HirAssignStmt {
                 local_id,
                 expr,
                 span: assign.span,
-            }))
+            })])
         }
+        Stmt::Defer(defer_stmt) => lower_defer_stmt(defer_stmt, ctx, ret_ty),
         Stmt::Return(ret) => {
             let expr = ret.expr.as_ref().map(|e| lower_expr(e, ctx, ret_ty)).transpose()?;
-            Ok(HirStmt::Return(HirReturnStmt {
+            Ok(vec![HirStmt::Return(HirReturnStmt {
                 expr,
                 span: ret.span,
-            }))
+            })])
+        }
+        Stmt::Break(break_stmt) => {
+            Ok(vec![HirStmt::Break(HirBreakStmt {
+                span: break_stmt.span,
+            })])
+        }
+        Stmt::Continue(continue_stmt) => {
+            Ok(vec![HirStmt::Continue(HirContinueStmt {
+                span: continue_stmt.span,
+            })])
         }
         Stmt::If(if_stmt) => {
             let cond = lower_expr(&if_stmt.cond, ctx, ret_ty)?;
@@ -327,49 +339,246 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirStmt
                 .map(|b| lower_block(b, ctx, ret_ty))
                 .transpose()?;
 
-            Ok(HirStmt::If(HirIfStmt {
+            Ok(vec![HirStmt::If(HirIfStmt {
                 cond,
                 then_block,
                 else_block,
                 span: if_stmt.span,
-            }))
+            })])
         }
         Stmt::While(while_stmt) => {
             let cond = lower_expr(&while_stmt.cond, ctx, ret_ty)?;
             let body = lower_block(&while_stmt.body, ctx, ret_ty)?;
 
-            Ok(HirStmt::While(HirWhileStmt {
+            Ok(vec![HirStmt::While(HirWhileStmt {
                 cond,
                 body,
                 span: while_stmt.span,
-            }))
+            })])
+        }
+        Stmt::For(for_stmt) => {
+            let start = lower_expr(&for_stmt.start, ctx, ret_ty)?;
+            let end = lower_expr(&for_stmt.end, ctx, ret_ty)?;
+
+            // Create a fresh local for the loop variable
+            let var_id = ctx.fresh_local(
+                for_stmt.var.item.clone(),
+                crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::I32),
+            );
+
+            let body = lower_block(&for_stmt.body, ctx, ret_ty)?;
+
+            Ok(vec![HirStmt::For(HirForStmt {
+                var_id,
+                start,
+                end,
+                body,
+                span: for_stmt.span,
+            })])
         }
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
                 match lower_expr(&expr_stmt.expr, ctx, ret_ty) {
                     Ok(expr) => {
-                        return Ok(HirStmt::Expr(HirExprStmt {
+                        return Ok(vec![HirStmt::Expr(HirExprStmt {
                             expr,
                             span: expr_stmt.span,
-                        }));
+                        })]);
                     }
                     Err(_) => {
                         let expr = lower_match_stmt(match_expr, ctx, ret_ty)?;
-                        return Ok(HirStmt::Expr(HirExprStmt {
+                        return Ok(vec![HirStmt::Expr(HirExprStmt {
                             expr,
                             span: expr_stmt.span,
-                        }));
+                        })]);
                     }
                 }
             }
 
             let expr = lower_expr(&expr_stmt.expr, ctx, ret_ty)?;
-            Ok(HirStmt::Expr(HirExprStmt {
+            Ok(vec![HirStmt::Expr(HirExprStmt {
                 expr,
                 span: expr_stmt.span,
-            }))
+            })])
         }
     }
+}
+
+fn lower_defer_stmt(
+    defer_stmt: &DeferStmt,
+    ctx: &mut LoweringCtx,
+    ret_ty: &Ty,
+) -> Result<Vec<HirStmt>, TypeError> {
+    let mut stmts = Vec::new();
+    let expr_ty = type_of_ast_expr(&defer_stmt.expr, ctx, ret_ty)?;
+    let hir_ret_ty = hir_type_for(expr_ty, ctx, defer_stmt.expr.span())?;
+
+    let deferred = match &defer_stmt.expr {
+        Expr::Call(call) => {
+            let mut args = Vec::with_capacity(call.args.len());
+            for arg in &call.args {
+                args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
+            }
+            let path = call.callee.to_path().ok_or_else(|| {
+                TypeError::new(
+                    "call target must be a function path".to_string(),
+                    call.callee.span(),
+                )
+            })?;
+            lower_defer_call_from_path(&path, &call.type_args, args, hir_ret_ty, ctx)?
+        }
+        Expr::MethodCall(method_call) => {
+            fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
+                match expr {
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
+                    Expr::FieldAccess(fa) => get_leftmost_segment(&fa.object),
+                    _ => None,
+                }
+            }
+
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+                ctx.local_types.contains_key(base_name)
+            } else {
+                true
+            };
+
+            let path_call = method_call.receiver.to_path().map(|mut path| {
+                path.segments.push(method_call.method.clone());
+                path.span = Span::new(path.span.start, method_call.method.span.end);
+                path
+            });
+
+            let is_function = if let Some(path) = &path_call {
+                let resolved = super::resolve_path(path, ctx.use_map);
+                let key = resolved.join(".");
+                ctx.functions.contains_key(&key)
+            } else {
+                false
+            };
+
+            if !base_is_local && is_function {
+                let path = path_call.expect("path exists for function call");
+                let mut args = Vec::with_capacity(method_call.args.len());
+                for arg in &method_call.args {
+                    args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
+                }
+                let deferred = lower_defer_call_from_path(
+                    &path,
+                    &method_call.type_args,
+                    args,
+                    hir_ret_ty,
+                    ctx,
+                )?;
+                stmts.push(HirStmt::Defer(HirDeferStmt {
+                    expr: deferred,
+                    span: defer_stmt.span,
+                }));
+                return Ok(stmts);
+            }
+
+            let receiver = capture_defer_expr(&method_call.receiver, ctx, ret_ty, &mut stmts)?;
+            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let (method_module, type_name, _) = resolve_method_target(
+                &receiver_ty,
+                ctx.module_name,
+                ctx.structs,
+                ctx.enums,
+                method_call.receiver.span(),
+            )?;
+            let method_fn = format!("{type_name}__{}", method_call.method.item);
+            let key = format!("{method_module}.{method_fn}");
+            let symbol = format!("capable_{}", key.replace('.', "_"));
+
+            let mut args = Vec::with_capacity(method_call.args.len() + 1);
+            args.push(receiver);
+            for arg in &method_call.args {
+                args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
+            }
+
+            HirExpr::Call(HirCall {
+                callee: ResolvedCallee::Function {
+                    module: method_module,
+                    name: method_fn,
+                    symbol,
+                },
+                type_args: lower_call_type_args(&method_call.type_args, ctx)?,
+                args,
+                ret_ty: hir_ret_ty,
+                span: method_call.span,
+            })
+        }
+        _ => {
+            return Err(TypeError::new(
+                "defer expects a function or method call".to_string(),
+                defer_stmt.span,
+            ))
+        }
+    };
+
+    stmts.push(HirStmt::Defer(HirDeferStmt {
+        expr: deferred,
+        span: defer_stmt.span,
+    }));
+    Ok(stmts)
+}
+
+fn lower_defer_call_from_path(
+    path: &Path,
+    type_args: &[Type],
+    args: Vec<HirExpr>,
+    ret_ty: HirType,
+    ctx: &mut LoweringCtx,
+) -> Result<HirExpr, TypeError> {
+
+    if path.segments.len() == 1 {
+        let name = &path.segments[0].item;
+        if name == "drop" || name == "panic" || name == "Ok" || name == "Err" {
+            return Err(TypeError::new(
+                "defer expects a function or method call".to_string(),
+                path.span,
+            ));
+        }
+    }
+
+    let mut resolved = super::resolve_path(&path, ctx.use_map);
+    if resolved.len() == 1 {
+        resolved.insert(0, ctx.module_name.to_string());
+    }
+    let key = resolved.join(".");
+    let module = resolved[..resolved.len() - 1].join(".");
+    let name = resolved.last().unwrap().clone();
+    let symbol = format!("capable_{}", key.replace('.', "_"));
+
+    Ok(HirExpr::Call(HirCall {
+        callee: ResolvedCallee::Function { module, name, symbol },
+        type_args: lower_call_type_args(type_args, ctx)?,
+        args,
+        ret_ty,
+        span: path.span,
+    }))
+}
+
+fn capture_defer_expr(
+    expr: &Expr,
+    ctx: &mut LoweringCtx,
+    ret_ty: &Ty,
+    stmts: &mut Vec<HirStmt>,
+) -> Result<HirExpr, TypeError> {
+    let hir_expr = lower_expr(expr, ctx, ret_ty)?;
+    let ty = hir_expr.ty().clone();
+    let local_name = format!("__defer_{}", ctx.local_counter);
+    let local_id = ctx.fresh_local(local_name, ty.ty.clone());
+    stmts.push(HirStmt::Let(HirLetStmt {
+        local_id,
+        ty: ty.clone(),
+        expr: hir_expr,
+        span: expr.span(),
+    }));
+    Ok(HirExpr::Local(HirLocal {
+        local_id,
+        ty,
+        span: expr.span(),
+    }))
 }
 
 /// Helper to get the type of an AST expression using the existing typechecker.
@@ -431,14 +640,14 @@ fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeE
             BuiltinType::U32 => Ok(AbiType::U32),
             BuiltinType::U8 => Ok(AbiType::U8),
             BuiltinType::Bool => Ok(AbiType::Bool),
-            BuiltinType::String => Ok(AbiType::String),
             BuiltinType::Unit => Ok(AbiType::Unit),
+            BuiltinType::Never => Ok(AbiType::Unit),
         },
         Ty::Ptr(_) => Ok(AbiType::Ptr),
         Ty::Ref(inner) => abi_type_for(inner, ctx, span),
         Ty::Param(_) => Ok(AbiType::Ptr),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let ok = abi_type_for(&args[0], ctx, span)?;
                 let err = abi_type_for(&args[1], ctx, span)?;
                 return Ok(AbiType::Result(Box::new(ok), Box::new(err)));
@@ -538,6 +747,13 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                         type_args: Vec::new(),
                         args: args?,
                         ret_ty: hir_ty,
+                        span: call.span,
+                    }));
+                }
+                if name == "panic" {
+                    // panic() lowers to an unconditional trap
+                    return Ok(HirExpr::Trap(HirTrap {
+                        ty: hir_ty,
                         span: call.span,
                     }));
                 }
@@ -642,107 +858,11 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
             let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
-            if let Ty::Path(name, args) = &receiver_ty {
-                if name == "Result" && args.len() == 2 {
-                    match method_call.method.item.as_str() {
-                        "unwrap_or" => {
-                            let default_expr = lower_expr(&method_call.args[0], ctx, ret_ty)?;
-                            let ok_name = format!("__unwrap_ok_{}", ctx.local_counter);
-                            let ok_local_id = ctx.fresh_local(ok_name.clone(), args[0].clone());
-                            let ok_pattern = HirPattern::Variant {
-                                variant_name: "Ok".to_string(),
-                                binding: Some(ok_local_id),
-                            };
-                            let err_pattern = HirPattern::Variant {
-                                variant_name: "Err".to_string(),
-                                binding: None,
-                            };
-                            let ok_expr = HirExpr::Local(HirLocal {
-                                local_id: ok_local_id,
-                                ty: hir_type_for(args[0].clone(), ctx, method_call.span)?,
-                                span: method_call.span,
-                            });
-                            let ok_block = HirBlock {
-                                stmts: vec![HirStmt::Expr(HirExprStmt {
-                                    expr: ok_expr,
-                                    span: method_call.span,
-                                })],
-                            };
-                            let err_block = HirBlock {
-                                stmts: vec![HirStmt::Expr(HirExprStmt {
-                                    expr: default_expr,
-                                    span: method_call.span,
-                                })],
-                            };
-                            return Ok(HirExpr::Match(HirMatch {
-                                expr: Box::new(receiver),
-                                arms: vec![
-                                    HirMatchArm {
-                                        pattern: ok_pattern,
-                                        body: ok_block,
-                                    },
-                                    HirMatchArm {
-                                        pattern: err_pattern,
-                                        body: err_block,
-                                    },
-                                ],
-                                result_ty: hir_ty,
-                                span: method_call.span,
-                            }));
-                        }
-                        "unwrap_err_or" => {
-                            let default_expr = lower_expr(&method_call.args[0], ctx, ret_ty)?;
-                            let err_name = format!("__unwrap_err_{}", ctx.local_counter);
-                            let err_local_id = ctx.fresh_local(err_name.clone(), args[1].clone());
-                            let ok_pattern = HirPattern::Variant {
-                                variant_name: "Ok".to_string(),
-                                binding: None,
-                            };
-                            let err_pattern = HirPattern::Variant {
-                                variant_name: "Err".to_string(),
-                                binding: Some(err_local_id),
-                            };
-                            let err_expr = HirExpr::Local(HirLocal {
-                                local_id: err_local_id,
-                                ty: hir_type_for(args[1].clone(), ctx, method_call.span)?,
-                                span: method_call.span,
-                            });
-                            let ok_block = HirBlock {
-                                stmts: vec![HirStmt::Expr(HirExprStmt {
-                                    expr: default_expr,
-                                    span: method_call.span,
-                                })],
-                            };
-                            let err_block = HirBlock {
-                                stmts: vec![HirStmt::Expr(HirExprStmt {
-                                    expr: err_expr,
-                                    span: method_call.span,
-                                })],
-                            };
-                            return Ok(HirExpr::Match(HirMatch {
-                                expr: Box::new(receiver),
-                                arms: vec![
-                                    HirMatchArm {
-                                        pattern: ok_pattern,
-                                        body: ok_block,
-                                    },
-                                    HirMatchArm {
-                                        pattern: err_pattern,
-                                        body: err_block,
-                                    },
-                                ],
-                                result_ty: hir_ty,
-                                span: method_call.span,
-                            }));
-                        }
-                        _ => {}
-                    }
-                }
-            }
             let (method_module, type_name, _) = resolve_method_target(
                 &receiver_ty,
                 ctx.module_name,
                 ctx.structs,
+                ctx.enums,
                 method_call.receiver.span(),
             )?;
             let method_fn = format!("{type_name}__{}", method_call.method.item);
@@ -907,7 +1027,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             let scrutinee = lower_expr(&try_expr.expr, ctx, ret_ty)?;
             let scrutinee_ty = scrutinee.ty().clone();
             let ok_ty = match &scrutinee_ty.ty {
-                Ty::Path(name, args) if name == "Result" && args.len() == 2 => args[0].clone(),
+                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => args[0].clone(),
                 _ => {
                     return Err(TypeError::new(
                         "the `?` operator expects a Result value".to_string(),
@@ -922,6 +1042,54 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 ret_ty: hir_type_for(ret_ty.clone(), ctx, try_expr.span)?,
                 span: try_expr.span,
             }))
+        }
+        Expr::Index(index_expr) => {
+            let object = lower_expr(&index_expr.object, ctx, ret_ty)?;
+            let index = lower_expr(&index_expr.index, ctx, ret_ty)?;
+
+            // Check if this is a Vec type - if so, desugar to .get() call
+            let object_ty = &object.ty().ty;
+            let is_vec_type = matches!(object_ty,
+                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString"
+                    || name == "VecI32" || name == "sys.vec.VecI32"
+                    || name == "VecU8" || name == "sys.vec.VecU8"
+            );
+
+            if is_vec_type {
+                // Desugar vec[i] to vec.get(i)
+                // Get the short type name (e.g., "VecString" from "sys.vec.VecString")
+                let type_name = match object_ty {
+                    Ty::Path(name, _) => {
+                        if name.starts_with("sys.vec.") {
+                            name.strip_prefix("sys.vec.").unwrap()
+                        } else {
+                            name.as_str()
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                let key = format!("sys.vec.{}__get", type_name);
+                let symbol = format!("capable_{}", key.replace('.', "_").replace("__", "_"));
+
+                Ok(HirExpr::Call(crate::hir::HirCall {
+                    callee: ResolvedCallee::Function {
+                        module: "sys.vec".to_string(),
+                        name: format!("{}__get", type_name),
+                        symbol,
+                    },
+                    type_args: vec![],
+                    args: vec![object, index],
+                    ret_ty: hir_ty,
+                    span: index_expr.span,
+                }))
+            } else {
+                Ok(HirExpr::Index(crate::hir::HirIndex {
+                    object: Box::new(object),
+                    index: Box::new(index),
+                    elem_ty: hir_ty,
+                    span: index_expr.span,
+                }))
+            }
         }
     }
 }
@@ -997,30 +1165,29 @@ fn lower_pattern(
         }
 
         Pattern::Call { path, binding, span } => {
-            if path.segments.len() == 1 {
-                let name = &path.segments[0].item;
-                if name == "Ok" || name == "Err" {
-                    if let Ty::Path(ty_name, args) = &match_ty.ty {
-                        if ty_name == "Result" && args.len() == 2 {
-                            let variant_name = name.clone();
+            // Check for Result::Ok/Err variants (both qualified and unqualified)
+            let variant_name = path.segments.last().map(|s| s.item.as_str());
+            if variant_name == Some("Ok") || variant_name == Some("Err") {
+                if let Ty::Path(ty_name, args) = &match_ty.ty {
+                    if ty_name == "sys.result.Result" && args.len() == 2 {
+                        let variant_name = variant_name.unwrap().to_string();
 
-                            let binding_info = if let Some(bind_ident) = binding {
-                                let bind_ty = if variant_name == "Ok" {
-                                    args[0].clone()
-                                } else {
-                                    args[1].clone()
-                                };
-                                let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
-                                Some(local_id)
+                        let binding_info = if let Some(bind_ident) = binding {
+                            let bind_ty = if variant_name == "Ok" {
+                                args[0].clone()
                             } else {
-                                None
+                                args[1].clone()
                             };
+                            let local_id = ctx.fresh_local(bind_ident.item.clone(), bind_ty);
+                            Some(local_id)
+                        } else {
+                            None
+                        };
 
-                            return Ok(HirPattern::Variant {
-                                variant_name,
-                                binding: binding_info,
-                            });
-                        }
+                        return Ok(HirPattern::Variant {
+                            variant_name,
+                            binding: binding_info,
+                        });
                     }
                 }
             }

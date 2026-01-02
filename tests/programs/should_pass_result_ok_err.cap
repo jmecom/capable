@@ -1,0 +1,33 @@
+module should_pass_result_ok_err
+use sys::system
+
+fn make_ok() -> Result<i32, i32> {
+  return Ok(42)
+}
+
+fn make_err() -> Result<i32, i32> {
+  return Err(99)
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let con = rc.mint_console()
+  let ok_result = make_ok()
+  let err_result = make_err()
+
+  if ok_result.is_ok() {
+    let val = ok_result.ok()
+    if val != 42 {
+      return 1
+    }
+  }
+
+  if err_result.is_err() {
+    let e = err_result.err()
+    if e != 99 {
+      return 2
+    }
+  }
+
+  con.print("ok_err ok")
+  return 0
+}

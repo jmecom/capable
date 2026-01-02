@@ -1,0 +1,41 @@
+module should_pass_if_let
+use sys::system
+use sys::console
+
+fn make_ok() -> Result<i32, i32> {
+  return Ok(7)
+}
+
+fn make_err() -> Result<i32, i32> {
+  return Err(9)
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let ok = make_ok()
+  if let Ok(x) = ok {
+    if (x != 7) {
+      c.println("bad ok")
+      return 1
+    }
+    c.println("ok")
+  } else {
+    c.println("unexpected err")
+    return 1
+  }
+
+  let err = make_err()
+  if let Err(e) = err {
+    if (e != 9) {
+      c.println("bad err")
+      return 2
+    }
+    c.println("err")
+  } else {
+    c.println("unexpected ok")
+    return 2
+  }
+
+  c.println("if_let ok")
+  return 0
+}

@@ -14,61 +14,53 @@ fn print_kv(c: Console, key: string, val: string) -> unit {
   c.println(val)
 }
 
-fn parse_line(c: Console, alloc: Alloc, line: string) -> Result[unit, VecErr] {
-  if line.len() == 0 {
+fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, VecErr> {
+  if (line.len() == 0) {
     return Ok(())
   }
-  if line.starts_with("#") {
+  if (line.starts_with("#")) {
     return Ok(())
   }
 
   let parts = line.split(61u8)
-  if parts.len() == 2 {
-    let key = parts.get(0)?
-    let val = parts.get(1)?
+  if (parts.len() == 2) {
+    let key = parts[0]?
+    let val = parts[1]?
     print_kv(c, key, val)
   }
   alloc.vec_string_free(parts)
   return Ok(())
 }
 
-fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result[unit, VecErr] {
+fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, VecErr> {
   let lines = contents.lines()
-  let i = 0
-  while i < lines.len() {
-    let line = lines.get(i)?
+  let n = lines.len()
+  for i in 0..n {
+    let line = lines[i]?
     parse_line(c, alloc, line)?
-    i = i + 1
   }
   alloc.vec_string_free(lines)
   return Ok(())
 }
 
-fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result[unit, FsErr] {
+fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result<unit, FsErr> {
   let contents = fs.read_to_string("app.conf")?
-  match (parse_config(c, alloc, contents)) {
-    Ok(_) => {
-      return Ok(())
-    }
-    Err(_) => {
-      return Err(fs::FsErr::IoError)
-    }
+  let result = parse_config(c, alloc, contents)
+  if (result.is_err()) {
+    return Err(fs::FsErr::IoError)
   }
+  return Ok(())
 }
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let fs = rc.mint_readfs("examples/config_loader")
   let alloc = rc.mint_alloc_default()
-  let res = run(c, alloc, fs)
-  match (res) {
-    Ok(_) => {
-      c.println("config ok")
-      return 0
-    }
-    Err(_) => {
-      c.println("config read failed")
-      return 1
-    }
+  let result = run(c, alloc, fs)
+  if (result.is_ok()) {
+    c.println("config ok")
+    return 0
   }
+  c.println("config read failed")
+  return 1
 }

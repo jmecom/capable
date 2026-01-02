@@ -141,9 +141,13 @@ pub struct Block {
 pub enum Stmt {
     Let(LetStmt),
     Assign(AssignStmt),
+    Defer(DeferStmt),
     Return(ReturnStmt),
+    Break(BreakStmt),
+    Continue(ContinueStmt),
     If(IfStmt),
     While(WhileStmt),
+    For(ForStmt),
     Expr(ExprStmt),
 }
 
@@ -158,6 +162,16 @@ pub struct LetStmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnStmt {
     pub expr: Option<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreakStmt {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinueStmt {
     pub span: Span,
 }
 
@@ -177,6 +191,15 @@ pub struct WhileStmt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForStmt {
+    pub var: Ident,
+    pub start: Expr,
+    pub end: Expr,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprStmt {
     pub expr: Expr,
     pub span: Span,
@@ -189,14 +212,24 @@ pub struct AssignStmt {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeferStmt {
+    pub expr: Expr,
+    pub span: Span,
+}
+
 impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Stmt::Let(s) => s.span,
             Stmt::Assign(s) => s.span,
+            Stmt::Defer(s) => s.span,
             Stmt::Return(s) => s.span,
+            Stmt::Break(s) => s.span,
+            Stmt::Continue(s) => s.span,
             Stmt::If(s) => s.span,
             Stmt::While(s) => s.span,
+            Stmt::For(s) => s.span,
             Stmt::Expr(s) => s.span,
         }
     }
@@ -209,6 +242,7 @@ pub enum Expr {
     Call(CallExpr),
     MethodCall(MethodCallExpr),
     FieldAccess(FieldAccessExpr),
+    Index(IndexExpr),
     StructLiteral(StructLiteralExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
@@ -285,6 +319,13 @@ pub struct CallExpr {
 pub struct FieldAccessExpr {
     pub object: Box<Expr>,
     pub field: Ident,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexExpr {
+    pub object: Box<Expr>,
+    pub index: Box<Expr>,
     pub span: Span,
 }
 

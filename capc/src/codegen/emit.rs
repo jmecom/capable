@@ -15,23 +15,195 @@ use crate::abi::AbiType;
 use crate::ast::{BinaryOp, Literal, UnaryOp};
 
 use super::{
-    CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape, StructLayoutIndex,
-    TypeLayout, ValueRepr,
+    CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape,
+    StructLayoutIndex, TypeLayout, ValueRepr,
 };
 use super::abi_quirks;
 use super::layout::{align_to, resolve_struct_layout, type_layout_for_abi};
 use super::sig_to_clif;
 
+/// Target blocks for break/continue inside a loop.
 #[derive(Copy, Clone, Debug)]
-struct ResultStringSlots {
-    slot_ptr: ir::StackSlot,
-    slot_len: ir::StackSlot,
-    slot_err: ir::StackSlot,
-    ptr_align: u32,
-    len_align: u32,
-    err_align: u32,
+pub(super) struct LoopTarget {
+    pub continue_block: ir::Block, // for while: header_block, for: increment_block
+    pub exit_block: ir::Block,
 }
 
+#[derive(Clone, Debug)]
+pub(super) enum ReturnLowering {
+    Direct,
+    SRet {
+        out_ptr: ir::Value,
+        ret_ty: crate::hir::HirType,
+    },
+    ResultOut {
+        out_ok: Option<ir::Value>,
+        out_err: Option<ir::Value>,
+        ok_ty: crate::hir::HirType,
+        err_ty: crate::hir::HirType,
+    },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum DeferScopeKind {
+    Regular,
+    LoopBody,
+}
+
+#[derive(Clone, Debug)]
+struct DeferScope {
+    kind: DeferScopeKind,
+    defers: Vec<crate::hir::HirExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct DeferStack {
+    scopes: Vec<DeferScope>,
+}
+
+impl DeferStack {
+    pub(super) fn new() -> Self {
+        Self { scopes: Vec::new() }
+    }
+
+    pub(super) fn push_block_scope(&mut self) {
+        self.push_scope(DeferScopeKind::Regular);
+    }
+
+    pub(super) fn push_loop_scope(&mut self) {
+        self.push_scope(DeferScopeKind::LoopBody);
+    }
+
+    fn push_scope(&mut self, kind: DeferScopeKind) {
+        self.scopes.push(DeferScope {
+            kind,
+            defers: Vec::new(),
+        });
+    }
+
+    pub(super) fn pop_scope(&mut self) {
+        let _ = self.scopes.pop();
+    }
+
+    pub(super) fn push_defer(&mut self, expr: crate::hir::HirExpr) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.defers.push(expr);
+        }
+    }
+
+    fn emit_scope_defers(
+        &self,
+        scope: &DeferScope,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        for defer_expr in scope.defers.iter().rev() {
+            let _ = emit_hir_expr(
+                builder,
+                defer_expr,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn emit_current_and_pop(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        if let Some(scope) = self.scopes.last() {
+            self.emit_scope_defers(
+                scope,
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+        }
+        self.pop_scope();
+        Ok(())
+    }
+
+    pub(super) fn emit_all_and_clear(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        while let Some(scope) = self.scopes.pop() {
+            self.emit_scope_defers(
+                &scope,
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn emit_until_loop_and_pop(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        locals: &HashMap<crate::hir::LocalId, LocalValue>,
+        fn_map: &HashMap<String, FnInfo>,
+        enum_index: &EnumIndex,
+        struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
+        module: &mut ObjectModule,
+        data_counter: &mut u32,
+    ) -> Result<(), CodegenError> {
+        while let Some(scope) = self.scopes.pop() {
+            self.emit_scope_defers(
+                &scope,
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            if scope.kind == DeferScopeKind::LoopBody {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Emit a single HIR statement.
 pub(super) fn emit_hir_stmt(
@@ -43,6 +215,9 @@ pub(super) fn emit_hir_stmt(
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
+    loop_target: Option<LoopTarget>,
+    return_lowering: &ReturnLowering,
+    defer_stack: &mut DeferStack,
 ) -> Result<Flow, CodegenError> {
     emit_hir_stmt_inner(
         builder,
@@ -53,6 +228,9 @@ pub(super) fn emit_hir_stmt(
         struct_layouts,
         module,
         data_counter,
+        loop_target,
+        return_lowering,
+        defer_stack,
     )
     .map_err(|err| err.with_span(stmt.span()))
 }
@@ -66,6 +244,9 @@ fn emit_hir_stmt_inner(
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
+    loop_target: Option<LoopTarget>,
+    return_lowering: &ReturnLowering,
+    defer_stack: &mut DeferStack,
 ) -> Result<Flow, CodegenError> {
     use crate::hir::HirStmt;
 
@@ -90,6 +271,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -134,6 +316,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -172,6 +355,9 @@ fn emit_hir_stmt_inner(
                 }
             }
         }
+        HirStmt::Defer(defer_stmt) => {
+            defer_stack.push_defer(defer_stmt.expr.clone());
+        }
         HirStmt::Return(ret_stmt) => {
             if let Some(expr) = &ret_stmt.expr {
                 let value = emit_hir_expr(
@@ -181,23 +367,152 @@ fn emit_hir_stmt_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
-                match value {
-                    ValueRepr::Unit => builder.ins().return_(&[]),
-                    ValueRepr::Single(val) => builder.ins().return_(&[val]),
-                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
-                        let values = flatten_value(&value);
-                        builder.ins().return_(&values)
+                match return_lowering {
+                    ReturnLowering::Direct => {
+                        defer_stack.emit_all_and_clear(
+                            builder,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            struct_layouts,
+                            return_lowering,
+                            module,
+                            data_counter,
+                        )?;
+                        match value {
+                            ValueRepr::Unit => builder.ins().return_(&[]),
+                            ValueRepr::Single(val) => builder.ins().return_(&[val]),
+                            ValueRepr::Result { .. } => {
+                                let values = flatten_value(&value);
+                                builder.ins().return_(&values)
+                            }
+                        };
                     }
-                };
+                    ReturnLowering::SRet { out_ptr, ret_ty } => {
+                        store_out_value(
+                            builder,
+                            *out_ptr,
+                            ret_ty,
+                            value,
+                            struct_layouts,
+                            module,
+                        )?;
+                        defer_stack.emit_all_and_clear(
+                            builder,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            struct_layouts,
+                            return_lowering,
+                            module,
+                            data_counter,
+                        )?;
+                        builder.ins().return_(&[]);
+                    }
+                    ReturnLowering::ResultOut {
+                        out_ok,
+                        out_err,
+                        ok_ty,
+                        err_ty,
+                    } => {
+                        let ValueRepr::Result { tag, ok, err } = value else {
+                            return Err(CodegenError::Unsupported(
+                                "return expects Result value".to_string(),
+                            ));
+                        };
+                        if let Some(out_ok) = out_ok {
+                            store_out_value(
+                                builder,
+                                *out_ok,
+                                ok_ty,
+                                *ok,
+                                struct_layouts,
+                                module,
+                            )?;
+                        }
+                        if let Some(out_err) = out_err {
+                            store_out_value(
+                                builder,
+                                *out_err,
+                                err_ty,
+                                *err,
+                                struct_layouts,
+                                module,
+                            )?;
+                        }
+                        defer_stack.emit_all_and_clear(
+                            builder,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            struct_layouts,
+                            return_lowering,
+                            module,
+                            data_counter,
+                        )?;
+                        builder.ins().return_(&[tag]);
+                    }
+                }
             } else {
+                defer_stack.emit_all_and_clear(
+                    builder,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                )?;
                 builder.ins().return_(&[]);
             }
             return Ok(Flow::Terminated);
         }
         HirStmt::Expr(expr_stmt) => {
+            if matches!(expr_stmt.expr, crate::hir::HirExpr::Trap(_)) {
+                let _ = emit_hir_expr(
+                    builder,
+                    &expr_stmt.expr,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                )?;
+                return Ok(Flow::Terminated);
+            }
+            // Special handling for match expressions that might diverge
+            if let crate::hir::HirExpr::Match(match_expr) = &expr_stmt.expr {
+                if matches!(
+                    match_expr.result_ty.ty,
+                    crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::Unit)
+                ) {
+                    let diverged = emit_hir_match_stmt(
+                        builder,
+                        match_expr,
+                        locals,
+                        fn_map,
+                        enum_index,
+                        struct_layouts,
+                        module,
+                        data_counter,
+                        loop_target,
+                        return_lowering,
+                        defer_stack,
+                    )?;
+                    if diverged {
+                        return Ok(Flow::Terminated);
+                    }
+                    // Don't fall through to emit_hir_expr - we already emitted the match
+                    return Ok(Flow::Continues);
+                }
+            }
             let _ = emit_hir_expr(
                 builder,
                 &expr_stmt.expr,
@@ -205,6 +520,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -212,6 +528,7 @@ fn emit_hir_stmt_inner(
         HirStmt::If(if_stmt) => {
             // Snapshot locals so branch-scoped lets don't leak
             let saved_locals = locals.clone();
+            let saved_defers = defer_stack.clone();
 
             let then_block = builder.create_block();
             let merge_block = builder.create_block();
@@ -228,6 +545,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -239,6 +557,8 @@ fn emit_hir_stmt_inner(
             // THEN branch with its own locals
             builder.switch_to_block(then_block);
             let mut then_locals = saved_locals.clone();
+            let mut then_defers = saved_defers.clone();
+            then_defers.push_block_scope();
             let mut then_terminated = false;
             for stmt in &if_stmt.then_block.stmts {
                 let flow = emit_hir_stmt(
@@ -250,6 +570,9 @@ fn emit_hir_stmt_inner(
                     struct_layouts,
                     module,
                     data_counter,
+                    loop_target,
+                    return_lowering,
+                    &mut then_defers,
                 )?;
                 if flow == Flow::Terminated {
                     then_terminated = true;
@@ -257,6 +580,16 @@ fn emit_hir_stmt_inner(
                 }
             }
             if !then_terminated {
+                then_defers.emit_current_and_pop(
+                    builder,
+                    &then_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                )?;
                 builder.ins().jump(merge_block, &[]);
             }
             builder.seal_block(then_block);
@@ -265,6 +598,8 @@ fn emit_hir_stmt_inner(
             if let Some(else_block_hir) = &if_stmt.else_block {
                 builder.switch_to_block(else_block);
                 let mut else_locals = saved_locals.clone();
+                let mut else_defers = saved_defers.clone();
+                else_defers.push_block_scope();
                 let mut else_terminated = false;
                 for stmt in &else_block_hir.stmts {
                     let flow = emit_hir_stmt(
@@ -276,6 +611,9 @@ fn emit_hir_stmt_inner(
                         struct_layouts,
                         module,
                         data_counter,
+                        loop_target,
+                        return_lowering,
+                        &mut else_defers,
                     )?;
                     if flow == Flow::Terminated {
                         else_terminated = true;
@@ -283,6 +621,16 @@ fn emit_hir_stmt_inner(
                     }
                 }
                 if !else_terminated {
+                    else_defers.emit_current_and_pop(
+                        builder,
+                        &else_locals,
+                        fn_map,
+                        enum_index,
+                        struct_layouts,
+                        return_lowering,
+                        module,
+                        data_counter,
+                    )?;
                     builder.ins().jump(merge_block, &[]);
                 }
                 builder.seal_block(else_block);
@@ -297,6 +645,7 @@ fn emit_hir_stmt_inner(
         HirStmt::While(while_stmt) => {
             // Snapshot locals so loop-body lets don't leak out of the loop
             let saved_locals = locals.clone();
+            let saved_defers = defer_stack.clone();
 
             let header_block = builder.create_block();
             let body_block = builder.create_block();
@@ -312,6 +661,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -322,8 +672,17 @@ fn emit_hir_stmt_inner(
 
             builder.switch_to_block(body_block);
 
+            // Create loop target for break/continue
+            // For while loops, continue goes to header (re-evaluate condition)
+            let body_loop_target = Some(LoopTarget {
+                continue_block: header_block,
+                exit_block,
+            });
+
             // Loop body gets its own locals
             let mut body_locals = saved_locals.clone();
+            let mut body_defers = saved_defers.clone();
+            body_defers.push_loop_scope();
             let mut body_terminated = false;
             for stmt in &while_stmt.body.stmts {
                 let flow = emit_hir_stmt(
@@ -335,6 +694,9 @@ fn emit_hir_stmt_inner(
                     struct_layouts,
                     module,
                     data_counter,
+                    body_loop_target,
+                    return_lowering,
+                    &mut body_defers,
                 )?;
                 if flow == Flow::Terminated {
                     body_terminated = true;
@@ -343,6 +705,16 @@ fn emit_hir_stmt_inner(
             }
 
             if !body_terminated {
+                body_defers.emit_current_and_pop(
+                    builder,
+                    &body_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                )?;
                 builder.ins().jump(header_block, &[]);
             }
 
@@ -354,6 +726,167 @@ fn emit_hir_stmt_inner(
 
             // After the loop, restore the pre-loop locals snapshot
             *locals = saved_locals;
+        }
+        HirStmt::For(for_stmt) => {
+            // Snapshot locals so loop-body lets don't leak out of the loop
+            let saved_locals = locals.clone();
+            let saved_defers = defer_stack.clone();
+
+            // Create stack slot for loop variable
+            let loop_var_slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                4, // i32 is 4 bytes
+            ));
+
+            // Evaluate start value and store in slot
+            let start_val = emit_hir_expr(
+                builder,
+                &for_stmt.start,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            let start_i32 = match start_val {
+                ValueRepr::Single(v) => v,
+                _ => return Err(CodegenError::Unsupported("for loop start".to_string())),
+            };
+            builder.ins().stack_store(start_i32, loop_var_slot, 0);
+
+            // Evaluate end value (once, before the loop)
+            let end_val = emit_hir_expr(
+                builder,
+                &for_stmt.end,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            let end_i32 = match end_val {
+                ValueRepr::Single(v) => v,
+                _ => return Err(CodegenError::Unsupported("for loop end".to_string())),
+            };
+
+            let header_block = builder.create_block();
+            let body_block = builder.create_block();
+            let increment_block = builder.create_block();
+            let exit_block = builder.create_block();
+
+            builder.ins().jump(header_block, &[]);
+            builder.switch_to_block(header_block);
+
+            // Load loop variable and compare with end
+            let current_val = builder.ins().stack_load(ir::types::I32, loop_var_slot, 0);
+            let cond = builder.ins().icmp(ir::condcodes::IntCC::SignedLessThan, current_val, end_i32);
+            builder.ins().brif(cond, body_block, &[], exit_block, &[]);
+
+            builder.switch_to_block(body_block);
+
+            // Create loop target for break/continue
+            // For for loops, continue goes to increment block (not header)
+            let body_loop_target = Some(LoopTarget {
+                continue_block: increment_block,
+                exit_block,
+            });
+
+            // Loop body gets its own locals with the loop variable bound
+            let mut body_locals = saved_locals.clone();
+            body_locals.insert(
+                for_stmt.var_id,
+                LocalValue::Slot(loop_var_slot, ir::types::I32),
+            );
+            let mut body_defers = saved_defers.clone();
+            body_defers.push_loop_scope();
+
+            let mut body_terminated = false;
+            for stmt in &for_stmt.body.stmts {
+                let flow = emit_hir_stmt(
+                    builder,
+                    stmt,
+                    &mut body_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                    data_counter,
+                    body_loop_target,
+                    return_lowering,
+                    &mut body_defers,
+                )?;
+                if flow == Flow::Terminated {
+                    body_terminated = true;
+                    break;
+                }
+            }
+
+            // Fall through to increment block (if not terminated by break/continue/return)
+            if !body_terminated {
+                body_defers.emit_current_and_pop(
+                    builder,
+                    &body_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                )?;
+                builder.ins().jump(increment_block, &[]);
+            }
+
+            // Increment block: increment loop variable and jump back to header
+            builder.switch_to_block(increment_block);
+            let current = builder.ins().stack_load(ir::types::I32, loop_var_slot, 0);
+            let one = builder.ins().iconst(ir::types::I32, 1);
+            let next = builder.ins().iadd(current, one);
+            builder.ins().stack_store(next, loop_var_slot, 0);
+            builder.ins().jump(header_block, &[]);
+
+            builder.seal_block(body_block);
+            builder.seal_block(increment_block);
+            builder.seal_block(header_block);
+
+            builder.switch_to_block(exit_block);
+            builder.seal_block(exit_block);
+
+            // After the loop, restore the pre-loop locals snapshot
+            *locals = saved_locals;
+        }
+        HirStmt::Break(_) => {
+            let target = loop_target.expect("break outside of loop (should be caught by typeck)");
+            defer_stack.emit_until_loop_and_pop(
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            builder.ins().jump(target.exit_block, &[]);
+            return Ok(Flow::Terminated);
+        }
+        HirStmt::Continue(_) => {
+            let target = loop_target.expect("continue outside of loop (should be caught by typeck)");
+            defer_stack.emit_until_loop_and_pop(
+                builder,
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            builder.ins().jump(target.continue_block, &[]);
+            return Ok(Flow::Terminated);
         }
     }
     Ok(Flow::Continues)
@@ -367,6 +900,7 @@ fn emit_hir_expr(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -377,6 +911,7 @@ fn emit_hir_expr(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )
@@ -390,6 +925,7 @@ fn emit_hir_expr_inner(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -406,7 +942,9 @@ fn emit_hir_expr_inner(
             Literal::Bool(value) => Ok(ValueRepr::Single(
                 builder.ins().iconst(ir::types::I8, *value as i64),
             )),
-            Literal::String(value) => emit_string(builder, value, module, data_counter),
+            Literal::String(value) => {
+                emit_string(builder, value, module, data_counter, struct_layouts)
+            }
             Literal::Unit => Ok(ValueRepr::Unit),
         },
         HirExpr::Local(local) => {
@@ -421,7 +959,7 @@ fn emit_hir_expr_inner(
         HirExpr::EnumVariant(variant) => {
             // Check if this is a Result type with payload (Ok/Err)
             if let crate::typeck::Ty::Path(ty_name, args) = &variant.enum_ty.ty {
-                if ty_name == "Result" && args.len() == 2 {
+                if ty_name == "sys.result.Result" && args.len() == 2 {
                     let AbiType::Result(ok_abi, err_abi) = &variant.enum_ty.abi else {
                         return Err(CodegenError::Unsupported(
                             abi_quirks::result_abi_mismatch_error().to_string(),
@@ -449,19 +987,36 @@ fn emit_hir_expr_inner(
                                     fn_map,
                                     enum_index,
                                     struct_layouts,
+                                    return_lowering,
                                     module,
                                     data_counter,
                                 )?
                             } else {
-                                zero_value_for_ty(builder, &ok_ty, ptr_ty, Some(struct_layouts))?
+                                zero_value_for_ty(
+                                    builder,
+                                    &ok_ty,
+                                    ptr_ty,
+                                    Some(struct_layouts),
+                                    module,
+                                )?
                             };
-                            let err_zero =
-                                zero_value_for_ty(builder, &err_ty, ptr_ty, Some(struct_layouts))?;
+                            let err_zero = zero_value_for_ty(
+                                builder,
+                                &err_ty,
+                                ptr_ty,
+                                Some(struct_layouts),
+                                module,
+                            )?;
                             (payload, err_zero)
                         }
                         "Err" => {
-                            let ok_zero =
-                                zero_value_for_ty(builder, &ok_ty, ptr_ty, Some(struct_layouts))?;
+                            let ok_zero = zero_value_for_ty(
+                                builder,
+                                &ok_ty,
+                                ptr_ty,
+                                Some(struct_layouts),
+                                module,
+                            )?;
                             let payload = if let Some(payload_expr) = &variant.payload {
                                 emit_hir_expr(
                                     builder,
@@ -470,11 +1025,18 @@ fn emit_hir_expr_inner(
                                     fn_map,
                                     enum_index,
                                     struct_layouts,
+                                    return_lowering,
                                     module,
                                     data_counter,
                                 )?
                             } else {
-                                zero_value_for_ty(builder, &err_ty, ptr_ty, Some(struct_layouts))?
+                                zero_value_for_ty(
+                                    builder,
+                                    &err_ty,
+                                    ptr_ty,
+                                    Some(struct_layouts),
+                                    module,
+                                )?
                             };
                             (ok_zero, payload)
                         }
@@ -522,6 +1084,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -539,7 +1102,7 @@ fn emit_hir_expr_inner(
 
             builder.switch_to_block(err_block);
             let ret_value = match &try_expr.ret_ty.ty {
-                crate::typeck::Ty::Path(name, args) if name == "Result" && args.len() == 2 => {
+                crate::typeck::Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
                     let AbiType::Result(ok_abi, _err_abi) = &try_expr.ret_ty.abi else {
                         return Err(CodegenError::Unsupported(
                             abi_quirks::result_abi_mismatch_error().to_string(),
@@ -550,8 +1113,13 @@ fn emit_hir_expr_inner(
                         abi: (**ok_abi).clone(),
                     };
                     let ptr_ty = module.isa().pointer_type();
-                    let ok_zero =
-                        zero_value_for_ty(builder, &ok_ty, ptr_ty, Some(struct_layouts))?;
+                    let ok_zero = zero_value_for_ty(
+                        builder,
+                        &ok_ty,
+                        ptr_ty,
+                        Some(struct_layouts),
+                        module,
+                    )?;
                     let tag_val = builder.ins().iconst(ir::types::I8, 1);
                     ValueRepr::Result {
                         tag: tag_val,
@@ -565,14 +1133,69 @@ fn emit_hir_expr_inner(
                     ))
                 }
             };
-            let ret_values = flatten_value(&ret_value);
-            builder.ins().return_(&ret_values);
+            match return_lowering {
+                ReturnLowering::Direct => {
+                    let ret_values = flatten_value(&ret_value);
+                    builder.ins().return_(&ret_values);
+                }
+                ReturnLowering::SRet { out_ptr, ret_ty } => {
+                    store_out_value(
+                        builder,
+                        *out_ptr,
+                        ret_ty,
+                        ret_value,
+                        struct_layouts,
+                        module,
+                    )?;
+                    builder.ins().return_(&[]);
+                }
+                ReturnLowering::ResultOut {
+                    out_ok,
+                    out_err,
+                    ok_ty,
+                    err_ty,
+                } => {
+                    let ValueRepr::Result { tag, ok, err } = ret_value else {
+                        return Err(CodegenError::Unsupported(
+                            "try expects a Result value".to_string(),
+                        ));
+                    };
+                    if let Some(out_ok) = out_ok {
+                        store_out_value(
+                            builder,
+                            *out_ok,
+                            ok_ty,
+                            *ok,
+                            struct_layouts,
+                            module,
+                        )?;
+                    }
+                    if let Some(out_err) = out_err {
+                        store_out_value(
+                            builder,
+                            *out_err,
+                            err_ty,
+                            *err,
+                            struct_layouts,
+                            module,
+                        )?;
+                    }
+                    builder.ins().return_(&[tag]);
+                }
+            }
             builder.seal_block(err_block);
 
             builder.switch_to_block(ok_block);
             builder.seal_block(ok_block);
 
             Ok(*ok)
+        }
+        HirExpr::Trap(_trap) => {
+            builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
+            // Return a dummy value - the block is now filled so no more
+            // instructions can be added. The match handler will detect this
+            // and skip value storage.
+            Ok(ValueRepr::Unit)
         }
         HirExpr::Call(call) => {
             // HIR calls are already fully resolved - no path resolution needed!
@@ -589,6 +1212,7 @@ fn emit_hir_expr_inner(
                             fn_map,
                             enum_index,
                             struct_layouts,
+                            return_lowering,
                             module,
                             data_counter,
                         )?;
@@ -604,9 +1228,30 @@ fn emit_hir_expr_inner(
                 .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
                 .clone();
             ensure_abi_sig_handled(&info)?;
+            let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
 
             // Emit arguments
             let mut args = Vec::new();
+            let mut sret_ptr = None;
+            if info.sig.ret == AbiType::Ptr
+                && abi_sig.ret == AbiType::Unit
+                && is_non_opaque_struct_type(&call.ret_ty, struct_layouts)
+            {
+                let layout =
+                    resolve_struct_layout(&call.ret_ty.ty, "", &struct_layouts.layouts).ok_or_else(
+                        || CodegenError::Unsupported("struct layout missing".to_string()),
+                    )?;
+                let ptr_ty = module.isa().pointer_type();
+                let align = layout.align.max(1);
+                let slot_size = layout.size.max(1).saturating_add(align - 1);
+                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    slot_size,
+                ));
+                let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                args.push(base_ptr);
+                sret_ptr = Some(base_ptr);
+            }
             for arg in &call.args {
                 let value = emit_hir_expr(
                     builder,
@@ -615,6 +1260,7 @@ fn emit_hir_expr_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -622,15 +1268,31 @@ fn emit_hir_expr_inner(
             }
 
             // Handle result out-parameters (same logic as AST version)
-            let mut out_slots: Option<ResultStringSlots> = None;
             let mut result_out = None;
-            let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
+            let result_payloads = match &call.ret_ty.ty {
+                crate::typeck::Ty::Path(name, args)
+                    if name == "sys.result.Result" && args.len() == 2 =>
+                {
+                    match &call.ret_ty.abi {
+                        AbiType::Result(ok_abi, err_abi) => Some((
+                            crate::hir::HirType {
+                                ty: args[0].clone(),
+                                abi: (**ok_abi).clone(),
+                            },
+                            crate::hir::HirType {
+                                ty: args[1].clone(),
+                                abi: (**err_abi).clone(),
+                            },
+                        )),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
 
-            if abi_quirks::is_result_string(&abi_sig.ret) {
-                let ptr_ty = module.isa().pointer_type();
-                let slots = result_string_slots(builder, ptr_ty);
-                push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
-                out_slots = Some(slots);
+            enum ResultOutSlot {
+                Scalar(ir::StackSlot, ir::Type, u32),
+                Struct(ir::Value),
             }
 
             if let AbiType::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
@@ -638,36 +1300,106 @@ fn emit_hir_expr_inner(
                 let ok_slot = if **ok_ty == AbiType::Unit {
                     None
                 } else {
-                    let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
-                    let align = ty.bytes().max(1) as u32;
-                    debug_assert!(align.is_power_of_two());
-                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                        ir::StackSlotKind::ExplicitSlot,
-                        aligned_slot_size(ty.bytes().max(1) as u32, align),
-                    ));
-                    let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
-                    args.push(addr);
-                    Some((slot, ty, align))
+                    if let Some((ok_hir, _)) = &result_payloads {
+                        if is_non_opaque_struct_type(ok_hir, struct_layouts) {
+                            let layout = resolve_struct_layout(
+                                &ok_hir.ty,
+                                "",
+                                &struct_layouts.layouts,
+                            )
+                            .ok_or_else(|| {
+                                CodegenError::Unsupported("struct layout missing".to_string())
+                            })?;
+                            let align = layout.align.max(1);
+                            let slot_size = layout.size.max(1).saturating_add(align - 1);
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                slot_size,
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Struct(addr))
+                        } else {
+                            let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+                            let align = ty.bytes().max(1) as u32;
+                            debug_assert!(align.is_power_of_two());
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                aligned_slot_size(ty.bytes().max(1) as u32, align),
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Scalar(slot, ty, align))
+                        }
+                    } else {
+                        let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+                        let align = ty.bytes().max(1) as u32;
+                        debug_assert!(align.is_power_of_two());
+                        let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                            ir::StackSlotKind::ExplicitSlot,
+                            aligned_slot_size(ty.bytes().max(1) as u32, align),
+                        ));
+                        let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                        args.push(addr);
+                        Some(ResultOutSlot::Scalar(slot, ty, align))
+                    }
                 };
                 let err_slot = if **err_ty == AbiType::Unit {
                     None
                 } else {
-                    let ty = value_type_for_result_out(err_ty, ptr_ty)?;
-                    let align = ty.bytes().max(1) as u32;
-                    debug_assert!(align.is_power_of_two());
-                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                        ir::StackSlotKind::ExplicitSlot,
-                        aligned_slot_size(ty.bytes().max(1) as u32, align),
-                    ));
-                    let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
-                    args.push(addr);
-                    Some((slot, ty, align))
+                    if let Some((_, err_hir)) = &result_payloads {
+                        if is_non_opaque_struct_type(err_hir, struct_layouts) {
+                            let layout = resolve_struct_layout(
+                                &err_hir.ty,
+                                "",
+                                &struct_layouts.layouts,
+                            )
+                            .ok_or_else(|| {
+                                CodegenError::Unsupported("struct layout missing".to_string())
+                            })?;
+                            let align = layout.align.max(1);
+                            let slot_size = layout.size.max(1).saturating_add(align - 1);
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                slot_size,
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Struct(addr))
+                        } else {
+                            let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+                            let align = ty.bytes().max(1) as u32;
+                            debug_assert!(align.is_power_of_two());
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                aligned_slot_size(ty.bytes().max(1) as u32, align),
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Scalar(slot, ty, align))
+                        }
+                    } else {
+                        let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+                        let align = ty.bytes().max(1) as u32;
+                        debug_assert!(align.is_power_of_two());
+                        let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                            ir::StackSlotKind::ExplicitSlot,
+                            aligned_slot_size(ty.bytes().max(1) as u32, align),
+                        ));
+                        let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                        args.push(addr);
+                        Some(ResultOutSlot::Scalar(slot, ty, align))
+                    }
                 };
                 result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
             }
 
             // Emit the call
-            let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+            let sig = sig_to_clif(
+                abi_sig,
+                module.isa().pointer_type(),
+                module.isa().default_call_conv(),
+            );
             let call_symbol = info.runtime_symbol.as_deref().unwrap_or(&info.symbol);
             let func_id = module
                 .declare_function(
@@ -685,58 +1417,43 @@ fn emit_hir_expr_inner(
             let results = builder.inst_results(call_inst).to_vec();
 
             // Handle result unpacking (same logic as AST version)
-            if abi_quirks::is_result_string(&abi_sig.ret) {
-                let tag = results
-                    .get(0)
-                    .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
-                let slots =
-                    out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
-                let ptr_ty = module.isa().pointer_type();
-                let (ptr, len, err) = read_result_string_slots(builder, ptr_ty, &slots);
-                match &info.sig.ret {
-                    AbiType::Result(ok_ty, err_ty) => {
-                        if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
-                            return Err(CodegenError::Unsupported(
-                                abi_quirks::result_out_params_error().to_string(),
-                            ));
-                        }
-                        Ok(ValueRepr::Result {
-                            tag: *tag,
-                            ok: Box::new(ValueRepr::Pair(ptr, len)),
-                            err: Box::new(ValueRepr::Single(err)),
-                        })
-                    }
-                    _ => Err(CodegenError::Unsupported(
-                        abi_quirks::result_out_params_error().to_string(),
-                    )),
-                }
-            } else if abi_quirks::is_result_out(&abi_sig.ret) {
+            if abi_quirks::is_result_out(&abi_sig.ret) {
                 let tag = results
                     .get(0)
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
                 let (ok_slot, err_slot, ok_ty, err_ty) = result_out
                     .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
-                let ok_val = if let Some((slot, ty, align)) = ok_slot {
-                    let addr = aligned_stack_addr(
-                        builder,
-                        slot,
-                        align,
-                        module.isa().pointer_type(),
-                    );
-                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
-                    ValueRepr::Single(val)
+                let ok_val = if let Some(slot) = ok_slot {
+                    match slot {
+                        ResultOutSlot::Scalar(slot, ty, align) => {
+                            let addr = aligned_stack_addr(
+                                builder,
+                                slot,
+                                align,
+                                module.isa().pointer_type(),
+                            );
+                            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                            ValueRepr::Single(val)
+                        }
+                        ResultOutSlot::Struct(ptr) => ValueRepr::Single(ptr),
+                    }
                 } else {
                     ValueRepr::Unit
                 };
-                let err_val = if let Some((slot, ty, align)) = err_slot {
-                    let addr = aligned_stack_addr(
-                        builder,
-                        slot,
-                        align,
-                        module.isa().pointer_type(),
-                    );
-                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
-                    ValueRepr::Single(val)
+                let err_val = if let Some(slot) = err_slot {
+                    match slot {
+                        ResultOutSlot::Scalar(slot, ty, align) => {
+                            let addr = aligned_stack_addr(
+                                builder,
+                                slot,
+                                align,
+                                module.isa().pointer_type(),
+                            );
+                            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                            ValueRepr::Single(val)
+                        }
+                        ResultOutSlot::Struct(ptr) => ValueRepr::Single(ptr),
+                    }
                 } else {
                     ValueRepr::Unit
                 };
@@ -750,6 +1467,8 @@ fn emit_hir_expr_inner(
                         "result out params for {ok_ty:?}/{err_ty:?}"
                     ))),
                 }
+            } else if let Some(ptr) = sret_ptr {
+                Ok(ValueRepr::Single(ptr))
             } else {
                 let mut index = 0;
                 value_from_results(builder, &info.sig.ret, &results, &mut index)
@@ -763,6 +1482,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -773,9 +1493,9 @@ fn emit_hir_expr_inner(
                     ValueRepr::Unit => {
                         return Err(CodegenError::Unsupported("boolean op on unit".to_string()))
                     }
-                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                    ValueRepr::Result { .. } => {
                         return Err(CodegenError::Unsupported(
-                            "boolean op on string".to_string(),
+                            "boolean op on result".to_string(),
                         ))
                     }
                 };
@@ -788,6 +1508,7 @@ fn emit_hir_expr_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 );
@@ -800,6 +1521,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -816,6 +1538,21 @@ fn emit_hir_expr_inner(
                 }
                 (BinaryOp::Div, ValueRepr::Single(a), ValueRepr::Single(b)) => {
                     Ok(ValueRepr::Single(emit_checked_div(builder, a, b, &binary.ty)?))
+                }
+                (BinaryOp::Eq, ValueRepr::Single(a), ValueRepr::Single(b))
+                    if is_string_type(&binary.left.ty().ty) =>
+                {
+                    let result = emit_string_eq(builder, module, a, b)?;
+                    Ok(ValueRepr::Single(result))
+                }
+                (BinaryOp::Neq, ValueRepr::Single(a), ValueRepr::Single(b))
+                    if is_string_type(&binary.left.ty().ty) =>
+                {
+                    let eq_result = emit_string_eq(builder, module, a, b)?;
+                    // Invert the result: 1 becomes 0, 0 becomes 1
+                    let one = builder.ins().iconst(ir::types::I8, 1);
+                    let neq_result = builder.ins().bxor(eq_result, one);
+                    Ok(ValueRepr::Single(neq_result))
                 }
                 (BinaryOp::Eq, ValueRepr::Single(a), ValueRepr::Single(b)) => {
                     let cmp = builder.ins().icmp(IntCC::Equal, a, b);
@@ -868,6 +1605,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -888,7 +1626,10 @@ fn emit_hir_expr_inner(
                 match_expr.result_ty.ty,
                 crate::typeck::Ty::Builtin(crate::typeck::BuiltinType::Unit)
             ) {
-                emit_hir_match_stmt(
+                // Note: divergence handling is done at HirStmt::Expr level.
+                // Here we just emit the match and return Unit.
+                let mut temp_defers = DeferStack::new();
+                let _diverged = emit_hir_match_stmt(
                     builder,
                     match_expr,
                     locals,
@@ -897,7 +1638,11 @@ fn emit_hir_expr_inner(
                     struct_layouts,
                     module,
                     data_counter,
-                )
+                    None, // break/continue not supported in expression-context matches
+                    return_lowering,
+                    &mut temp_defers,
+                )?;
+                Ok(ValueRepr::Unit)
             } else {
                 emit_hir_match_expr(
                     builder,
@@ -906,6 +1651,7 @@ fn emit_hir_expr_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )
@@ -918,6 +1664,18 @@ fn emit_hir_expr_inner(
             fn_map,
             enum_index,
             struct_layouts,
+            return_lowering,
+            module,
+            data_counter,
+        ),
+        HirExpr::Index(index_expr) => emit_hir_index(
+            builder,
+            index_expr,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            return_lowering,
             module,
             data_counter,
         ),
@@ -929,6 +1687,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )
@@ -1017,6 +1776,237 @@ fn trap_on_overflow(builder: &mut FunctionBuilder, overflow: Value) {
     builder.seal_block(ok_block);
 }
 
+/// Emit a call to the runtime string equality function.
+/// Returns an i8 value: 1 if strings are equal, 0 otherwise.
+fn emit_string_eq(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    lhs: Value,
+    rhs: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (ptr, ptr) -> i8
+    let mut sig = Signature::new(module.isa().default_call_conv());
+    sig.params.push(AbiParam::new(ptr_ty));
+    sig.params.push(AbiParam::new(ptr_ty));
+    sig.returns.push(AbiParam::new(ir::types::I8));
+
+    // Declare and import the runtime function
+    let func_id = module
+        .declare_function("capable_rt_string_eq", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+
+    // Call the function
+    let call_inst = builder.ins().call(local_func, &[lhs, rhs]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
+}
+
+fn is_string_type(ty: &crate::typeck::Ty) -> bool {
+    matches!(ty, crate::typeck::Ty::Path(name, _) if name == "sys.string.string" || name == "string")
+}
+
+/// Emit an index expression, calling the appropriate runtime function.
+fn emit_hir_index(
+    builder: &mut FunctionBuilder,
+    index_expr: &crate::hir::HirIndex,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
+    module: &mut ObjectModule,
+    data_counter: &mut u32,
+) -> Result<ValueRepr, CodegenError> {
+    // Emit the object expression
+    let object = emit_hir_expr(
+        builder,
+        &index_expr.object,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        return_lowering,
+        module,
+        data_counter,
+    )?;
+
+    // Emit the index expression
+    let index = emit_hir_expr(
+        builder,
+        &index_expr.index,
+        locals,
+        fn_map,
+        enum_index,
+        struct_layouts,
+        return_lowering,
+        module,
+        data_counter,
+    )?;
+
+    let index_val = match index {
+        ValueRepr::Single(v) => v,
+        _ => {
+            return Err(CodegenError::Codegen(
+                "index must be a single value".to_string(),
+            ))
+        }
+    };
+
+    // Get the object type to determine what runtime function to call
+    let object_ty = &index_expr.object.ty().ty;
+
+    match object_ty {
+        ty if is_string_type(ty) => {
+            // For strings, index into the backing Slice<u8>.
+            let base_ptr = match object {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Codegen(
+                        "expected string to be a struct pointer".to_string(),
+                    ))
+                }
+            };
+            let layout = resolve_struct_layout(object_ty, "", &struct_layouts.layouts).ok_or_else(
+                || CodegenError::Unsupported("string layout missing".to_string()),
+            )?;
+            let field = layout.fields.get("bytes").ok_or_else(|| {
+                CodegenError::Unsupported("string.bytes field missing".to_string())
+            })?;
+            let addr = ptr_add(builder, base_ptr, field.offset);
+            let handle = builder
+                .ins()
+                .load(ir::types::I64, MemFlags::new(), addr, 0);
+            let result = emit_slice_at(builder, module, handle, index_val)?;
+            Ok(ValueRepr::Single(result))
+        }
+        crate::typeck::Ty::Path(name, _) if name == "Slice" || name == "sys.buffer.Slice" => {
+            // For Slice[u8], call capable_rt_slice_at(handle, index) -> u8
+            let handle = match object {
+                ValueRepr::Single(h) => h,
+                _ => {
+                    return Err(CodegenError::Codegen(
+                        "expected Slice to be a handle".to_string(),
+                    ))
+                }
+            };
+
+            let result = emit_slice_at(builder, module, handle, index_val)?;
+            Ok(ValueRepr::Single(result))
+        }
+        crate::typeck::Ty::Path(name, _) if name == "MutSlice" || name == "sys.buffer.MutSlice" => {
+            // For MutSlice[u8], call capable_rt_mut_slice_at(handle, index) -> u8
+            let handle = match object {
+                ValueRepr::Single(h) => h,
+                _ => {
+                    return Err(CodegenError::Codegen(
+                        "expected MutSlice to be a handle".to_string(),
+                    ))
+                }
+            };
+
+            let result = emit_mut_slice_at(builder, module, handle, index_val)?;
+            Ok(ValueRepr::Single(result))
+        }
+        _ => Err(CodegenError::Codegen(format!(
+            "cannot index into type {:?}",
+            object_ty
+        ))),
+    }
+}
+
+/// Emit a call to the runtime slice at function.
+/// Returns a u8 value at the given index.
+fn emit_slice_at(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    handle: Value,
+    index: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (handle, i32) -> u8
+    let mut sig = Signature::new(module.isa().default_call_conv());
+    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
+    sig.params.push(AbiParam::new(ir::types::I32));
+    sig.returns.push(AbiParam::new(ir::types::I8));
+
+    // Declare and import the runtime function
+    let func_id = module
+        .declare_function("capable_rt_slice_at", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+
+    // Call the function
+    let call_inst = builder.ins().call(local_func, &[handle, index]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
+}
+
+/// Emit a call to the runtime slice_from_ptr helper.
+fn emit_slice_from_ptr(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    ptr: Value,
+    len: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (handle, ptr, i32) -> handle
+    let mut sig = Signature::new(module.isa().default_call_conv());
+    sig.params.push(AbiParam::new(ir::types::I64));
+    sig.params.push(AbiParam::new(ptr_ty));
+    sig.params.push(AbiParam::new(ir::types::I32));
+    sig.returns.push(AbiParam::new(ir::types::I64));
+
+    let func_id = module
+        .declare_function("capable_rt_slice_from_ptr", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+    let default_alloc = builder.ins().iconst(ir::types::I64, 0);
+    let call_inst = builder.ins().call(local_func, &[default_alloc, ptr, len]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
+}
+
+/// Emit a call to the runtime mutable slice at function.
+/// Returns a u8 value at the given index.
+fn emit_mut_slice_at(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    handle: Value,
+    index: Value,
+) -> Result<Value, CodegenError> {
+    use cranelift_codegen::ir::{AbiParam, Signature};
+
+    let ptr_ty = module.isa().pointer_type();
+
+    // Build signature: (handle, i32) -> u8
+    let mut sig = Signature::new(module.isa().default_call_conv());
+    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
+    sig.params.push(AbiParam::new(ir::types::I32));
+    sig.returns.push(AbiParam::new(ir::types::I8));
+
+    // Declare and import the runtime function
+    let func_id = module
+        .declare_function("capable_rt_mut_slice_at", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local_func = module.declare_func_in_func(func_id, builder.func);
+
+    // Call the function
+    let call_inst = builder.ins().call(local_func, &[handle, index]);
+    let results = builder.inst_results(call_inst);
+    Ok(results[0])
+}
+
 fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
     let ty = match expr {
         crate::hir::HirExpr::Literal(lit) => &lit.ty,
@@ -1024,11 +2014,13 @@ fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
         crate::hir::HirExpr::EnumVariant(variant) => &variant.enum_ty,
         crate::hir::HirExpr::Call(call) => &call.ret_ty,
         crate::hir::HirExpr::FieldAccess(field) => &field.field_ty,
+        crate::hir::HirExpr::Index(idx) => &idx.elem_ty,
         crate::hir::HirExpr::StructLiteral(lit) => &lit.struct_ty,
         crate::hir::HirExpr::Unary(unary) => &unary.ty,
         crate::hir::HirExpr::Binary(binary) => &binary.ty,
         crate::hir::HirExpr::Match(m) => &m.result_ty,
         crate::hir::HirExpr::Try(t) => &t.ok_ty,
+        crate::hir::HirExpr::Trap(t) => &t.ty,
     };
     if crate::typeck::is_unsigned_type(&ty.ty) {
         unsigned
@@ -1045,6 +2037,7 @@ fn emit_hir_struct_literal(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1078,6 +2071,7 @@ fn emit_hir_struct_literal(
             fn_map,
             enum_index,
             struct_layouts,
+            return_lowering,
             module,
             data_counter,
         )?;
@@ -1103,6 +2097,7 @@ fn emit_hir_field_access(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1128,6 +2123,7 @@ fn emit_hir_field_access(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -1150,6 +2146,51 @@ fn emit_hir_field_access(
     )
 }
 
+fn is_non_opaque_struct_type(
+    ty: &crate::hir::HirType,
+    struct_layouts: &StructLayoutIndex,
+) -> bool {
+    resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts).is_some()
+}
+
+fn store_out_value(
+    builder: &mut FunctionBuilder,
+    out_ptr: ir::Value,
+    ty: &crate::hir::HirType,
+    value: ValueRepr,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+) -> Result<(), CodegenError> {
+    if is_non_opaque_struct_type(ty, struct_layouts) {
+        return store_value_by_ty(
+            builder,
+            out_ptr,
+            0,
+            ty,
+            value,
+            struct_layouts,
+            module,
+        );
+    }
+    match ty.abi {
+        AbiType::I32
+        | AbiType::U32
+        | AbiType::U8
+        | AbiType::Bool
+        | AbiType::Handle
+        | AbiType::Ptr => store_value_by_tykind(
+            builder,
+            out_ptr,
+            &ty.abi,
+            value,
+            module.isa().pointer_type(),
+        ),
+        _ => Err(CodegenError::Unsupported(
+            "return out param type".to_string(),
+        )),
+    }
+}
+
 /// Store a lowered value into memory using a typeck::Ty layout.
 fn store_value_by_ty(
     builder: &mut FunctionBuilder,
@@ -1166,7 +2207,7 @@ fn store_value_by_ty(
     let ptr_ty = module.isa().pointer_type();
     match &ty.ty {
         Ty::Builtin(b) => match b {
-            BuiltinType::Unit => Ok(()),
+            BuiltinType::Unit | BuiltinType::Never => Ok(()),
             BuiltinType::I32 | BuiltinType::U32 => {
                 let ValueRepr::Single(val) = value else {
                     return Err(CodegenError::Unsupported("store i32".to_string()));
@@ -1179,17 +2220,6 @@ fn store_value_by_ty(
                     return Err(CodegenError::Unsupported("store u8".to_string()));
                 };
                 builder.ins().store(MemFlags::new(), val, addr, 0);
-                Ok(())
-            }
-            BuiltinType::String => {
-                let ValueRepr::Pair(ptr, len) = value else {
-                    return Err(CodegenError::Unsupported("store string".to_string()));
-                };
-                let (ptr_off, len_off) = string_offsets(ptr_ty);
-                let ptr_addr = ptr_add(builder, base_ptr, offset + ptr_off);
-                let len_addr = ptr_add(builder, base_ptr, offset + len_off);
-                builder.ins().store(MemFlags::new(), ptr, ptr_addr, 0);
-                builder.ins().store(MemFlags::new(), len, len_addr, 0);
                 Ok(())
             }
             BuiltinType::I64 => Err(CodegenError::Unsupported("i64 not yet supported".to_string())),
@@ -1220,7 +2250,7 @@ fn store_value_by_ty(
             "generic type parameters must be monomorphized before codegen".to_string(),
         )),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let ValueRepr::Result { tag, ok, err } = value else {
                     return Err(CodegenError::Unsupported("store result".to_string()));
                 };
@@ -1333,25 +2363,13 @@ fn load_value_by_ty(
     let ptr_ty = module.isa().pointer_type();
     match &ty.ty {
         Ty::Builtin(b) => match b {
-            BuiltinType::Unit => Ok(ValueRepr::Unit),
+            BuiltinType::Unit | BuiltinType::Never => Ok(ValueRepr::Unit),
             BuiltinType::I32 | BuiltinType::U32 => Ok(ValueRepr::Single(
                 builder.ins().load(ir::types::I32, MemFlags::new(), addr, 0),
             )),
             BuiltinType::U8 | BuiltinType::Bool => Ok(ValueRepr::Single(
                 builder.ins().load(ir::types::I8, MemFlags::new(), addr, 0),
             )),
-            BuiltinType::String => {
-                let (ptr_off, len_off) = string_offsets(ptr_ty);
-                let ptr_addr = ptr_add(builder, base_ptr, offset + ptr_off);
-                let len_addr = ptr_add(builder, base_ptr, offset + len_off);
-                let ptr = builder
-                    .ins()
-                    .load(ptr_ty, MemFlags::new(), ptr_addr, 0);
-                let len = builder
-                    .ins()
-                    .load(ir::types::I64, MemFlags::new(), len_addr, 0);
-                Ok(ValueRepr::Pair(ptr, len))
-            }
             BuiltinType::I64 => Err(CodegenError::Unsupported("i64 not yet supported".to_string())),
         },
         Ty::Ptr(_) => Ok(ValueRepr::Single(
@@ -1375,7 +2393,7 @@ fn load_value_by_ty(
             "generic type parameters must be monomorphized before codegen".to_string(),
         )),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
                     return Err(CodegenError::Unsupported(
                         abi_quirks::result_abi_mismatch_error().to_string(),
@@ -1480,72 +2498,6 @@ fn aligned_slot_size(size: u32, align: u32) -> u32 {
     size.max(1).saturating_add(align.saturating_sub(1))
 }
 
-fn result_string_slots(builder: &mut FunctionBuilder, ptr_ty: Type) -> ResultStringSlots {
-    let ptr_align = ptr_ty.bytes() as u32;
-    let len_bytes = abi_quirks::result_string_len_bytes();
-    let len_align = len_bytes;
-    let err_align = 4u32;
-    let slot_ptr = builder.create_sized_stack_slot(ir::StackSlotData::new(
-        ir::StackSlotKind::ExplicitSlot,
-        aligned_slot_size(ptr_ty.bytes() as u32, ptr_align),
-    ));
-    let slot_len = builder.create_sized_stack_slot(ir::StackSlotData::new(
-        ir::StackSlotKind::ExplicitSlot,
-        aligned_slot_size(len_bytes, len_align),
-    ));
-    let slot_err = builder.create_sized_stack_slot(ir::StackSlotData::new(
-        ir::StackSlotKind::ExplicitSlot,
-        aligned_slot_size(4, err_align),
-    ));
-    ResultStringSlots {
-        slot_ptr,
-        slot_len,
-        slot_err,
-        ptr_align,
-        len_align,
-        err_align,
-    }
-}
-
-fn push_result_string_out_params(
-    builder: &mut FunctionBuilder,
-    ptr_ty: Type,
-    slots: &ResultStringSlots,
-    args: &mut Vec<Value>,
-) {
-    let ptr_ptr = aligned_stack_addr(builder, slots.slot_ptr, slots.ptr_align, ptr_ty);
-    let len_ptr = aligned_stack_addr(builder, slots.slot_len, slots.len_align, ptr_ty);
-    let err_ptr = aligned_stack_addr(builder, slots.slot_err, slots.err_align, ptr_ty);
-    args.push(ptr_ptr);
-    args.push(len_ptr);
-    args.push(err_ptr);
-}
-
-fn read_result_string_slots(
-    builder: &mut FunctionBuilder,
-    ptr_ty: Type,
-    slots: &ResultStringSlots,
-) -> (Value, Value, Value) {
-    let ptr_addr = aligned_stack_addr(builder, slots.slot_ptr, slots.ptr_align, ptr_ty);
-    let len_addr = aligned_stack_addr(builder, slots.slot_len, slots.len_align, ptr_ty);
-    let err_addr = aligned_stack_addr(builder, slots.slot_err, slots.err_align, ptr_ty);
-    let ptr = builder.ins().load(ptr_ty, MemFlags::new(), ptr_addr, 0);
-    let len = builder
-        .ins()
-        .load(ir::types::I64, MemFlags::new(), len_addr, 0);
-    let err = builder
-        .ins()
-        .load(ir::types::I32, MemFlags::new(), err_addr, 0);
-    (ptr, len, err)
-}
-
-/// Compute pointer/len offsets for the string layout.
-fn string_offsets(ptr_ty: Type) -> (u32, u32) {
-    let ptr_size = ptr_ty.bytes() as u32;
-    let len_offset = align_to(ptr_size, 8);
-    (0, len_offset)
-}
-
 /// Compute offsets for Result layout (tag, ok, err).
 fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
     let tag_offset = 0u32;
@@ -1579,6 +2531,7 @@ fn emit_hir_short_circuit_expr(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1606,6 +2559,7 @@ fn emit_hir_short_circuit_expr(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -1621,8 +2575,8 @@ fn emit_hir_short_circuit_expr(
     Ok(ValueRepr::Single(param))
 }
 
-/// Emit HIR match as statement (arms can contain returns, don't produce values)
 /// Emit HIR match as statement (arms can contain returns, don't produce values).
+/// Returns true if all paths diverged (returned/broke/continued).
 fn emit_hir_match_stmt(
     builder: &mut FunctionBuilder,
     match_expr: &crate::hir::HirMatch,
@@ -1632,7 +2586,10 @@ fn emit_hir_match_stmt(
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
     data_counter: &mut u32,
-) -> Result<ValueRepr, CodegenError> {
+    loop_target: Option<LoopTarget>,
+    return_lowering: &ReturnLowering,
+    defer_stack: &mut DeferStack,
+) -> Result<bool, CodegenError> {
     // Emit the scrutinee expression
     let value = emit_hir_expr(
         builder,
@@ -1641,6 +2598,7 @@ fn emit_hir_match_stmt(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -1649,9 +2607,6 @@ fn emit_hir_match_stmt(
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
-        ValueRepr::Pair(_, _) => {
-            return Err(CodegenError::Unsupported("match on string".to_string()))
-        }
     };
 
     let merge_block = builder.create_block();
@@ -1694,6 +2649,8 @@ fn emit_hir_match_stmt(
         builder.switch_to_block(arm_block);
 
         let mut arm_locals = locals.clone();
+        let mut arm_defers = defer_stack.clone();
+        arm_defers.push_block_scope();
         hir_bind_match_pattern_value(
             builder,
             &arm.pattern,
@@ -1714,6 +2671,9 @@ fn emit_hir_match_stmt(
                 struct_layouts,
                 module,
                 data_counter,
+                loop_target,
+                return_lowering,
+                &mut arm_defers,
             )?;
             if flow == Flow::Terminated {
                 arm_terminated = true;
@@ -1723,6 +2683,16 @@ fn emit_hir_match_stmt(
 
         // If the arm didn't terminate (e.g., with return), jump to merge block
         if !arm_terminated {
+            arm_defers.emit_current_and_pop(
+                builder,
+                &arm_locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
             builder.ins().jump(merge_block, &[]);
             any_arm_continues = true;
         }
@@ -1739,7 +2709,8 @@ fn emit_hir_match_stmt(
         builder.ins().trap(ir::TrapCode::UnreachableCodeReached);
     }
 
-    Ok(ValueRepr::Unit)
+    // Return true if all paths diverged (no arm continues to merge_block)
+    Ok(!any_arm_continues)
 }
 
 /// Emit HIR match expression
@@ -1751,6 +2722,7 @@ fn emit_hir_match_expr(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1764,6 +2736,7 @@ fn emit_hir_match_expr(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -1772,9 +2745,6 @@ fn emit_hir_match_expr(
         ValueRepr::Single(v) => (v, None),
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
-        ValueRepr::Pair(_, _) => {
-            return Err(CodegenError::Unsupported("match on string".to_string()))
-        }
     };
 
     let merge_block = builder.create_block();
@@ -1807,6 +2777,8 @@ fn emit_hir_match_expr(
 
         builder.switch_to_block(arm_block);
         let mut arm_locals = locals.clone();
+        let mut arm_defers = DeferStack::new();
+        arm_defers.push_block_scope();
         hir_bind_match_pattern_value(
             builder,
             &arm.pattern,
@@ -1832,6 +2804,9 @@ fn emit_hir_match_expr(
                 struct_layouts,
                 module,
                 data_counter,
+                None, // break/continue not allowed in value-producing match
+                return_lowering,
+                &mut arm_defers,
             )?;
             if flow == Flow::Terminated {
                 prefix_terminated = true;
@@ -1847,17 +2822,23 @@ fn emit_hir_match_expr(
         }
 
         // Last statement should be an expression
-        let arm_value = match last {
-            HirStmt::Expr(expr_stmt) => emit_hir_expr(
-                builder,
-                &expr_stmt.expr,
-                &arm_locals,
-                fn_map,
-                enum_index,
-                struct_layouts,
-                module,
-                data_counter,
-            )?,
+        let (arm_value, arm_diverges) = match last {
+            HirStmt::Expr(expr_stmt) => {
+                // Check if this arm ends with a Trap - if so, it diverges
+                let diverges = matches!(&expr_stmt.expr, crate::hir::HirExpr::Trap(_));
+                let value = emit_hir_expr(
+                    builder,
+                    &expr_stmt.expr,
+                    &arm_locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                )?;
+                (value, diverges)
+            }
             _ => {
                 return Err(CodegenError::Unsupported(
                     "match arm must end with expression".to_string(),
@@ -1865,55 +2846,66 @@ fn emit_hir_match_expr(
             }
         };
 
-        let values = match &arm_value {
-            ValueRepr::Single(val) => vec![*val],
-            ValueRepr::Pair(a, b) => vec![*a, *b],
-            ValueRepr::Unit => vec![],
-            ValueRepr::Result { .. } => {
-                return Err(CodegenError::Unsupported("match result value".to_string()))
-            }
-        };
+        // If the arm diverges (e.g., with a trap), skip value storage
+        if arm_diverges {
+            builder.seal_block(arm_block);
+        } else {
+            let values = match &arm_value {
+                ValueRepr::Single(val) => vec![*val],
+                ValueRepr::Unit => vec![],
+                ValueRepr::Result { .. } => {
+                    return Err(CodegenError::Unsupported("match result value".to_string()))
+                }
+            };
 
-        // Set up result shape and stack slots on first arm
-        if result_shape.is_none() {
-            let mut types = Vec::new();
-            let mut slots = Vec::new();
-            for val in &values {
-                let ty = builder.func.dfg.value_type(*val);
-                let size = ty.bytes() as u32;
-                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                    ir::StackSlotKind::ExplicitSlot,
-                    size.max(1),
-                ));
-                types.push(ty);
-                slots.push(slot);
+            // Set up result shape and stack slots on first non-terminated arm
+            if result_shape.is_none() {
+                let mut types = Vec::new();
+                let mut slots = Vec::new();
+                for val in &values {
+                    let ty = builder.func.dfg.value_type(*val);
+                    let size = ty.bytes() as u32;
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        size.max(1),
+                    ));
+                    types.push(ty);
+                    slots.push(slot);
+                }
+                result_shape = Some(ResultShape {
+                    kind: match &arm_value {
+                        ValueRepr::Unit => ResultKind::Unit,
+                        ValueRepr::Single(_) => ResultKind::Single,
+                        _ => ResultKind::Single,
+                    },
+                    slots,
+                    types,
+                });
             }
-            result_shape = Some(ResultShape {
-                kind: match &arm_value {
-                    ValueRepr::Unit => ResultKind::Unit,
-                    ValueRepr::Single(_) => ResultKind::Single,
-                    ValueRepr::Pair(_, _) => ResultKind::Pair,
-                    _ => ResultKind::Single,
-                },
-                slots,
-                types,
-            });
-        }
 
-        // Store values to stack slots
-        let shape = result_shape
-            .as_ref()
-            .ok_or_else(|| CodegenError::Codegen("missing match result shape".to_string()))?;
-        if values.len() != shape.types.len() {
-            eprintln!("DEBUG: arm value mismatch - values: {:?}, expected: {:?}", values.len(), shape.types.len());
-            eprintln!("DEBUG: arm_value = {:?}", arm_value);
-            return Err(CodegenError::Unsupported("mismatched match arm".to_string()));
+            // Store values to stack slots
+            let shape = result_shape
+                .as_ref()
+                .ok_or_else(|| CodegenError::Codegen("missing match result shape".to_string()))?;
+            if values.len() != shape.types.len() {
+                return Err(CodegenError::Unsupported("mismatched match arm".to_string()));
+            }
+            for (idx, val) in values.iter().enumerate() {
+                builder.ins().stack_store(*val, shape.slots[idx], 0);
+            }
+            arm_defers.emit_current_and_pop(
+                builder,
+                &arm_locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            builder.ins().jump(merge_block, &[]);
+            builder.seal_block(arm_block);
         }
-        for (idx, val) in values.iter().enumerate() {
-            builder.ins().stack_store(*val, shape.slots[idx], 0);
-        }
-        builder.ins().jump(merge_block, &[]);
-        builder.seal_block(arm_block);
 
         if is_last {
             break;
@@ -1937,7 +2929,6 @@ fn emit_hir_match_expr(
     let result = match shape.kind {
         ResultKind::Unit => ValueRepr::Unit,
         ResultKind::Single => ValueRepr::Single(loaded[0]),
-        ResultKind::Pair => ValueRepr::Pair(loaded[0], loaded[1]),
     };
 
     Ok(result)
@@ -1996,7 +2987,7 @@ fn hir_match_pattern_cond(
             let val_ty = builder.func.dfg.value_type(match_val);
 
             // Special handling for Result type (built-in, not in enum_index)
-            if qualified == "Result" {
+            if qualified == "sys.result.Result" {
                 let discr = match variant_name.as_str() {
                     "Ok" => 0i64,
                     "Err" => 1i64,
@@ -2065,9 +3056,7 @@ fn to_b1(builder: &mut FunctionBuilder, value: ValueRepr) -> Result<ir::Value, C
     match value {
         ValueRepr::Single(val) => Ok(builder.ins().icmp_imm(IntCC::NotEqual, val, 0)),
         ValueRepr::Unit => Err(CodegenError::Unsupported("unit condition".to_string())),
-        ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
-            Err(CodegenError::Unsupported("string condition".to_string()))
-        }
+        ValueRepr::Result { .. } => Err(CodegenError::Unsupported("result condition".to_string())),
     }
 }
 
@@ -2087,6 +3076,7 @@ fn emit_string(
     value: &str,
     module: &mut ObjectModule,
     data_counter: &mut u32,
+    struct_layouts: &StructLayoutIndex,
 ) -> Result<ValueRepr, CodegenError> {
     let name = format!("__str_{}", data_counter);
     *data_counter += 1;
@@ -2102,8 +3092,29 @@ fn emit_string(
     let ptr = builder
         .ins()
         .global_value(module.isa().pointer_type(), global);
-    let len = builder.ins().iconst(ir::types::I64, value.len() as i64);
-    Ok(ValueRepr::Pair(ptr, len))
+    let len = builder.ins().iconst(ir::types::I32, value.len() as i64);
+    let slice_handle = emit_slice_from_ptr(builder, module, ptr, len)?;
+
+    let string_ty = crate::typeck::Ty::Path("sys.string.string".to_string(), Vec::new());
+    let layout = resolve_struct_layout(&string_ty, "", &struct_layouts.layouts).ok_or_else(|| {
+        CodegenError::Unsupported("string layout missing".to_string())
+    })?;
+    let field = layout.fields.get("bytes").ok_or_else(|| {
+        CodegenError::Unsupported("string.bytes field missing".to_string())
+    })?;
+    let ptr_ty = module.isa().pointer_type();
+    let align = layout.align.max(1);
+    let slot_size = layout.size.max(1).saturating_add(align - 1);
+    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+        ir::StackSlotKind::ExplicitSlot,
+        slot_size,
+    ));
+    let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
+    let addr = ptr_add(builder, base_ptr, field.offset);
+    builder
+        .ins()
+        .store(MemFlags::new(), slice_handle, addr, 0);
+    Ok(ValueRepr::Single(base_ptr))
 }
 
 /// Flatten a ValueRepr into ABI-ready Cranelift values.
@@ -2111,7 +3122,6 @@ pub(super) fn flatten_value(value: &ValueRepr) -> Vec<ir::Value> {
     match value {
         ValueRepr::Unit => vec![],
         ValueRepr::Single(val) => vec![*val],
-        ValueRepr::Pair(a, b) => vec![*a, *b],
         ValueRepr::Result { tag, ok, err } => {
             let mut out = vec![*tag];
             out.extend(flatten_value(ok));
@@ -2176,11 +3186,6 @@ fn zero_value_for_tykind(
         AbiType::U8 | AbiType::Bool => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, 0))),
         AbiType::Handle => Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I64, 0))),
         AbiType::Ptr => Ok(ValueRepr::Single(builder.ins().iconst(ptr_ty, 0))),
-        AbiType::String => {
-            let ptr = builder.ins().iconst(ptr_ty, 0);
-            let len = builder.ins().iconst(ir::types::I64, 0);
-            Ok(ValueRepr::Pair(ptr, len))
-        }
         AbiType::Result(ok, err) => {
             let tag = builder.ins().iconst(ir::types::I8, 0);
             let ok_val = zero_value_for_tykind(builder, ok, ptr_ty)?;
@@ -2194,9 +3199,6 @@ fn zero_value_for_tykind(
         AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported(
             abi_quirks::result_out_params_error().to_string(),
         )),
-        AbiType::ResultString => Err(CodegenError::Unsupported(
-            abi_quirks::result_string_params_error().to_string(),
-        )),
     }
 }
 
@@ -2205,7 +3207,8 @@ fn zero_value_for_ty(
     builder: &mut FunctionBuilder,
     ty: &crate::hir::HirType,
     ptr_ty: Type,
-    _struct_layouts: Option<&StructLayoutIndex>,
+    struct_layouts: Option<&StructLayoutIndex>,
+    module: &mut ObjectModule,
 ) -> Result<ValueRepr, CodegenError> {
     use crate::typeck::Ty;
 
@@ -2216,13 +3219,13 @@ fn zero_value_for_ty(
                 ty: *inner.clone(),
                 abi: ty.abi.clone(),
             };
-            zero_value_for_ty(builder, &inner_ty, ptr_ty, _struct_layouts)
+            zero_value_for_ty(builder, &inner_ty, ptr_ty, struct_layouts, module)
         }
         Ty::Param(_) => Err(CodegenError::Unsupported(
             "generic type parameters must be monomorphized before codegen".to_string(),
         )),
         Ty::Path(name, args) => {
-            if name == "Result" && args.len() == 2 {
+            if name == "sys.result.Result" && args.len() == 2 {
                 let AbiType::Result(ok_abi, err_abi) = &ty.abi else {
                     return Err(CodegenError::Unsupported(
                         abi_quirks::result_abi_mismatch_error().to_string(),
@@ -2237,13 +3240,41 @@ fn zero_value_for_ty(
                     abi: (**err_abi).clone(),
                 };
                 let tag = builder.ins().iconst(ir::types::I8, 0);
-                let ok_val = zero_value_for_ty(builder, &ok_ty, ptr_ty, _struct_layouts)?;
-                let err_val = zero_value_for_ty(builder, &err_ty, ptr_ty, _struct_layouts)?;
+                let ok_val = zero_value_for_ty(builder, &ok_ty, ptr_ty, struct_layouts, module)?;
+                let err_val = zero_value_for_ty(builder, &err_ty, ptr_ty, struct_layouts, module)?;
                 return Ok(ValueRepr::Result {
                     tag,
                     ok: Box::new(ok_val),
                     err: Box::new(err_val),
                 });
+            }
+            if let Some(struct_layouts) = struct_layouts {
+                if let Some(layout) = resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts) {
+                    let align = layout.align.max(1);
+                    let slot_size = layout.size.max(1).saturating_add(align - 1);
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        slot_size,
+                    ));
+                    let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                    for name in &layout.field_order {
+                        let Some(field) = layout.fields.get(name) else {
+                            continue;
+                        };
+                        let field_zero =
+                            zero_value_for_ty(builder, &field.ty, ptr_ty, Some(struct_layouts), module)?;
+                        store_value_by_ty(
+                            builder,
+                            base_ptr,
+                            field.offset,
+                            &field.ty,
+                            field_zero,
+                            struct_layouts,
+                            module,
+                        )?;
+                    }
+                    return Ok(ValueRepr::Single(base_ptr));
+                }
             }
             zero_value_for_tykind(builder, &ty.abi, ptr_ty)
         }
@@ -2264,12 +3295,6 @@ pub(super) fn value_from_params(
             *idx += 1;
             Ok(ValueRepr::Single(val))
         }
-        AbiType::String => {
-            let ptr = params[*idx];
-            let len = params[*idx + 1];
-            *idx += 2;
-            Ok(ValueRepr::Pair(ptr, len))
-        }
         AbiType::Result(ok, err) => {
             let tag = params[*idx];
             *idx += 1;
@@ -2281,17 +3306,12 @@ pub(super) fn value_from_params(
                 err: Box::new(err_val),
             })
         }
-        // ResultOut and ResultString are ABI-level return types, not input types.
+        // ResultOut is an ABI-level return type, not an input type.
         // They should never appear as function parameters.
         AbiType::ResultOut(ok, err) => {
             Err(CodegenError::Codegen(format!(
                 "ResultOut<{ok:?}, {err:?}> cannot be a parameter type (ABI return type only)"
             )))
-        }
-        AbiType::ResultString => {
-            Err(CodegenError::Codegen(
-                "ResultString cannot be a parameter type (ABI return type only)".to_string()
-            ))
         }
     }
 }
@@ -2312,15 +3332,6 @@ fn value_from_results(
             *idx += 1;
             Ok(ValueRepr::Single(*val))
         }
-        AbiType::String => {
-            if results.len() < *idx + 2 {
-                return Err(CodegenError::Codegen("string return count".to_string()));
-            }
-            let ptr = results[*idx];
-            let len = results[*idx + 1];
-            *idx += 2;
-            Ok(ValueRepr::Pair(ptr, len))
-        }
         AbiType::Result(ok, err) => {
             let tag = results
                 .get(*idx)
@@ -2337,9 +3348,6 @@ fn value_from_results(
         AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported(
             abi_quirks::result_out_params_error().to_string(),
         )),
-        AbiType::ResultString => Err(CodegenError::Unsupported(
-            abi_quirks::result_string_params_error().to_string(),
-        )),
     }
 }
 
@@ -2349,24 +3357,53 @@ pub(super) fn emit_runtime_wrapper_call(
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,
     info: &FnInfo,
-    mut args: Vec<Value>,
+    args: Vec<Value>,
+    ret_ty: &crate::hir::HirType,
+    struct_layouts: &StructLayoutIndex,
 ) -> Result<ValueRepr, CodegenError> {
     ensure_abi_sig_handled(info)?;
     let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
-    let mut out_slots: Option<ResultStringSlots> = None;
     let mut result_out = None;
+    let mut sret_ptr = None;
+    let mut call_args = args;
 
-    if abi_quirks::is_result_string(&abi_sig.ret) {
+    enum ResultOutSlot {
+        Scalar(ir::StackSlot, ir::Type, u32),
+        Struct(ir::Value),
+    }
+
+    if info.sig.ret == AbiType::Ptr
+        && abi_sig.ret == AbiType::Unit
+        && is_non_opaque_struct_type(ret_ty, struct_layouts)
+    {
+        let layout = resolve_struct_layout(&ret_ty.ty, "", &struct_layouts.layouts).ok_or_else(
+            || CodegenError::Unsupported("struct layout missing".to_string()),
+        )?;
         let ptr_ty = module.isa().pointer_type();
-        let slots = result_string_slots(builder, ptr_ty);
-        push_result_string_out_params(builder, ptr_ty, &slots, &mut args);
-        out_slots = Some(slots);
+        let align = layout.align.max(1);
+        let slot_size = layout.size.max(1).saturating_add(align - 1);
+        let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+            ir::StackSlotKind::ExplicitSlot,
+            slot_size,
+        ));
+        let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
+        call_args.insert(0, base_ptr);
+        sret_ptr = Some(base_ptr);
     }
 
     if let AbiType::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
         let ptr_ty = module.isa().pointer_type();
         let ok_slot = if **ok_ty == AbiType::Unit {
             None
+        } else if **ok_ty == AbiType::Ptr {
+            let align = ptr_ty.bytes().max(1) as u32;
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                aligned_slot_size(ptr_ty.bytes() as u32, align),
+            ));
+            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+            call_args.push(addr);
+            Some(ResultOutSlot::Struct(addr))
         } else {
             let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
             let align = ty.bytes().max(1) as u32;
@@ -2376,11 +3413,20 @@ pub(super) fn emit_runtime_wrapper_call(
                 aligned_slot_size(ty.bytes().max(1) as u32, align),
             ));
             let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
-            args.push(addr);
-            Some((slot, ty, align))
+            call_args.push(addr);
+            Some(ResultOutSlot::Scalar(slot, ty, align))
         };
         let err_slot = if **err_ty == AbiType::Unit {
             None
+        } else if **err_ty == AbiType::Ptr {
+            let align = ptr_ty.bytes().max(1) as u32;
+            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                ir::StackSlotKind::ExplicitSlot,
+                aligned_slot_size(ptr_ty.bytes() as u32, align),
+            ));
+            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+            call_args.push(addr);
+            Some(ResultOutSlot::Struct(addr))
         } else {
             let ty = value_type_for_result_out(err_ty, ptr_ty)?;
             let align = ty.bytes().max(1) as u32;
@@ -2390,13 +3436,17 @@ pub(super) fn emit_runtime_wrapper_call(
                 aligned_slot_size(ty.bytes().max(1) as u32, align),
             ));
             let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
-            args.push(addr);
-            Some((slot, ty, align))
+            call_args.push(addr);
+            Some(ResultOutSlot::Scalar(slot, ty, align))
         };
         result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
     }
 
-    let sig = sig_to_clif(abi_sig, module.isa().pointer_type());
+    let sig = sig_to_clif(
+        abi_sig,
+        module.isa().pointer_type(),
+        module.isa().default_call_conv(),
+    );
     let call_symbol = info
         .runtime_symbol
         .as_deref()
@@ -2405,34 +3455,8 @@ pub(super) fn emit_runtime_wrapper_call(
         .declare_function(call_symbol, Linkage::Import, &sig)
         .map_err(|err| CodegenError::Codegen(err.to_string()))?;
     let local = module.declare_func_in_func(func_id, builder.func);
-    let call_inst = builder.ins().call(local, &args);
+    let call_inst = builder.ins().call(local, &call_args);
     let results = builder.inst_results(call_inst).to_vec();
-
-    if abi_quirks::is_result_string(&abi_sig.ret) {
-        let tag = results
-            .get(0)
-            .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
-        let slots = out_slots.ok_or_else(|| CodegenError::Codegen("missing slots".to_string()))?;
-        let ptr_ty = module.isa().pointer_type();
-        let (ptr, len, err) = read_result_string_slots(builder, ptr_ty, &slots);
-        match &info.sig.ret {
-            AbiType::Result(ok_ty, err_ty) => {
-                if **ok_ty != AbiType::String || **err_ty != AbiType::I32 {
-                    return Err(CodegenError::Unsupported(
-                        abi_quirks::result_out_params_error().to_string(),
-                    ));
-                }
-                return Ok(ValueRepr::Result {
-                    tag: *tag,
-                    ok: Box::new(ValueRepr::Pair(ptr, len)),
-                    err: Box::new(ValueRepr::Single(err)),
-                });
-            }
-            _ => return Err(CodegenError::Unsupported(
-                abi_quirks::result_out_params_error().to_string(),
-            )),
-        }
-    }
 
     if abi_quirks::is_result_out(&abi_sig.ret) {
         let tag = results
@@ -2440,17 +3464,29 @@ pub(super) fn emit_runtime_wrapper_call(
             .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
         let (ok_slot, err_slot, ok_ty, err_ty) = result_out
             .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
-        let ok_val = if let Some((slot, ty, align)) = ok_slot {
-            let addr = aligned_stack_addr(builder, slot, align, module.isa().pointer_type());
-            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
-            ValueRepr::Single(val)
+        let ok_val = if let Some(slot) = ok_slot {
+            match slot {
+                ResultOutSlot::Scalar(slot, ty, align) => {
+                    let addr =
+                        aligned_stack_addr(builder, slot, align, module.isa().pointer_type());
+                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                    ValueRepr::Single(val)
+                }
+                ResultOutSlot::Struct(addr) => ValueRepr::Single(addr),
+            }
         } else {
             ValueRepr::Unit
         };
-        let err_val = if let Some((slot, ty, align)) = err_slot {
-            let addr = aligned_stack_addr(builder, slot, align, module.isa().pointer_type());
-            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
-            ValueRepr::Single(val)
+        let err_val = if let Some(slot) = err_slot {
+            match slot {
+                ResultOutSlot::Scalar(slot, ty, align) => {
+                    let addr =
+                        aligned_stack_addr(builder, slot, align, module.isa().pointer_type());
+                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                    ValueRepr::Single(val)
+                }
+                ResultOutSlot::Struct(addr) => ValueRepr::Single(addr),
+            }
         } else {
             ValueRepr::Unit
         };
@@ -2470,6 +3506,10 @@ pub(super) fn emit_runtime_wrapper_call(
         }
     }
 
+    if let Some(ptr) = sret_ptr {
+        return Ok(ValueRepr::Single(ptr));
+    }
+
     let mut idx = 0;
     value_from_results(builder, &info.sig.ret, &results, &mut idx)
 }
@@ -2485,7 +3525,7 @@ fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {
         Ok(())
     } else {
         Err(CodegenError::Codegen(format!(
-            "abi signature mismatch for {} without ResultString/ResultOut lowering",
+            "abi signature mismatch for {} without ResultOut lowering",
             info.symbol
         )))
     }
@@ -2500,31 +3540,6 @@ mod tests {
     fn aligned_slot_size_adds_padding_for_alignment() {
         assert_eq!(aligned_slot_size(1, 4), 4);
         assert_eq!(aligned_slot_size(8, 8), 15);
-    }
-
-    #[test]
-    fn result_string_len_is_u64() {
-        assert_eq!(abi_quirks::result_string_len_bytes(), 8);
-    }
-
-    #[test]
-    fn ensure_abi_sig_allows_result_string_lowering() {
-        let sig = FnSig {
-            params: Vec::new(),
-            ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
-        };
-        let abi_sig = FnSig {
-            params: Vec::new(),
-            ret: AbiType::ResultString,
-        };
-        let info = FnInfo {
-            sig,
-            abi_sig: Some(abi_sig),
-            symbol: "test".to_string(),
-            runtime_symbol: None,
-            is_runtime: false,
-        };
-        assert!(ensure_abi_sig_handled(&info).is_ok());
     }
 
     #[test]

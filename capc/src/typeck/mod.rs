@@ -19,8 +19,8 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::hir::HirModule;
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
-    "i32", "i64", "u32", "u8", "bool", "string", "unit", "Result",
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 7] = [
+    "i32", "i64", "u32", "u8", "bool", "unit", "never",
 ];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
@@ -88,8 +88,8 @@ pub enum BuiltinType {
     U32,
     U8,
     Bool,
-    String,
     Unit,
+    Never,
 }
 
 pub(super) fn function_key(module_name: &str, func_name: &str) -> String {
@@ -212,6 +212,8 @@ struct Scopes {
     /// Stack of scopes, where each scope is a map from name to local info.
     /// The last element is the innermost (current) scope.
     stack: Vec<HashMap<String, LocalInfo>>,
+    /// Stack of scope depths that mark loop bodies for break/continue checks.
+    loop_stack: Vec<usize>,
 }
 
 impl Scopes {
@@ -280,7 +282,22 @@ impl Scopes {
                 },
             );
         }
-        Scopes { stack: vec![scope] }
+        Scopes {
+            stack: vec![scope],
+            loop_stack: Vec::new(),
+        }
+    }
+
+    fn push_loop(&mut self) {
+        self.loop_stack.push(self.stack.len());
+    }
+
+    fn pop_loop(&mut self) {
+        self.loop_stack.pop();
+    }
+
+    fn current_loop_depth(&self) -> Option<usize> {
+        self.loop_stack.last().copied()
     }
 
     fn contains(&self, name: &str) -> bool {
@@ -355,6 +372,7 @@ fn resolve_method_target(
     receiver_ty: &Ty,
     module_name: &str,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     span: Span,
 ) -> Result<(String, String, Vec<Ty>), TypeError> {
     let base_ty = match receiver_ty {
@@ -363,13 +381,6 @@ fn resolve_method_target(
     };
     let (receiver_name, receiver_args) = match base_ty {
         Ty::Path(name, args) => (name.as_str(), args),
-        Ty::Builtin(BuiltinType::String) => {
-            return Ok((
-                "sys.string".to_string(),
-                "string".to_string(),
-                Vec::new(),
-            ));
-        }
         Ty::Builtin(BuiltinType::U8) => {
             return Ok((
                 "sys.bytes".to_string(),
@@ -379,7 +390,7 @@ fn resolve_method_target(
         }
         _ => {
             return Err(TypeError::new(
-                "method receiver must be a struct value".to_string(),
+                "method receiver must be a struct or enum value".to_string(),
                 span,
             ));
         }
@@ -392,6 +403,19 @@ fn resolve_method_target(
             .unwrap_or(receiver_name)
             .to_string();
         return Ok((info.module.clone(), type_name, receiver_args.clone()));
+    }
+
+    if enum_map.contains_key(receiver_name) {
+        let type_name = receiver_name
+            .rsplit_once('.')
+            .map(|(_, t)| t)
+            .unwrap_or(receiver_name)
+            .to_string();
+        let mod_part = receiver_name
+            .rsplit_once('.')
+            .map(|(m, _)| m)
+            .unwrap_or(module_name);
+        return Ok((mod_part.to_string(), type_name, receiver_args.clone()));
     }
 
     if receiver_name.contains('.') {
@@ -408,9 +432,12 @@ fn resolve_method_target(
     if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
         return Ok((info.module.clone(), receiver_name.to_string(), receiver_args.clone()));
     }
+    if enum_map.contains_key(&format!("{module_name}.{receiver_name}")) {
+        return Ok((module_name.to_string(), receiver_name.to_string(), receiver_args.clone()));
+    }
 
     Err(TypeError::new(
-        format!("unknown struct `{receiver_name}`"),
+        format!("unknown struct or enum `{receiver_name}`"),
         span,
     ))
 }
@@ -420,6 +447,7 @@ fn resolve_impl_target(
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
     type_params: &HashSet<String>,
     module_name: &str,
     span: Span,
@@ -427,6 +455,7 @@ fn resolve_impl_target(
     let target_ty = lower_type(target, use_map, stdlib, type_params)?;
     let (impl_module, type_name) = match &target_ty {
         Ty::Path(target_name, _target_args) => {
+            // Check struct_map first
             if let Some(info) = struct_map.get(target_name) {
                 let type_name = target_name
                     .rsplit_once('.')
@@ -434,6 +463,18 @@ fn resolve_impl_target(
                     .unwrap_or(target_name)
                     .to_string();
                 (info.module.clone(), type_name)
+            // Check enum_map
+            } else if enum_map.contains_key(target_name) {
+                let type_name = target_name
+                    .rsplit_once('.')
+                    .map(|(_, t)| t)
+                    .unwrap_or(target_name)
+                    .to_string();
+                let mod_part = target_name
+                    .rsplit_once('.')
+                    .map(|(m, _)| m)
+                    .unwrap_or(module_name);
+                (mod_part.to_string(), type_name)
             } else if target_name.contains('.') {
                 let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
                     TypeError::new("invalid type path".to_string(), span)
@@ -441,18 +482,19 @@ fn resolve_impl_target(
                 (mod_part.to_string(), type_part.to_string())
             } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
                 (info.module.clone(), target_name.clone())
+            } else if enum_map.contains_key(&format!("{module_name}.{target_name}")) {
+                (module_name.to_string(), target_name.clone())
             } else {
                 return Err(TypeError::new(
-                    "impl target must be a struct type name".to_string(),
+                    "impl target must be a struct or enum type name".to_string(),
                     span,
                 ));
             }
         }
-        Ty::Builtin(BuiltinType::String) => ("sys.string".to_string(), "string".to_string()),
         Ty::Builtin(BuiltinType::U8) => ("sys.bytes".to_string(), "u8".to_string()),
         _ => {
             return Err(TypeError::new(
-                "impl target must be a struct type name".to_string(),
+                "impl target must be a struct or enum type name".to_string(),
                 span,
             ));
         }
@@ -531,10 +573,13 @@ fn validate_impl_method(
 
     let ret_ty = lower_type(&method.ret, use_map, stdlib, type_params)?;
     if receiver_is_ref && type_contains_capability(&ret_ty, struct_map, enum_map) {
-        return Err(TypeError::new(
-            "methods returning capabilities must take `self` by value".to_string(),
-            method.ret.span(),
-        ));
+        let receiver_kind = type_kind(target_ty, struct_map, enum_map);
+        if receiver_kind != TypeKind::Unrestricted {
+            return Err(TypeError::new(
+                "methods returning capabilities must take `self` by value".to_string(),
+                method.ret.span(),
+            ));
+        }
     }
 
     Ok(params)
@@ -576,6 +621,7 @@ fn desugar_impl_methods(
         use_map,
         stdlib,
         struct_map,
+        enum_map,
         &impl_type_params,
         module_name,
         impl_block.span,
@@ -658,19 +704,65 @@ fn lower_type(
                     "u32" => Some(BuiltinType::U32),
                     "u8" => Some(BuiltinType::U8),
                     "bool" => Some(BuiltinType::Bool),
-                    "string" => Some(BuiltinType::String),
                     "unit" => Some(BuiltinType::Unit),
+                    "never" => Some(BuiltinType::Never),
                     _ => None,
                 };
                 if let Some(builtin) = builtin {
                     return Ok(Ty::Builtin(builtin));
                 }
+                let resolved_joined = resolved.join(".");
                 let alias = resolve_type_name(path, use_map, stdlib);
-                if alias != resolved.join(".") {
-                    return Ok(Ty::Path(alias, args));
+                let joined = if alias != resolved_joined {
+                    alias
+                } else {
+                    resolved_joined
+                };
+                if joined == "Vec" || joined == "sys.vec.Vec" {
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
+                            format!("Vec expects 1 type argument, found {}", args.len()),
+                            path.span,
+                        ));
+                    }
+                    let elem = &args[0];
+                    let vec_name = match elem {
+                        Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
+                        Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
+                        _ if is_string_ty(elem) => "sys.vec.VecString",
+                        _ => {
+                            return Err(TypeError::new(
+                                "Vec only supports u8, i32, and string element types".to_string(),
+                                path.span,
+                            ))
+                        }
+                    };
+                    return Ok(Ty::Path(vec_name.to_string(), Vec::new()));
                 }
+                return Ok(Ty::Path(joined, args));
             }
             let joined = path_segments.join(".");
+            if joined == "Vec" || joined == "sys.vec.Vec" {
+                if args.len() != 1 {
+                    return Err(TypeError::new(
+                        format!("Vec expects 1 type argument, found {}", args.len()),
+                        path.span,
+                    ));
+                }
+                let elem = &args[0];
+                let vec_name = match elem {
+                    Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
+                    Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
+                    _ if is_string_ty(elem) => "sys.vec.VecString",
+                    _ => {
+                        return Err(TypeError::new(
+                            "Vec only supports u8, i32, and string element types".to_string(),
+                            path.span,
+                        ))
+                    }
+                };
+                return Ok(Ty::Path(vec_name.to_string(), Vec::new()));
+            }
             Ok(Ty::Path(joined, args))
         }
     }
@@ -720,6 +812,19 @@ fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> Str
     resolved.join(".")
 }
 
+pub(super) fn is_string_ty(ty: &Ty) -> bool {
+    matches!(ty, Ty::Path(name, _) if name == "sys.string.string" || name == "string")
+}
+
+fn stdlib_string_ty(stdlib: &StdlibIndex) -> Ty {
+    let name = stdlib
+        .types
+        .get("string")
+        .cloned()
+        .unwrap_or_else(|| "sys.string.string".to_string());
+    Ty::Path(name, Vec::new())
+}
+
 fn type_contains_ref(ty: &Type) -> Option<Span> {
     match ty {
         Type::Ref { span, .. } => Some(*span),
@@ -754,7 +859,7 @@ fn type_contains_capability_inner(
         Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => false,
         Ty::Param(_) => true,
         Ty::Path(name, args) => {
-            if name == "Result" {
+            if name == "sys.result.Result" {
                 return args
                     .iter()
                     .any(|arg| type_contains_capability_inner(arg, struct_map, enum_map, visiting));
@@ -836,7 +941,7 @@ fn type_kind_inner(
         Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => TypeKind::Unrestricted,
         Ty::Param(_) => TypeKind::Affine,
         Ty::Path(name, args) => {
-            if name == "Result" {
+            if name == "sys.result.Result" {
                 return args.iter().fold(TypeKind::Unrestricted, |acc, arg| {
                     combine_kind(acc, type_kind_inner(arg, struct_map, enum_map, visiting))
                 });
@@ -879,14 +984,7 @@ fn validate_type_args(
         Ty::Builtin(_) | Ty::Param(_) => Ok(()),
         Ty::Ptr(inner) | Ty::Ref(inner) => validate_type_args(inner, struct_map, enum_map, span),
         Ty::Path(name, args) => {
-            if name == "Result" {
-                if args.len() != 2 {
-                    return Err(TypeError::new(
-                        format!("Result expects 2 type arguments, found {}", args.len()),
-                        span,
-                    ));
-                }
-            } else if let Some(info) = struct_map.get(name) {
+            if let Some(info) = struct_map.get(name) {
                 if args.len() != info.type_params.len() {
                     return Err(TypeError::new(
                         format!(
@@ -1086,6 +1184,7 @@ impl SpanExt for Expr {
             Expr::Call(call) => call.span,
             Expr::MethodCall(method_call) => method_call.span,
             Expr::FieldAccess(field) => field.span,
+            Expr::Index(index) => index.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

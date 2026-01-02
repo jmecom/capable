@@ -1,0 +1,15 @@
+module for_basic
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Basic for loop: should print 0 1 2 3 4
+  for i in 0..5 {
+    c.println_i32(i)
+  }
+
+  c.println("for_basic ok")
+  return 0
+}

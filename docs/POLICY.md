@@ -45,5 +45,9 @@ Keep these as invariants:
 
 ## Result Helpers
 
-- `Result.unwrap_or(default)` returns `Ok` or the default.
-- `Result.unwrap_err_or(default)` returns `Err` or the default.
+- `Result.is_ok()` returns `true` if `Ok`, `false` if `Err`.
+- `Result.is_err()` returns `true` if `Err`, `false` if `Ok`.
+- `Result.ok()` returns the `Ok` value (traps if `Err`).
+- `Result.err()` returns the `Err` value (traps if `Ok`).
+- `Result.unwrap_or(default)` returns `Ok` value or the default.
+- `Result.unwrap_err_or(default)` returns `Err` value or the default.

@@ -13,6 +13,9 @@ pub fn main(rc: RootCap) -> i32 {
   let trimmed = "  hi \n".trim()
   let trimmed_start = "  hi ".trim_start()
   let trimmed_end = "  hi ".trim_end()
+  let trimmed_ascii = " \tHi\n".trim_ascii()
+  let lower = "AbC".to_lower_ascii()
+  let upper = "AbC".to_upper_ascii()
   let lines = "a\nb\n".split_lines()
   let alloc = rc.mint_alloc_default()
   alloc.vec_string_free(words)
@@ -23,8 +26,47 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(trimmed.ends_with_byte(105u8))
   c.assert(trimmed_start.starts_with("hi"))
   c.assert(trimmed_end.ends_with("hi"))
-  c.assert("abc".starts_with_byte(97u8))
-  c.assert("abc".ends_with_byte(99u8))
+  c.assert(trimmed_ascii.eq("Hi"))
+  c.assert(lower.eq("abc"))
+  c.assert(upper.eq("ABC"))
+  c.assert("abc".starts_with_byte('a'))
+  c.assert("abc".ends_with_byte('c'))
+  c.assert("".is_empty())
+  c.assert(!"a".is_empty())
+  c.assert("abc".contains_byte(98u8))
+  c.assert(!"abc".contains_byte(120u8))
+  match ("abc".index_of_byte('c')) {
+    Ok(i) => { c.assert(i == 2) }
+    Err(_) => { c.assert(false) }
+  }
+  match ("abca".last_index_of_byte('a')) {
+    Ok(i) => { c.assert(i == 3) }
+    Err(_) => { c.assert(false) }
+  }
+  match ("abca".find_byte('a')) {
+    Ok(i) => { c.assert(i == 0) }
+    Err(_) => { c.assert(false) }
+  }
+  match ("abca".rfind_byte('a')) {
+    Ok(i) => { c.assert(i == 3) }
+    Err(_) => { c.assert(false) }
+  }
+  c.assert("abca".count_byte('a') == 2)
+  c.assert("abc".is_ascii())
+  c.assert("abc".byte_at_checked(10).is_err())
+  match ("a,b,c".split_once(',')) {
+    Ok(parts) => {
+      c.assert(parts.left.eq("a"))
+      c.assert(parts.right.eq("b,c"))
+    }
+    Err(_) => { c.assert(false) }
+  }
+  let pieces = "a,b,c".split(',')
+  c.assert(pieces.len() == 3)
+  match (pieces.join(",")) {
+    Ok(joined) => { c.assert(joined.eq("a,b,c")) }
+    Err(_) => { c.assert(false) }
+  }
   c.println("string ok")
   return 0
 }

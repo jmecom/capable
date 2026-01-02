@@ -2,7 +2,7 @@ package unsafe
 module sys::net
 
 pub copy capability struct Net
-pub linear capability struct TcpListener
+pub copy capability struct TcpListener
 pub linear capability struct TcpConn
 
 pub enum NetErr {
@@ -12,17 +12,17 @@ pub enum NetErr {
 }
 
 impl Net {
-  pub fn listen(self, host: string, port: i32) -> Result[TcpListener, NetErr] {
+  pub fn listen(self, host: string, port: i32) -> Result<TcpListener, NetErr> {
     return Err(NetErr::IoError)
   }
 
-  pub fn connect(self, host: string, port: i32) -> Result[TcpConn, NetErr] {
+  pub fn connect(self, host: string, port: i32) -> Result<TcpConn, NetErr> {
     return Err(NetErr::IoError)
   }
 }
 
 impl TcpListener {
-  pub fn accept(self) -> Result[TcpConn, NetErr] {
+  pub fn accept(self: &TcpListener) -> Result<TcpConn, NetErr> {
     return Err(NetErr::IoError)
   }
 
@@ -32,15 +32,15 @@ impl TcpListener {
 }
 
 impl TcpConn {
-  pub fn read_to_string(self: &TcpConn) -> Result[string, NetErr] {
+  pub fn read_to_string(self: &TcpConn) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 
-  pub fn read(self: &TcpConn, max_size: i32) -> Result[string, NetErr] {
+  pub fn read(self: &TcpConn, max_size: i32) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 
-  pub fn write(self: &TcpConn, data: string) -> Result[unit, NetErr] {
+  pub fn write(self: &TcpConn, data: string) -> Result<unit, NetErr> {
     return Err(NetErr::IoError)
   }
 

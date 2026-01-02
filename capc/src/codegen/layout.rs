@@ -242,14 +242,6 @@ pub(super) fn type_layout_for_abi(
             size: ptr_ty.bytes() as u32,
             align: ptr_ty.bytes() as u32,
         }),
-        AbiType::String => {
-            let ptr_size = ptr_ty.bytes() as u32;
-            let len_offset = align_to(ptr_size, 8);
-            Ok(TypeLayout {
-                size: len_offset + 8,
-                align: ptr_ty.bytes().max(8) as u32,
-            })
-        }
         AbiType::Result(ok, err) => {
             let tag = TypeLayout { size: 1, align: 1 };
             let ok = type_layout_for_abi(ok, ptr_ty)?;
@@ -266,7 +258,7 @@ pub(super) fn type_layout_for_abi(
             let size = align_to(offset, align);
             Ok(TypeLayout { size, align })
         }
-        AbiType::ResultOut(_, _) | AbiType::ResultString => Err(CodegenError::Unsupported(
+        AbiType::ResultOut(_, _) => Err(CodegenError::Unsupported(
             abi_quirks::result_lowering_layout_error().to_string(),
         )),
     }

@@ -1,0 +1,43 @@
+module string_compare
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Test equal strings
+  let a = "hello"
+  let b = "hello"
+  if (a == b) {
+    c.println("equal ok")
+  }
+
+  // Test not equal strings
+  let x = "hello"
+  let y = "world"
+  if (x != y) {
+    c.println("not equal ok")
+  }
+
+  // Test equal empty strings
+  let empty1 = ""
+  let empty2 = ""
+  if (empty1 == empty2) {
+    c.println("empty ok")
+  }
+
+  // Test different lengths
+  let short = "hi"
+  let long = "hello"
+  if (short != long) {
+    c.println("diff len ok")
+  }
+
+  // Test string literals directly
+  if ("test" == "test") {
+    c.println("literal ok")
+  }
+
+  c.println("string_compare ok")
+  return 0
+}

@@ -1,0 +1,11 @@
+module should_fail_break_outside_loop
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  c.println("before")
+  break
+  c.println("after")
+  return 0
+}

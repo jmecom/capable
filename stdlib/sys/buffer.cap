@@ -1,14 +1,25 @@
 package safe
 module sys::buffer
 use sys::vec
+use sys::string
 
 pub copy opaque struct Alloc
 pub copy opaque struct Buffer
-pub copy opaque struct Slice[T]
-pub copy opaque struct MutSlice[T]
+pub copy opaque struct Slice<T>
+pub copy opaque struct MutSlice<T>
 
 pub enum AllocErr {
   Oom
+}
+
+/// Intrinsic; implemented by the runtime.
+pub fn new(initial_len: i32) -> Result<Buffer, AllocErr> {
+  return Err(AllocErr::Oom)
+}
+
+/// Intrinsic; implemented by the runtime.
+pub fn vec_string_new() -> vec::Vec<string> {
+  return ()
 }
 
 impl Alloc {
@@ -28,15 +39,15 @@ impl Alloc {
     return ()
   }
 
-  pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice[u8] {
+  pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice<u8> {
     return ()
   }
 
-  pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice[u8] {
+  pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice<u8> {
     return ()
   }
 
-  pub fn buffer_new(self, initial_len: i32) -> Result[Buffer, AllocErr] {
+  pub fn buffer_new(self, initial_len: i32) -> Result<Buffer, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
@@ -44,27 +55,27 @@ impl Alloc {
     return ()
   }
 
-  pub fn vec_u8_new(self) -> vec::VecU8 {
+  pub fn vec_u8_new(self) -> vec::Vec<u8> {
     return ()
   }
 
-  pub fn vec_u8_free(self, v: vec::VecU8) -> unit {
+  pub fn vec_u8_free(self, v: vec::Vec<u8>) -> unit {
     return ()
   }
 
-  pub fn vec_i32_new(self) -> vec::VecI32 {
+  pub fn vec_i32_new(self) -> vec::Vec<i32> {
     return ()
   }
 
-  pub fn vec_i32_free(self, v: vec::VecI32) -> unit {
+  pub fn vec_i32_free(self, v: vec::Vec<i32>) -> unit {
     return ()
   }
 
-  pub fn vec_string_new(self) -> vec::VecString {
+  pub fn vec_string_new(self) -> vec::Vec<string> {
     return ()
   }
 
-  pub fn vec_string_free(self, v: vec::VecString) -> unit {
+  pub fn vec_string_free(self, v: vec::Vec<string>) -> unit {
     return ()
   }
 }
@@ -74,28 +85,36 @@ impl Buffer {
     return 0
   }
 
-  pub fn push(self, x: u8) -> Result[unit, AllocErr] {
+  pub fn push(self, x: u8) -> Result<unit, AllocErr> {
     return Err(AllocErr::Oom)
   }
 
-  pub fn extend(self, data: Slice[u8]) -> Result[unit, AllocErr] {
+  pub fn extend(self, data: Slice<u8>) -> Result<unit, AllocErr> {
     return Err(AllocErr::Oom)
+  }
+
+  pub fn push_str(self, s: string) -> Result<unit, AllocErr> {
+    return self.extend(s.as_slice())
   }
 
   pub fn is_empty(self) -> bool {
     return false
   }
 
-  pub fn as_slice(self) -> Slice[u8] {
+  pub fn as_slice(self) -> Slice<u8> {
     return ()
   }
 
-  pub fn as_mut_slice(self) -> MutSlice[u8] {
+  pub fn as_mut_slice(self) -> MutSlice<u8> {
     return ()
+  }
+
+  pub fn to_string(self) -> Result<string, AllocErr> {
+    return string::from_bytes(self.as_slice())
   }
 }
 
-impl Slice[u8] {
+impl Slice<u8> {
   pub fn len(self) -> i32 {
     return 0
   }
@@ -105,7 +124,7 @@ impl Slice[u8] {
   }
 }
 
-impl MutSlice[u8] {
+impl MutSlice<u8> {
   pub fn at(self, i: i32) -> u8 {
     return 0
   }

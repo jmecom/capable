@@ -188,7 +188,10 @@ fn build_binary(
     )
     .map_err(|err| miette!("failed to write stub: {err}"))?;
 
-    let out_path = out.unwrap_or_else(|| build_dir.join("capable"));
+    let out_path = out.unwrap_or_else(|| {
+        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("a.out");
+        build_dir.join(name)
+    });
     let runtime_lib_dir = workspace_root.join("target").join("debug");
     let mut rustc = std::process::Command::new("rustc");
     rustc

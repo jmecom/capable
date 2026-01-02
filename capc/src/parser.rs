@@ -222,8 +222,8 @@ impl Parser {
                 }
                 Ok(Item::Impl(self.parse_impl_block(doc)?))
             }
-            Some(_other) => Err(self.error_current(format!(
-                "expected item, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected item, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -466,8 +466,12 @@ impl Parser {
         match self.peek_kind() {
             Some(TokenKind::Let) => Ok(Stmt::Let(self.parse_let()?)),
             Some(TokenKind::Return) => Ok(Stmt::Return(self.parse_return()?)),
-            Some(TokenKind::If) => Ok(Stmt::If(self.parse_if()?)),
+            Some(TokenKind::Break) => Ok(Stmt::Break(self.parse_break()?)),
+            Some(TokenKind::Continue) => Ok(Stmt::Continue(self.parse_continue()?)),
+            Some(TokenKind::Defer) => Ok(Stmt::Defer(self.parse_defer()?)),
+            Some(TokenKind::If) => self.parse_if_stmt(),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
+            Some(TokenKind::For) => self.parse_for_stmt(),
             Some(TokenKind::Ident) => {
                 if self.peek_token(1).is_some_and(|t| t.kind == TokenKind::Eq) {
                     Ok(Stmt::Assign(self.parse_assign()?))
@@ -529,17 +533,103 @@ impl Parser {
         })
     }
 
-    fn parse_if(&mut self) -> Result<IfStmt, ParseError> {
-        let start = self.expect(TokenKind::If)?.span.start;
-        let cond = self.parse_expr()?;
+    fn parse_break(&mut self) -> Result<BreakStmt, ParseError> {
+        let token = self.expect(TokenKind::Break)?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(token.span.end, |t| t.span.end);
+        Ok(BreakStmt {
+            span: Span::new(token.span.start, end),
+        })
+    }
+
+    fn parse_continue(&mut self) -> Result<ContinueStmt, ParseError> {
+        let token = self.expect(TokenKind::Continue)?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(token.span.end, |t| t.span.end);
+        Ok(ContinueStmt {
+            span: Span::new(token.span.start, end),
+        })
+    }
+
+    fn parse_defer(&mut self) -> Result<DeferStmt, ParseError> {
+        let start = self.expect(TokenKind::Defer)?.span.start;
+        let expr = self.parse_expr()?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(expr.span().end, |t| t.span.end);
+        Ok(DeferStmt {
+            expr,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_if_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let if_token = self.expect(TokenKind::If)?;
+        let start = if_token.span.start;
+        if self.peek_kind() == Some(TokenKind::Let) {
+            self.bump();
+            let pattern = self.parse_pattern()?;
+            self.expect(TokenKind::Eq)?;
+            let expr = self.parse_expr_no_struct()?;
+            let then_block = self.parse_block()?;
+            let else_block = if self.peek_kind() == Some(TokenKind::Else) {
+                self.bump();
+                if self.peek_kind() == Some(TokenKind::If) {
+                    let else_if = self.parse_if_stmt()?;
+                    let span = else_if.span();
+                    Some(Block {
+                        stmts: vec![else_if],
+                        span,
+                    })
+                } else {
+                    Some(self.parse_block()?)
+                }
+            } else {
+                None
+            };
+            let end = else_block
+                .as_ref()
+                .map_or(then_block.span.end, |b| b.span.end);
+            let else_body = else_block.unwrap_or(Block {
+                stmts: Vec::new(),
+                span: Span::new(end, end),
+            });
+            let match_expr = MatchExpr {
+                expr: Box::new(expr),
+                arms: vec![
+                    MatchArm {
+                        pattern,
+                        body: then_block,
+                        span: Span::new(start, end),
+                    },
+                    MatchArm {
+                        pattern: Pattern::Wildcard(Span::new(end, end)),
+                        body: else_body,
+                        span: Span::new(start, end),
+                    },
+                ],
+                span: Span::new(start, end),
+                match_span: if_token.span,
+            };
+            return Ok(Stmt::Expr(ExprStmt {
+                expr: Expr::Match(match_expr),
+                span: Span::new(start, end),
+            }));
+        }
+
+        // Use parse_expr_no_struct because `{` after condition starts the then-block, not a struct literal
+        let cond = self.parse_expr_no_struct()?;
         let then_block = self.parse_block()?;
         let else_block = if self.peek_kind() == Some(TokenKind::Else) {
             self.bump();
             if self.peek_kind() == Some(TokenKind::If) {
-                let else_if = self.parse_if()?;
+                let else_if = self.parse_if_stmt()?;
+                let span = else_if.span();
                 Some(Block {
-                    stmts: vec![Stmt::If(else_if.clone())],
-                    span: else_if.span,
+                    stmts: vec![else_if],
+                    span,
                 })
             } else {
                 Some(self.parse_block()?)
@@ -550,17 +640,18 @@ impl Parser {
         let end = else_block
             .as_ref()
             .map_or(then_block.span.end, |b| b.span.end);
-        Ok(IfStmt {
+        Ok(Stmt::If(IfStmt {
             cond,
             then_block,
             else_block,
             span: Span::new(start, end),
-        })
+        }))
     }
 
     fn parse_while(&mut self) -> Result<WhileStmt, ParseError> {
         let start = self.expect(TokenKind::While)?.span.start;
-        let cond = self.parse_expr()?;
+        // Use parse_expr_no_struct because `{` after condition starts the loop body, not a struct literal
+        let cond = self.parse_expr_no_struct()?;
         let body = self.parse_block()?;
         let end = body.span.end;
         Ok(WhileStmt {
@@ -568,6 +659,94 @@ impl Parser {
             body,
             span: Span::new(start, end),
         })
+    }
+
+    fn parse_for_after(&mut self, start: usize) -> Result<ForStmt, ParseError> {
+        let var = self.expect_ident()?;
+        self.expect(TokenKind::In)?;
+        let range_start = self.parse_range_bound()?;
+        self.expect(TokenKind::DotDot)?;
+        let range_end = self.parse_range_bound()?;
+        let body = self.parse_block()?;
+        let end = body.span.end;
+        Ok(ForStmt {
+            var,
+            start: range_start,
+            end: range_end,
+            body,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_for_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let for_token = self.expect(TokenKind::For)?;
+        let start = for_token.span.start;
+        if self.peek_kind() == Some(TokenKind::LBrace) {
+            let body = self.parse_block()?;
+            let end = body.span.end;
+            let cond = Expr::Literal(LiteralExpr {
+                value: Literal::Bool(true),
+                span: for_token.span,
+            });
+            return Ok(Stmt::While(WhileStmt {
+                cond,
+                body,
+                span: Span::new(start, end),
+            }));
+        }
+        Ok(Stmt::For(self.parse_for_after(start)?))
+    }
+
+    /// Parse a simple expression for range bounds (no struct literals allowed)
+    fn parse_range_bound(&mut self) -> Result<Expr, ParseError> {
+        match self.peek_kind() {
+            Some(TokenKind::Int) => {
+                let token = self.bump().unwrap();
+                let value = token.text.parse::<i64>().map_err(|_| {
+                    self.error_at(token.span, "invalid integer literal".to_string())
+                })?;
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::Int(value),
+                    span: token.span,
+                }))
+            }
+            Some(TokenKind::True) => {
+                let token = self.bump().unwrap();
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::Bool(true),
+                    span: token.span,
+                }))
+            }
+            Some(TokenKind::False) => {
+                let token = self.bump().unwrap();
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::Bool(false),
+                    span: token.span,
+                }))
+            }
+            Some(TokenKind::Ident) => {
+                // Parse just a simple path (no struct literal)
+                let first_ident = self.expect_ident()?;
+                let start = first_ident.span.start;
+                let mut segments = vec![first_ident];
+
+                while self.peek_kind() == Some(TokenKind::ColonColon) {
+                    self.bump();
+                    let segment = self.expect_ident()?;
+                    segments.push(segment);
+                }
+
+                let end = segments.last().unwrap().span.end;
+                Ok(Expr::Path(Path {
+                    segments,
+                    span: Span::new(start, end),
+                }))
+            }
+            Some(other) => Err(self.error_current(format!(
+                "expected integer or identifier in range bound, found {other:?}"
+            ))),
+            None => Err(self.error_current("unexpected end of input".to_string())),
+        }
     }
 
     fn parse_expr_stmt(&mut self) -> Result<ExprStmt, ParseError> {
@@ -583,11 +762,51 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_expr_bp(0)
+        self.parse_expr_inner(true)
     }
 
-    fn parse_expr_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
-        let mut lhs = self.parse_prefix()?;
+    /// Parse an expression where struct literals are not allowed.
+    /// Used in if/while/for/match scrutinee positions where `{` starts a block, not a struct literal.
+    fn parse_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
+        self.parse_expr_inner(false)
+    }
+
+    fn parse_expr_inner(&mut self, allow_struct_literal: bool) -> Result<Expr, ParseError> {
+        self.parse_expr_bp(0, allow_struct_literal)
+    }
+
+    /// Look ahead to see if a `<...>` type-arg list is closed and followed by
+    /// a call `(` or struct literal `{`.
+    fn type_args_followed_by_call_or_struct(&self) -> bool {
+        if self.peek_kind() != Some(TokenKind::Lt) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let mut idx = self.index;
+        while idx < self.tokens.len() {
+            match self.tokens[idx].kind {
+                TokenKind::Lt => depth += 1,
+                TokenKind::Gt => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.tokens.get(idx + 1).map(|t| &t.kind),
+                            Some(TokenKind::LParen) | Some(TokenKind::LBrace)
+                        );
+                    }
+                }
+                _ => {}
+            }
+            idx += 1;
+        }
+        false
+    }
+
+    fn parse_expr_bp(&mut self, min_bp: u8, allow_struct_literal: bool) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_prefix(allow_struct_literal)?;
 
         loop {
             // First, check for postfix operators
@@ -602,14 +821,14 @@ impl Parser {
                             let start = lhs.span().start;
                             self.bump(); // consume '.'
                             let field = self.expect_ident()?;
-                            let type_args = if self.peek_kind() == Some(TokenKind::LBracket) {
+                            let type_args = if self.peek_kind() == Some(TokenKind::Lt) {
                                 self.parse_type_args()?
                             } else {
                                 Vec::new()
                             };
 
                             // Check if this is a struct literal (followed by '{')
-                            if self.peek_kind() == Some(TokenKind::LBrace) {
+                            if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
                                 // Convert the lhs and field into a path for the struct literal
                                 let mut path = match lhs {
                                     Expr::Path(p) => p,
@@ -668,26 +887,16 @@ impl Parser {
                             continue;
                         }
                         TokenKind::LBracket => {
-                            let type_args = self.parse_type_args()?;
-                            if self.peek_kind() == Some(TokenKind::LBrace) {
-                                let path = match lhs {
-                                    Expr::Path(p) => p,
-                                    Expr::FieldAccess(ref fa) => self.field_access_to_path(fa)?,
-                                    _ => {
-                                        return Err(self.error_current(
-                                            "expected path before struct literal".to_string(),
-                                        ))
-                                    }
-                                };
-                                lhs = self.parse_struct_literal(path, type_args)?;
-                                continue;
-                            }
-                            if self.peek_kind() != Some(TokenKind::LParen) {
-                                return Err(self.error_current(
-                                    "type arguments require a call or struct literal".to_string(),
-                                ));
-                            }
-                            lhs = self.finish_call(lhs, type_args)?;
+                            // With <> for generics, [] is unambiguously for indexing
+                            let start = lhs.span().start;
+                            self.bump(); // consume '['
+                            let index = self.parse_expr()?;
+                            let end = self.expect(TokenKind::RBracket)?.span.end;
+                            lhs = Expr::Index(IndexExpr {
+                                object: Box::new(lhs),
+                                index: Box::new(index),
+                                span: Span::new(start, end),
+                            });
                             continue;
                         }
                         TokenKind::Question => {
@@ -702,6 +911,38 @@ impl Parser {
                         _ => unreachable!(),
                     }
                 }
+            }
+
+            // Special handling for '<' which can be type arguments or less-than
+            if self.peek_kind() == Some(TokenKind::Lt) {
+                // Check if this looks like type arguments: path<Type>(args) or path<Type>{ ... }
+                if matches!(&lhs, Expr::Path(_) | Expr::FieldAccess(_))
+                    && self.type_args_followed_by_call_or_struct()
+                {
+                    let type_args = self.parse_type_args()?;
+                    if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
+                        let path = match lhs {
+                            Expr::Path(p) => p,
+                            Expr::FieldAccess(ref fa) => self.field_access_to_path(fa)?,
+                            _ => unreachable!(),
+                        };
+                        lhs = self.parse_struct_literal(path, type_args)?;
+                        continue;
+                    }
+                    if self.peek_kind() == Some(TokenKind::LParen) {
+                        lhs = self.finish_call(lhs, type_args)?;
+                        continue;
+                    }
+                    if !allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
+                        return Err(self.error_current(
+                            "generic expressions in this context require parentheses".to_string(),
+                        ));
+                    }
+                    return Err(self.error_current(
+                        "type arguments require a call or struct literal".to_string(),
+                    ));
+                }
+                // Fall through to treat as less-than comparison
             }
 
             // Then, check for binary operators
@@ -727,7 +968,8 @@ impl Parser {
             }
 
             self.bump();
-            let rhs = self.parse_expr_bp(r_bp)?;
+            // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
+            let rhs = self.parse_expr_bp(r_bp, allow_struct_literal)?;
             let span = Span::new(lhs.span().start, rhs.span().end);
             lhs = Expr::Binary(BinaryExpr {
                 op,
@@ -740,11 +982,12 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_prefix(&mut self) -> Result<Expr, ParseError> {
+    fn parse_prefix(&mut self, allow_struct_literal: bool) -> Result<Expr, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Minus) => {
                 let start = self.bump().unwrap().span.start;
-                let expr = self.parse_expr_bp(7)?;
+                // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
+                let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Neg,
                     span: Span::new(start, expr.span().end),
@@ -753,7 +996,8 @@ impl Parser {
             }
             Some(TokenKind::Bang) => {
                 let start = self.bump().unwrap().span.start;
-                let expr = self.parse_expr_bp(7)?;
+                // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
+                let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Not,
                     span: Span::new(start, expr.span().end),
@@ -761,11 +1005,11 @@ impl Parser {
                 }))
             }
             Some(TokenKind::Match) => self.parse_match(),
-            _ => self.parse_primary(),
+            _ => self.parse_primary(allow_struct_literal),
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+    fn parse_primary(&mut self, allow_struct_literal: bool) -> Result<Expr, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Int) => {
                 let token = self.bump().unwrap();
@@ -802,6 +1046,16 @@ impl Parser {
                 })?;
                 Ok(Expr::Literal(LiteralExpr {
                     value: Literal::String(value),
+                    span: token.span,
+                }))
+            }
+            Some(TokenKind::Char) => {
+                let token = self.bump().unwrap();
+                let value = unescape_char(&token.text).map_err(|message| {
+                    self.error_at(token.span, format!("invalid char literal: {message}"))
+                })?;
+                Ok(Expr::Literal(LiteralExpr {
+                    value: Literal::U8(value),
                     span: token.span,
                 }))
             }
@@ -855,14 +1109,14 @@ impl Parser {
                     span: Span::new(start, end),
                 };
 
-                if self.peek_kind() == Some(TokenKind::LBrace) {
+                if allow_struct_literal && self.peek_kind() == Some(TokenKind::LBrace) {
                     self.parse_struct_literal(path, Vec::new())
                 } else {
                     Ok(Expr::Path(path))
                 }
             }
-            Some(_other) => Err(self.error_current(format!(
-                "unexpected token in expression: {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "unexpected token in expression: {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -871,7 +1125,8 @@ impl Parser {
     fn parse_match(&mut self) -> Result<Expr, ParseError> {
         let match_token = self.expect(TokenKind::Match)?;
         let start = match_token.span.start;
-        let expr = self.parse_expr()?;
+        // Use parse_expr_no_struct because `{` after the scrutinee starts the match arms, not a struct literal
+        let expr = self.parse_expr_no_struct()?;
         self.expect(TokenKind::LBrace)?;
         let mut arms = Vec::new();
         while self.peek_kind() != Some(TokenKind::RBrace) {
@@ -908,6 +1163,13 @@ impl Parser {
                     self.error_at(token.span, "invalid integer literal".to_string())
                 })?;
                 Ok(Pattern::Literal(Literal::Int(value)))
+            }
+            Some(TokenKind::Char) => {
+                let token = self.bump().unwrap();
+                let value = unescape_char(&token.text).map_err(|message| {
+                    self.error_at(token.span, format!("invalid char literal: {message}"))
+                })?;
+                Ok(Pattern::Literal(Literal::U8(value)))
             }
             Some(TokenKind::True) => {
                 self.bump();
@@ -1028,9 +1290,9 @@ impl Parser {
         let path = self.parse_path()?;
         let mut args = Vec::new();
         let mut end = path.span.end;
-        if self.peek_kind() == Some(TokenKind::LBracket) {
+        if self.peek_kind() == Some(TokenKind::Lt) {
             self.bump();
-            if self.peek_kind() != Some(TokenKind::RBracket) {
+            if self.peek_kind() != Some(TokenKind::Gt) {
                 loop {
                     args.push(self.parse_type()?);
                     if self.maybe_consume(TokenKind::Comma).is_none() {
@@ -1038,7 +1300,7 @@ impl Parser {
                     }
                 }
             }
-            end = self.expect(TokenKind::RBracket)?.span.end;
+            end = self.expect(TokenKind::Gt)?.span.end;
         }
         let span = Span::new(path.span.start, end);
         Ok(Type::Path { path, args, span })
@@ -1099,12 +1361,12 @@ impl Parser {
     }
 
     fn parse_type_params(&mut self) -> Result<Vec<Ident>, ParseError> {
-        if self.peek_kind() != Some(TokenKind::LBracket) {
+        if self.peek_kind() != Some(TokenKind::Lt) {
             return Ok(Vec::new());
         }
         self.bump();
         let mut params = Vec::new();
-        if self.peek_kind() != Some(TokenKind::RBracket) {
+        if self.peek_kind() != Some(TokenKind::Gt) {
             loop {
                 let ident = self.expect_ident()?;
                 params.push(ident);
@@ -1113,17 +1375,17 @@ impl Parser {
                 }
             }
         }
-        self.expect(TokenKind::RBracket)?;
+        self.expect(TokenKind::Gt)?;
         Ok(params)
     }
 
     fn parse_type_args(&mut self) -> Result<Vec<Type>, ParseError> {
-        if self.peek_kind() != Some(TokenKind::LBracket) {
+        if self.peek_kind() != Some(TokenKind::Lt) {
             return Ok(Vec::new());
         }
         self.bump();
         let mut args = Vec::new();
-        if self.peek_kind() != Some(TokenKind::RBracket) {
+        if self.peek_kind() != Some(TokenKind::Gt) {
             loop {
                 args.push(self.parse_type()?);
                 if self.maybe_consume(TokenKind::Comma).is_none() {
@@ -1131,15 +1393,15 @@ impl Parser {
                 }
             }
         }
-        self.expect(TokenKind::RBracket)?;
+        self.expect(TokenKind::Gt)?;
         Ok(args)
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         match self.peek_kind() {
             Some(k) if k == kind => Ok(self.bump().unwrap()),
-            Some(_other) => Err(self.error_current(format!(
-                "expected {{kind:?}}, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected {kind:?}, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -1148,8 +1410,8 @@ impl Parser {
     fn expect_ident(&mut self) -> Result<Ident, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Ident) => Ok(to_ident(&self.bump().unwrap())),
-            Some(_other) => Err(self.error_current(format!(
-                "expected identifier, found {{other:?}}"
+            Some(other) => Err(self.error_current(format!(
+                "expected identifier, found {other:?}"
             ))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
@@ -1252,6 +1514,42 @@ fn unescape_string(text: &str) -> Result<String, String> {
     Ok(out)
 }
 
+fn unescape_char(text: &str) -> Result<u8, String> {
+    let mut chars = text.chars();
+    if chars.next() != Some('\'') || text.len() < 2 {
+        return Err("missing quotes".to_string());
+    }
+    let Some(ch) = chars.next() else {
+        return Err("empty char literal".to_string());
+    };
+    let value = if ch == '\\' {
+        let Some(esc) = chars.next() else {
+            return Err("invalid escape".to_string());
+        };
+        match esc {
+            'n' => b'\n',
+            'r' => b'\r',
+            't' => b'\t',
+            '\\' => b'\\',
+            '\'' => b'\'',
+            'x' => {
+                let hi = chars.next().ok_or_else(|| "invalid hex escape".to_string())?;
+                let lo = chars.next().ok_or_else(|| "invalid hex escape".to_string())?;
+                let hex = format!("{hi}{lo}");
+                u8::from_str_radix(&hex, 16).map_err(|_| "invalid hex escape".to_string())?
+            }
+            other => return Err(format!("unsupported escape \\{other}")),
+        }
+    } else {
+        let code = ch as u32;
+        if code > 255 {
+            return Err("char literal out of range".to_string());
+        }
+        code as u8
+    };
+    Ok(value)
+}
+
 trait SpanExt {
     fn span(&self) -> Span;
 }
@@ -1264,6 +1562,7 @@ impl SpanExt for Expr {
             Expr::Call(call) => call.span,
             Expr::MethodCall(method_call) => method_call.span,
             Expr::FieldAccess(field) => field.span,
+            Expr::Index(index) => index.span,
             Expr::StructLiteral(lit) => lit.span,
             Expr::Unary(unary) => unary.span,
             Expr::Binary(binary) => binary.span,

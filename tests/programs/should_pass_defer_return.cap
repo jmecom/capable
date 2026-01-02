@@ -1,0 +1,14 @@
+module should_pass_defer_return
+use sys::system
+use sys::console
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  c.println("start")
+  defer c.println("outer")
+  if (true) {
+    defer c.println("inner")
+    return 0
+  }
+  return 1
+}

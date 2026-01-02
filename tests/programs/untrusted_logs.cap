@@ -1,7 +1,7 @@
 module untrusted_logs
 use sys::fs
 
-pub fn read_log(dir: Dir) -> Result[string, FsErr] {
+pub fn read_log(dir: Dir) -> Result<string, FsErr> {
   let file = dir.open_read("app.log")
   return file.read_to_string()
 }

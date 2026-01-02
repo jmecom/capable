@@ -28,8 +28,11 @@ mod abi_quirks;
 mod intrinsics;
 mod layout;
 
-use emit::{emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local, value_from_params};
-use layout::{build_enum_index, build_struct_layout_index};
+use emit::{
+    emit_hir_stmt, emit_runtime_wrapper_call, flatten_value, store_local, value_from_params,
+    DeferStack, ReturnLowering,
+};
+use layout::{build_enum_index, build_struct_layout_index, resolve_struct_layout};
 
 #[derive(Debug, Error, Diagnostic)]
 #[allow(unused_assignments)]
@@ -156,7 +159,6 @@ struct TypeLayout {
 enum ValueRepr {
     Unit,
     Single(ir::Value),
-    Pair(ir::Value, ir::Value),
     Result {
         tag: ir::Value,
         ok: Box<ValueRepr>,
@@ -185,7 +187,6 @@ struct ResultShape {
 enum ResultKind {
     Unit,
     Single,
-    Pair,
 }
 
 /// Build and write the object file for a fully-checked HIR program.
@@ -224,6 +225,7 @@ pub fn build_object(
             &enum_index,
             &mut fn_map,
             &runtime_intrinsics,
+            &struct_layouts,
             module.isa().pointer_type(),
             true,
         )?;
@@ -236,6 +238,7 @@ pub fn build_object(
             &enum_index,
             &mut fn_map,
             &runtime_intrinsics,
+            &struct_layouts,
             module.isa().pointer_type(),
             false,
         )?;
@@ -246,6 +249,7 @@ pub fn build_object(
         &enum_index,
         &mut fn_map,
         &runtime_intrinsics,
+        &struct_layouts,
         module.isa().pointer_type(),
         false,
     )?;
@@ -257,7 +261,7 @@ pub fn build_object(
         .collect::<Vec<_>>();
 
     for module_ref in &all_modules {
-        register_extern_functions_from_hir(module_ref, &mut fn_map)?;
+        register_extern_functions_from_hir(module_ref, &mut fn_map, &struct_layouts)?;
     }
 
     let mut data_counter = 0u32;
@@ -272,17 +276,31 @@ pub fn build_object(
             if info.is_runtime {
                 continue;
             }
+            let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
+            let sig_for_codegen = if info.runtime_symbol.is_some() {
+                &info.sig
+            } else {
+                abi_sig
+            };
             let func_id = module
                 .declare_function(
                     &info.symbol,
                     Linkage::Export,
-                    &sig_to_clif(&info.sig, module.isa().pointer_type()),
+                    &sig_to_clif(
+                        sig_for_codegen,
+                        module.isa().pointer_type(),
+                        module.isa().default_call_conv(),
+                    ),
                 )
                 .map_err(|err| CodegenError::Codegen(err.to_string()))?;
             let mut ctx = module.make_context();
             ctx.func = Function::with_name_signature(
                 ir::UserFuncName::user(0, func_id.as_u32()),
-                sig_to_clif(&info.sig, module.isa().pointer_type()),
+                sig_to_clif(
+                    sig_for_codegen,
+                    module.isa().pointer_type(),
+                    module.isa().default_call_conv(),
+                ),
             );
 
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -294,11 +312,18 @@ pub fn build_object(
 
             if info.runtime_symbol.is_some() {
                 let args = builder.block_params(block).to_vec();
-                let value = emit_runtime_wrapper_call(&mut builder, &mut module, &info, args)?;
+                let value = emit_runtime_wrapper_call(
+                    &mut builder,
+                    &mut module,
+                    &info,
+                    args,
+                    &func.ret_ty,
+                    &struct_layouts,
+                )?;
                 match value {
                     ValueRepr::Unit => builder.ins().return_(&[]),
                     ValueRepr::Single(val) => builder.ins().return_(&[val]),
-                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                    ValueRepr::Result { .. } => {
                         let values = flatten_value(&value);
                         builder.ins().return_(&values)
                     }
@@ -318,12 +343,83 @@ pub fn build_object(
             let mut locals: HashMap<crate::hir::LocalId, LocalValue> = HashMap::new();
             let params = builder.block_params(block).to_vec();
             let mut param_index = 0;
+            let mut return_lowering = ReturnLowering::Direct;
+
+            if info.sig.ret == AbiType::Ptr
+                && abi_sig.ret == AbiType::Unit
+                && resolve_struct_layout(&func.ret_ty.ty, "", &struct_layouts.layouts).is_some()
+            {
+                let out_ptr = params
+                    .get(0)
+                    .copied()
+                    .ok_or_else(|| CodegenError::Codegen("missing sret param".to_string()))?;
+                return_lowering = ReturnLowering::SRet {
+                    out_ptr,
+                    ret_ty: func.ret_ty.clone(),
+                };
+                param_index = 1;
+            } else if let AbiType::ResultOut(ok_abi, err_abi) = &abi_sig.ret {
+                let (ok_ty, err_ty) = match &func.ret_ty.ty {
+                    crate::typeck::Ty::Path(name, args)
+                        if name == "sys.result.Result" && args.len() == 2 =>
+                    {
+                        (
+                            crate::hir::HirType {
+                                ty: args[0].clone(),
+                                abi: (**ok_abi).clone(),
+                            },
+                            crate::hir::HirType {
+                                ty: args[1].clone(),
+                                abi: (**err_abi).clone(),
+                            },
+                        )
+                    }
+                    _ => {
+                        return Err(CodegenError::Codegen(
+                            "result out params missing result type".to_string(),
+                        ))
+                    }
+                };
+                return_lowering = ReturnLowering::ResultOut {
+                    out_ok: None,
+                    out_err: None,
+                    ok_ty,
+                    err_ty,
+                };
+            }
             for param in &func.params {
                 let value =
                     value_from_params(&mut builder, &param.ty.abi, &params, &mut param_index)?;
                 let local = store_local(&mut builder, value);
                 locals.insert(param.local_id, local);
             }
+            if let ReturnLowering::ResultOut {
+                out_ok,
+                out_err,
+                ok_ty,
+                err_ty,
+            } = &mut return_lowering
+            {
+                if ok_ty.abi != AbiType::Unit {
+                    *out_ok = Some(
+                        params
+                            .get(param_index)
+                            .copied()
+                            .ok_or_else(|| CodegenError::Codegen("missing ok out param".to_string()))?,
+                    );
+                    param_index += 1;
+                }
+                if err_ty.abi != AbiType::Unit {
+                    *out_err = Some(
+                        params
+                            .get(param_index)
+                            .copied()
+                            .ok_or_else(|| CodegenError::Codegen("missing err out param".to_string()))?,
+                    );
+                }
+            }
+            let mut defer_stack = DeferStack::new();
+            defer_stack.push_block_scope();
 
             let mut terminated = false;
             for stmt in &func.body.stmts {
@@ -336,6 +432,9 @@ pub fn build_object(
                     &struct_layouts,
                     &mut module,
                     &mut data_counter,
+                    None, // no loop context at function top level
+                    &return_lowering,
+                    &mut defer_stack,
                 )?;
                 if flow == Flow::Terminated {
                     terminated = true;
@@ -344,6 +443,16 @@ pub fn build_object(
             }
 
             if info.sig.ret == AbiType::Unit && !terminated {
+                defer_stack.emit_all_and_clear(
+                    &mut builder,
+                    &locals,
+                    &fn_map,
+                    &enum_index,
+                    &struct_layouts,
+                    &return_lowering,
+                    &mut module,
+                    &mut data_counter,
+                )?;
                 builder.ins().return_(&[]);
             }
 
@@ -371,8 +480,8 @@ pub fn build_object(
 }
 
 /// Lower a codegen signature into a Cranelift signature.
-fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
-    let mut signature = Signature::new(CallConv::SystemV);
+fn sig_to_clif(sig: &FnSig, ptr_ty: Type, call_conv: CallConv) -> Signature {
+    let mut signature = Signature::new(call_conv);
     for param in &sig.params {
         append_ty_params(&mut signature, param, ptr_ty);
     }
@@ -384,10 +493,6 @@ fn sig_to_clif(sig: &FnSig, ptr_ty: Type) -> Signature {
 fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
         AbiType::Unit => {}
-        AbiType::String => {
-            signature.params.push(AbiParam::new(ptr_ty));
-            signature.params.push(AbiParam::new(ir::types::I64));
-        }
         AbiType::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
         AbiType::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
@@ -407,11 +512,6 @@ fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
                 signature.params.push(AbiParam::new(ptr_ty));
             }
         }
-        AbiType::ResultString => {
-            signature.params.push(AbiParam::new(ptr_ty));
-            signature.params.push(AbiParam::new(ptr_ty));
-            signature.params.push(AbiParam::new(ptr_ty));
-        }
     }
 }
 
@@ -425,19 +525,12 @@ fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
         AbiType::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
         AbiType::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
         AbiType::Ptr => signature.returns.push(AbiParam::new(ptr_ty)),
-        AbiType::String => {
-            signature.returns.push(AbiParam::new(ptr_ty));
-            signature.returns.push(AbiParam::new(ir::types::I64));
-        }
         AbiType::Result(ok, err) => {
             signature.returns.push(AbiParam::new(ir::types::I8));
             append_ty_returns(signature, ok, ptr_ty);
             append_ty_returns(signature, err, ptr_ty);
         }
         AbiType::ResultOut(_, _) => {
-            signature.returns.push(AbiParam::new(ir::types::I8));
-        }
-        AbiType::ResultString => {
             signature.returns.push(AbiParam::new(ir::types::I8));
         }
     }
@@ -448,6 +541,49 @@ fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     intrinsics::register_runtime_intrinsics(ptr_ty)
 }
 
+fn is_non_opaque_struct_type(
+    ty: &crate::typeck::Ty,
+    struct_layouts: &StructLayoutIndex,
+) -> bool {
+    resolve_struct_layout(ty, "", &struct_layouts.layouts).is_some()
+}
+
+fn lowered_abi_sig_for_return(
+    sig: &FnSig,
+    ret_ty: &crate::hir::HirType,
+    struct_layouts: &StructLayoutIndex,
+) -> Option<FnSig> {
+    if let crate::typeck::Ty::Path(name, args) = &ret_ty.ty {
+        if name == "sys.result.Result" && args.len() == 2 {
+            let ok_is_struct = is_non_opaque_struct_type(&args[0], struct_layouts);
+            let err_is_struct = is_non_opaque_struct_type(&args[1], struct_layouts);
+            if ok_is_struct || err_is_struct {
+                let AbiType::Result(ok_abi, err_abi) = &ret_ty.abi else {
+                    return None;
+                };
+                let mut params = sig.params.clone();
+                params.push(AbiType::ResultOut(ok_abi.clone(), err_abi.clone()));
+                return Some(FnSig {
+                    params,
+                    ret: AbiType::ResultOut(ok_abi.clone(), err_abi.clone()),
+                });
+            }
+        }
+    }
+
+    if is_non_opaque_struct_type(&ret_ty.ty, struct_layouts) {
+        let mut params = Vec::with_capacity(sig.params.len() + 1);
+        params.push(AbiType::Ptr);
+        params.extend(sig.params.iter().cloned());
+        return Some(FnSig {
+            params,
+            ret: AbiType::Unit,
+        });
+    }
+
+    None
+}
+
 /// Register Capable-defined functions (stdlib or user) into the codegen map.
 fn register_user_functions(
     module: &crate::hir::HirModule,
@@ -455,6 +591,7 @@ fn register_user_functions(
     _enum_index: &EnumIndex,
     map: &mut HashMap<String, FnInfo>,
     runtime_intrinsics: &HashMap<String, FnInfo>,
+    struct_layouts: &StructLayoutIndex,
     _ptr_ty: Type,
     is_stdlib: bool,
 ) -> Result<(), CodegenError> {
@@ -487,6 +624,7 @@ fn register_user_functions(
         } else {
             (None, None)
         };
+        let abi_sig = abi_sig.or_else(|| lowered_abi_sig_for_return(&sig, &func.ret_ty, struct_layouts));
         map.insert(
             key,
             FnInfo {
@@ -505,6 +643,7 @@ fn register_user_functions(
 fn register_extern_functions_from_hir(
     module: &crate::hir::HirModule,
     map: &mut HashMap<String, FnInfo>,
+    struct_layouts: &StructLayoutIndex,
 ) -> Result<(), CodegenError> {
     let module_name = &module.name;
     for func in &module.extern_functions {
@@ -517,11 +656,12 @@ fn register_extern_functions_from_hir(
             ret: func.ret_ty.abi.clone(),
         };
         let key = format!("{}.{}", module_name, func.name);
+        let abi_sig = lowered_abi_sig_for_return(&sig, &func.ret_ty, struct_layouts);
         map.insert(
             key,
             FnInfo {
                 sig,
-                abi_sig: None,
+                abi_sig,
                 symbol: func.name.clone(),
                 runtime_symbol: None,
                 is_runtime: true,

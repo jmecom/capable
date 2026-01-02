@@ -642,3 +642,317 @@ fn run_scoping_assign() {
     assert_eq!(code, 0);
     assert!(stdout.contains("scoping assign test ok"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_break_basic() {
+    let out_dir = make_out_dir("break_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/break_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("break ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_continue_basic() {
+    let out_dir = make_out_dir("continue_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/continue_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("continue ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_break_nested() {
+    let out_dir = make_out_dir("break_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/break_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("break nested ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_nested_match() {
+    let out_dir = make_out_dir("nested_match");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/nested_match.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("nested match ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_basic() {
+    let out_dir = make_out_dir("for_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_basic ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_break() {
+    let out_dir = make_out_dir("for_break");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_break.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_break ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_continue() {
+    let out_dir = make_out_dir("for_continue");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_continue.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_continue ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_nested() {
+    let out_dir = make_out_dir("for_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_nested ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_sum() {
+    let out_dir = make_out_dir("for_sum");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_sum.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_sum ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_empty_range() {
+    let out_dir = make_out_dir("for_empty_range");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_empty_range.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_empty_range ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_break_nested() {
+    let out_dir = make_out_dir("for_break_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_break_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_break_nested ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_continue_nested() {
+    let out_dir = make_out_dir("for_continue_nested");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_continue_nested.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for_continue_nested ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_string_compare() {
+    let out_dir = make_out_dir("string_compare");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/string_compare.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("string_compare ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_string_index() {
+    let out_dir = make_out_dir("string_index");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/string_index.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("string_index ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_generic_and_index() {
+    let out_dir = make_out_dir("generic_and_index");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/generic_and_index.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("generic_and_index ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_result_is_ok_is_err() {
+    let out_dir = make_out_dir("result_is_ok_is_err");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_result_is_ok_is_err.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("is_ok_is_err ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_result_ok_err() {
+    let out_dir = make_out_dir("result_ok_err");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_result_ok_err.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("ok_err ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_defer() {
+    let out_dir = make_out_dir("defer");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_defer.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("start\nend\nsecond\nfirst\n"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
+fn run_defer_scope() {
+    let out_dir = make_out_dir("defer_scope");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_defer_scope.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("start\nin if\nif defer\nafter if\nin loop\nloop defer\nafter loop\n"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
+fn run_defer_return() {
+    let out_dir = make_out_dir("defer_return");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_defer_return.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("start\ninner\nouter\n"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_if_let() {
+    let out_dir = make_out_dir("if_let");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_if_let.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("ok\nerr\nif_let ok\n"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_forever() {
+    let out_dir = make_out_dir("for_forever");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/should_pass_for_forever.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("0\n1\n2\nfor_forever ok\n"), "stdout was: {stdout:?}");
+}

@@ -3,6 +3,7 @@ module sys::vec
 
 use sys::buffer
 
+pub copy opaque struct Vec<T>
 pub copy opaque struct VecU8
 pub copy opaque struct VecI32
 pub copy opaque struct VecString
@@ -17,20 +18,38 @@ impl VecU8 {
     return 0
   }
 
-  pub fn get(self, i: i32) -> Result[u8, VecErr] {
+  pub fn is_empty(self) -> bool {
+    return self.len() == 0
+  }
+
+  pub fn get(self, i: i32) -> Result<u8, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn set(self, i: i32, x: u8) -> Result[unit, VecErr] {
+  pub fn set(self, i: i32, x: u8) -> Result<unit, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn push(self, x: u8) -> Result[unit, buffer::AllocErr] {
+  pub fn push(self, x: u8) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn extend(self, other: VecU8) -> Result[unit, buffer::AllocErr] {
+  pub fn extend(self, other: VecU8) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
+  }
+
+  pub fn extend_slice(self, data: Slice<u8>) -> Result<unit, buffer::AllocErr> {
+    let len = data.len()
+    let i = 0
+    while (i < len) {
+      self.push(data.at(i))?
+      i = i + 1
+    }
+    return Ok(())
+  }
+
+  pub fn push_all(self, other: VecU8) -> Result<unit, buffer::AllocErr> {
+    return self.extend(other)
   }
 
   pub fn filter(self, value: u8) -> VecU8 {
@@ -41,15 +60,25 @@ impl VecU8 {
     return ()
   }
 
-  pub fn slice(self, start: i32, len: i32) -> Result[Slice[u8], VecErr] {
+  pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn pop(self) -> Result[u8, VecErr] {
+  pub fn pop(self) -> Result<u8, VecErr> {
     return Err(VecErr::Empty)
   }
 
-  pub fn as_slice(self) -> Slice[u8] {
+  pub fn as_slice(self) -> Slice<u8> {
+    return ()
+  }
+
+  pub fn clear(self) -> unit {
+    while (true) {
+      match (self.pop()) {
+        Ok(_) => { }
+        Err(_) => { break }
+      }
+    }
     return ()
   }
 }
@@ -59,20 +88,28 @@ impl VecI32 {
     return 0
   }
 
-  pub fn get(self, i: i32) -> Result[i32, VecErr] {
+  pub fn is_empty(self) -> bool {
+    return self.len() == 0
+  }
+
+  pub fn get(self, i: i32) -> Result<i32, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn set(self, i: i32, x: i32) -> Result[unit, VecErr] {
+  pub fn set(self, i: i32, x: i32) -> Result<unit, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn push(self, x: i32) -> Result[unit, buffer::AllocErr] {
+  pub fn push(self, x: i32) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn extend(self, other: VecI32) -> Result[unit, buffer::AllocErr] {
+  pub fn extend(self, other: VecI32) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
+  }
+
+  pub fn push_all(self, other: VecI32) -> Result<unit, buffer::AllocErr> {
+    return self.extend(other)
   }
 
   pub fn filter(self, value: i32) -> VecI32 {
@@ -83,8 +120,18 @@ impl VecI32 {
     return ()
   }
 
-  pub fn pop(self) -> Result[i32, VecErr] {
+  pub fn pop(self) -> Result<i32, VecErr> {
     return Err(VecErr::Empty)
+  }
+
+  pub fn clear(self) -> unit {
+    while (true) {
+      match (self.pop()) {
+        Ok(_) => { }
+        Err(_) => { break }
+      }
+    }
+    return ()
   }
 }
 
@@ -93,19 +140,55 @@ impl VecString {
     return 0
   }
 
-  pub fn get(self, i: i32) -> Result[string, VecErr] {
+  pub fn is_empty(self) -> bool {
+    return self.len() == 0
+  }
+
+  pub fn get(self, i: i32) -> Result<string, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn push(self, x: string) -> Result[unit, buffer::AllocErr] {
+  pub fn push(self, x: string) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn extend(self, other: VecString) -> Result[unit, buffer::AllocErr] {
+  pub fn extend(self, other: VecString) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  pub fn pop(self) -> Result[string, VecErr] {
+  pub fn push_all(self, other: VecString) -> Result<unit, buffer::AllocErr> {
+    return self.extend(other)
+  }
+
+  pub fn pop(self) -> Result<string, VecErr> {
     return Err(VecErr::Empty)
+  }
+
+  pub fn clear(self) -> unit {
+    while (true) {
+      match (self.pop()) {
+        Ok(_) => { }
+        Err(_) => { break }
+      }
+    }
+    return ()
+  }
+
+  pub fn join(self, sep: string) -> Result<string, buffer::AllocErr> {
+    let len = self.len()
+    let buf = buffer::new(0)?
+    let i = 0
+    while (i < len) {
+      let part = match (self.get(i)) {
+        Ok(v) => { v }
+        Err(_) => { panic() }
+      }
+      if (i > 0) {
+        buf.push_str(sep)?
+      }
+      buf.push_str(part)?
+      i = i + 1
+    }
+    return buf.to_string()
   }
 }

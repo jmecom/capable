@@ -67,9 +67,8 @@ struct FileReadState {
 }
 
 #[repr(C)]
-pub struct RawString {
-    ptr: *const u8,
-    len: u64,
+pub struct CapString {
+    bytes: Handle,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -133,11 +132,21 @@ fn with_table<T, R>(
     f(&mut table)
 }
 
-fn to_raw_string(value: String) -> RawString {
+fn to_slice_handle(value: String) -> Handle {
     let bytes = value.into_bytes().into_boxed_slice();
-    let len = bytes.len() as u64;
-    let ptr = Box::into_raw(bytes) as *const u8;
-    RawString { ptr, len }
+    let len = bytes.len();
+    let ptr = Box::into_raw(bytes) as *mut u8;
+    let handle = new_handle();
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(
+            handle,
+            SliceState {
+                ptr: ptr as usize,
+                len,
+            },
+        );
+    });
+    handle
 }
 
 fn write_handle_result(
@@ -249,13 +258,12 @@ pub extern "C" fn capable_rt_mint_net(_sys: Handle) -> Handle {
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_readfs(
     _sys: Handle,
-    root_ptr: *const u8,
-    root_len: usize,
+    root: *const CapString,
 ) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
         return 0;
     }
-    let root = unsafe { read_str(root_ptr, root_len) };
+    let root = unsafe { read_cap_string(root) };
     let root_path = match root {
         Some(path) => normalize_root(Path::new(&path)),
         None => normalize_root(Path::new("")),
@@ -271,13 +279,12 @@ pub extern "C" fn capable_rt_mint_readfs(
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_filesystem(
     _sys: Handle,
-    root_ptr: *const u8,
-    root_len: usize,
+    root: *const CapString,
 ) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
         return 0;
     }
-    let root = unsafe { read_str(root_ptr, root_len) };
+    let root = unsafe { read_cap_string(root) };
     let root_path = match root {
         Some(path) => normalize_root(Path::new(&path)),
         None => normalize_root(Path::new("")),
@@ -322,10 +329,9 @@ pub extern "C" fn capable_rt_fs_filesystem_close(fs: Handle) {
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_subdir(
     dir: Handle,
-    name_ptr: *const u8,
-    name_len: usize,
+    name: *const CapString,
 ) -> Handle {
-    let name = unsafe { read_str(name_ptr, name_len) };
+    let name = unsafe { read_cap_string(name) };
     let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
@@ -353,10 +359,9 @@ pub extern "C" fn capable_rt_fs_subdir(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_open_read(
     dir: Handle,
-    name_ptr: *const u8,
-    name_len: usize,
+    name: *const CapString,
 ) -> Handle {
-    let name = unsafe { read_str(name_ptr, name_len) };
+    let name = unsafe { read_cap_string(name) };
     let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
@@ -389,10 +394,9 @@ pub extern "C" fn capable_rt_fs_dir_close(dir: Handle) {
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_exists(
     fs: Handle,
-    path_ptr: *const u8,
-    path_len: usize,
+    path: *const CapString,
 ) -> u8 {
-    let path = unsafe { read_str(path_ptr, path_len) };
+    let path = unsafe { read_cap_string(path) };
     let state = take_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return 0;
@@ -410,12 +414,11 @@ pub extern "C" fn capable_rt_fs_exists(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_read_bytes(
     fs: Handle,
-    path_ptr: *const u8,
-    path_len: usize,
+    path: *const CapString,
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
-    let path = unsafe { read_str(path_ptr, path_len) };
+    let path = unsafe { read_cap_string(path) };
     let state = take_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
@@ -442,12 +445,11 @@ pub extern "C" fn capable_rt_fs_read_bytes(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_list_dir(
     fs: Handle,
-    path_ptr: *const u8,
-    path_len: usize,
+    path: *const CapString,
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
-    let path = unsafe { read_str(path_ptr, path_len) };
+    let path = unsafe { read_cap_string(path) };
     let state = take_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
@@ -481,10 +483,9 @@ pub extern "C" fn capable_rt_fs_list_dir(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_dir_exists(
     dir: Handle,
-    name_ptr: *const u8,
-    name_len: usize,
+    name: *const CapString,
 ) -> u8 {
-    let name = unsafe { read_str(name_ptr, name_len) };
+    let name = unsafe { read_cap_string(name) };
     let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
@@ -502,12 +503,11 @@ pub extern "C" fn capable_rt_fs_dir_exists(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_dir_read_bytes(
     dir: Handle,
-    name_ptr: *const u8,
-    name_len: usize,
+    name: *const CapString,
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
-    let name = unsafe { read_str(name_ptr, name_len) };
+    let name = unsafe { read_cap_string(name) };
     let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
@@ -567,16 +567,25 @@ pub extern "C" fn capable_rt_fs_dir_list_dir(
 
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_join(
-    a_ptr: *const u8,
-    a_len: usize,
-    b_ptr: *const u8,
-    b_len: usize,
-) -> RawString {
-    let (Some(a), Some(b)) = (unsafe { read_str(a_ptr, a_len) }, unsafe { read_str(b_ptr, b_len) }) else {
-        return RawString { ptr: std::ptr::null(), len: 0 };
+    out: *mut CapString,
+    a: *const CapString,
+    b: *const CapString,
+) {
+    let (Some(a), Some(b)) = (unsafe { read_cap_string(a) }, unsafe { read_cap_string(b) }) else {
+        unsafe {
+            if !out.is_null() {
+                (*out).bytes = 0;
+            }
+        }
+        return;
     };
     let joined = Path::new(&a).join(&b);
-    to_raw_string(joined.to_string_lossy().to_string())
+    let handle = to_slice_handle(joined.to_string_lossy().to_string());
+    unsafe {
+        if !out.is_null() {
+            (*out).bytes = handle;
+        }
+    }
 }
 
 #[no_mangle]
@@ -591,19 +600,27 @@ pub extern "C" fn capable_rt_assert(_sys: Handle, cond: u8) {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_console_print(_console: Handle, ptr: *const u8, len: usize) {
+pub extern "C" fn capable_rt_console_print(_console: Handle, s: *const CapString) {
     if !has_handle(&CONSOLES, _console, "console table") {
         return;
     }
-    unsafe { write_bytes(ptr, len, false) };
+    let handle = unsafe { if s.is_null() { 0 } else { (*s).bytes } };
+    let Some(state) = slice_state(handle) else {
+        return;
+    };
+    unsafe { write_bytes(state.ptr as *const u8, state.len, false) };
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_console_println(_console: Handle, ptr: *const u8, len: usize) {
+pub extern "C" fn capable_rt_console_println(_console: Handle, s: *const CapString) {
     if !has_handle(&CONSOLES, _console, "console table") {
         return;
     }
-    unsafe { write_bytes(ptr, len, true) };
+    let handle = unsafe { if s.is_null() { 0 } else { (*s).bytes } };
+    let Some(state) = slice_state(handle) else {
+        return;
+    };
+    unsafe { write_bytes(state.ptr as *const u8, state.len, true) };
 }
 
 #[no_mangle]
@@ -674,37 +691,35 @@ pub extern "C" fn capable_rt_math_mul_wrap_u8(a: u8, b: u8) -> u8 {
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_read_to_string(
     fs: Handle,
-    path_ptr: *const u8,
-    path_len: usize,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    path: *const CapString,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
-    let path = unsafe { read_str(path_ptr, path_len) };
+    let path = unsafe { read_cap_string(path) };
     let state = take_handle(&READ_FS, fs, "readfs table");
 
     let Some(state) = state else {
-        return write_result(out_ptr, out_len, out_err, Err(FsErr::PermissionDenied));
+        return write_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
     let Some(path) = path else {
-        return write_result(out_ptr, out_len, out_err, Err(FsErr::InvalidPath));
+        return write_result(out_ok, out_err, Err(FsErr::InvalidPath));
     };
     let relative = match normalize_relative(Path::new(&path)) {
         Some(path) => path,
-        None => return write_result(out_ptr, out_len, out_err, Err(FsErr::InvalidPath)),
+        None => return write_result(out_ok, out_err, Err(FsErr::InvalidPath)),
     };
     let full = state.root.join(relative);
     let full = match full.canonicalize() {
         Ok(path) => path,
-        Err(err) => return write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
+        Err(err) => return write_result(out_ok, out_err, Err(map_fs_err(err))),
     };
     if !full.starts_with(&state.root) {
-        return write_result(out_ptr, out_len, out_err, Err(FsErr::InvalidPath));
+        return write_result(out_ok, out_err, Err(FsErr::InvalidPath));
     }
 
     match std::fs::read_to_string(&full) {
-        Ok(contents) => write_result(out_ptr, out_len, out_err, Ok(contents)),
-        Err(err) => write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
+        Ok(contents) => write_result(out_ok, out_err, Ok(contents)),
+        Err(err) => write_result(out_ok, out_err, Err(map_fs_err(err))),
     }
 }
 
@@ -716,27 +731,26 @@ pub extern "C" fn capable_rt_fs_readfs_close(fs: Handle) {
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_file_read_to_string(
     file: Handle,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
     let state = take_handle(&FILE_READS, file, "file read table");
 
     let Some(state) = state else {
-        return write_result(out_ptr, out_len, out_err, Err(FsErr::PermissionDenied));
+        return write_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
     let full = state.root.join(state.rel);
     let full = match full.canonicalize() {
         Ok(path) => path,
-        Err(err) => return write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
+        Err(err) => return write_result(out_ok, out_err, Err(map_fs_err(err))),
     };
     if !full.starts_with(&state.root) {
-        return write_result(out_ptr, out_len, out_err, Err(FsErr::InvalidPath));
+        return write_result(out_ok, out_err, Err(FsErr::InvalidPath));
     }
 
     match std::fs::read_to_string(&full) {
-        Ok(contents) => write_result(out_ptr, out_len, out_err, Ok(contents)),
-        Err(err) => write_result(out_ptr, out_len, out_err, Err(map_fs_err(err))),
+        Ok(contents) => write_result(out_ok, out_err, Ok(contents)),
+        Err(err) => write_result(out_ok, out_err, Err(map_fs_err(err))),
     }
 }
 
@@ -748,8 +762,7 @@ pub extern "C" fn capable_rt_fs_file_read_close(file: Handle) {
 #[no_mangle]
 pub extern "C" fn capable_rt_net_connect(
     net: Handle,
-    host_ptr: *const u8,
-    host_len: usize,
+    host: *const CapString,
     port: i32,
     out_ok: *mut Handle,
     out_err: *mut i32,
@@ -757,7 +770,7 @@ pub extern "C" fn capable_rt_net_connect(
     if !has_handle(&NET_CAPS, net, "net table") {
         return write_handle_result_code(out_ok, out_err, Err(NetErr::IoError as i32));
     }
-    let host = unsafe { read_str(host_ptr, host_len) };
+    let host = unsafe { read_cap_string(host) };
     let Some(host) = host else {
         return write_handle_result_code(out_ok, out_err, Err(NetErr::InvalidAddress as i32));
     };
@@ -777,8 +790,7 @@ pub extern "C" fn capable_rt_net_connect(
 #[no_mangle]
 pub extern "C" fn capable_rt_net_listen(
     net: Handle,
-    host_ptr: *const u8,
-    host_len: usize,
+    host: *const CapString,
     port: i32,
     out_ok: *mut Handle,
     out_err: *mut i32,
@@ -786,7 +798,7 @@ pub extern "C" fn capable_rt_net_listen(
     if !has_handle(&NET_CAPS, net, "net table") {
         return write_handle_result_code(out_ok, out_err, Err(NetErr::IoError as i32));
     }
-    let host = unsafe { read_str(host_ptr, host_len) };
+    let host = unsafe { read_cap_string(host) };
     let Some(host) = host else {
         return write_handle_result_code(out_ok, out_err, Err(NetErr::InvalidAddress as i32));
     };
@@ -826,8 +838,7 @@ pub extern "C" fn capable_rt_net_accept(
 #[no_mangle]
 pub extern "C" fn capable_rt_net_read_to_string(
     conn: Handle,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
     let result = with_table(&TCP_CONNS, "tcp conn table", |table| {
@@ -840,20 +851,14 @@ pub extern "C" fn capable_rt_net_read_to_string(
             Err(err) => Err(map_net_err(err)),
         }
     });
-    write_string_result(
-        out_ptr,
-        out_len,
-        out_err,
-        result.map_err(|err| err as i32),
-    )
+    write_string_result(out_ok, out_err, result.map_err(|err| err as i32))
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_net_read(
     conn: Handle,
     max_size: i32,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
     let result = with_table(&TCP_CONNS, "tcp conn table", |table| {
@@ -873,22 +878,16 @@ pub extern "C" fn capable_rt_net_read(
             Err(err) => Err(map_net_err(err)),
         }
     });
-    write_string_result(
-        out_ptr,
-        out_len,
-        out_err,
-        result.map_err(|err| err as i32),
-    )
+    write_string_result(out_ok, out_err, result.map_err(|err| err as i32))
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_net_write(
     conn: Handle,
-    data_ptr: *const u8,
-    data_len: usize,
+    data: *const CapString,
     out_err: *mut i32,
 ) -> u8 {
-    let data = unsafe { read_str(data_ptr, data_len) };
+    let data = unsafe { read_cap_string(data) };
     let Some(data) = data else {
         unsafe {
             if !out_err.is_null() {
@@ -1087,6 +1086,15 @@ pub extern "C" fn capable_rt_buffer_new(
         }
     }
     0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_buffer_new_default(
+    initial_len: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    capable_rt_buffer_new(0, initial_len, out_ok, out_err)
 }
 
 #[no_mangle]
@@ -1783,6 +1791,11 @@ pub extern "C" fn capable_rt_vec_string_new(_alloc: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_string_new_default() -> Handle {
+    capable_rt_vec_string_new(0)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_string_len(vec: Handle) -> i32 {
     with_table(&VECS_STRING, "vec string table", |table| {
         table
@@ -1796,35 +1809,33 @@ pub extern "C" fn capable_rt_vec_string_len(vec: Handle) -> i32 {
 pub extern "C" fn capable_rt_vec_string_get(
     vec: Handle,
     index: i32,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
     let idx = match usize::try_from(index) {
         Ok(idx) => idx,
         Err(_) => {
-            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+            return write_string_result(out_ok, out_err, Err(VecErr::OutOfRange as i32));
         }
     };
     with_table(&VECS_STRING, "vec string table", |table| {
         let Some(data) = table.get(&vec) else {
-            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+            return write_string_result(out_ok, out_err, Err(VecErr::OutOfRange as i32));
         };
         let Some(value) = data.get(idx) else {
-            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::OutOfRange as i32));
+            return write_string_result(out_ok, out_err, Err(VecErr::OutOfRange as i32));
         };
-        write_string_result(out_ptr, out_len, out_err, Ok(value.clone()))
+        write_string_result(out_ok, out_err, Ok(value.clone()))
     })
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_string_push(
     vec: Handle,
-    ptr: *const u8,
-    len: usize,
+    value: *const CapString,
     out_err: *mut i32,
 ) -> u8 {
-    let value = unsafe { read_str(ptr, len) };
+    let value = unsafe { read_cap_string(value) };
     let Some(value) = value else {
         unsafe {
             if !out_err.is_null() {
@@ -1894,18 +1905,17 @@ pub extern "C" fn capable_rt_vec_string_extend(
 #[no_mangle]
 pub extern "C" fn capable_rt_vec_string_pop(
     vec: Handle,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
     with_table(&VECS_STRING, "vec string table", |table| {
         let Some(data) = table.get_mut(&vec) else {
-            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
+            return write_string_result(out_ok, out_err, Err(VecErr::Empty as i32));
         };
         let Some(value) = data.pop() else {
-            return write_string_result(out_ptr, out_len, out_err, Err(VecErr::Empty as i32));
+            return write_string_result(out_ok, out_err, Err(VecErr::Empty as i32));
         };
-        write_string_result(out_ptr, out_len, out_err, Ok(value))
+        write_string_result(out_ok, out_err, Ok(value))
     })
 }
 
@@ -1914,104 +1924,6 @@ pub extern "C" fn capable_rt_vec_string_free(_alloc: Handle, vec: Handle) {
     with_table(&VECS_STRING, "vec string table", |table| {
         table.remove(&vec);
     });
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_split_whitespace(
-    ptr: *const u8,
-    len: usize,
-) -> Handle {
-    let value = unsafe { read_str(ptr, len) };
-    let mut vec = Vec::new();
-    if let Some(value) = value {
-        vec.extend(value.split_whitespace().map(|s| s.to_string()));
-    }
-    let handle = new_handle();
-    with_table(&VECS_STRING, "vec string table", |table| {
-        table.insert(handle, vec);
-    });
-    handle
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_split(
-    ptr: *const u8,
-    len: usize,
-    delim: u8,
-) -> Handle {
-    let value = unsafe { read_str(ptr, len) };
-    let mut vec = Vec::new();
-    if let Some(value) = value {
-        let bytes = value.as_bytes();
-        let mut start = 0usize;
-        for (idx, byte) in bytes.iter().enumerate() {
-            if *byte == delim {
-                let part = &value[start..idx];
-                vec.push(part.to_string());
-                start = idx + 1;
-            }
-        }
-        let part = &value[start..];
-        vec.push(part.to_string());
-    }
-    let handle = new_handle();
-    with_table(&VECS_STRING, "vec string table", |table| {
-        table.insert(handle, vec);
-    });
-    handle
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_split_lines(ptr: *const u8, len: usize) -> Handle {
-    let value = unsafe { read_str(ptr, len) };
-    let mut vec = Vec::new();
-    if let Some(value) = value {
-        for line in value.split('\n') {
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            vec.push(line.to_string());
-        }
-    }
-    let handle = new_handle();
-    with_table(&VECS_STRING, "vec string table", |table| {
-        table.insert(handle, vec);
-    });
-    handle
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_trim(ptr: *const u8, len: usize) -> RawString {
-    let value = unsafe { read_str(ptr, len) };
-    let trimmed = value.as_deref().unwrap_or("").trim().to_string();
-    to_raw_string(trimmed)
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_trim_start(ptr: *const u8, len: usize) -> RawString {
-    let value = unsafe { read_str(ptr, len) };
-    let trimmed = value.as_deref().unwrap_or("").trim_start().to_string();
-    to_raw_string(trimmed)
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_trim_end(ptr: *const u8, len: usize) -> RawString {
-    let value = unsafe { read_str(ptr, len) };
-    let trimmed = value.as_deref().unwrap_or("").trim_end().to_string();
-    to_raw_string(trimmed)
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_starts_with(
-    ptr: *const u8,
-    len: usize,
-    prefix_ptr: *const u8,
-    prefix_len: usize,
-) -> u8 {
-    let value = unsafe { read_str(ptr, len) };
-    let prefix = unsafe { read_str(prefix_ptr, prefix_len) };
-    match (value, prefix) {
-        (Some(value), Some(prefix)) => u8::from(value.starts_with(&prefix)),
-        _ => 0,
-    }
 }
 
 #[no_mangle]
@@ -2026,8 +1938,7 @@ pub extern "C" fn capable_rt_args_len(_sys: Handle) -> i32 {
 pub extern "C" fn capable_rt_args_at(
     _sys: Handle,
     index: i32,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
     if !has_handle(&ARGS_CAPS, _sys, "args table") {
@@ -2057,70 +1968,52 @@ pub extern "C" fn capable_rt_args_at(
         }
         return 1;
     };
-    unsafe {
-        if !out_ptr.is_null() {
-            *out_ptr = arg.as_ptr();
-        }
-        if !out_len.is_null() {
-            *out_len = arg.len() as u64;
-        }
-    }
-    0
+    write_string_result(out_ok, out_err, Ok(arg.clone()))
 }
 
 #[no_mangle]
 pub extern "C" fn capable_rt_read_stdin_to_string(
     _sys: Handle,
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
     if !has_handle(&STDIN_CAPS, _sys, "stdin table") {
-        return write_string_result(out_ptr, out_len, out_err, Err(0));
+        return write_string_result(out_ok, out_err, Err(0));
     }
     let mut input = String::new();
     let result = io::stdin().read_to_string(&mut input);
     match result {
-        Ok(_) => write_string_result(out_ptr, out_len, out_err, Ok(input)),
-        Err(_) => write_string_result(out_ptr, out_len, out_err, Err(0)),
+        Ok(_) => write_string_result(out_ok, out_err, Ok(input)),
+        Err(_) => write_string_result(out_ok, out_err, Err(0)),
     }
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_string_len(ptr: *const u8, len: usize) -> i32 {
-    let _ = ptr;
-    len.min(i32::MAX as usize) as i32
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_byte_at(
-    ptr: *const u8,
-    len: usize,
-    index: i32,
-) -> u8 {
-    let idx = match usize::try_from(index) {
-        Ok(idx) => idx,
-        Err(_) => return 0,
+pub extern "C" fn capable_rt_string_eq(
+    left: *const CapString,
+    right: *const CapString,
+) -> i8 {
+    let left_handle = unsafe { if left.is_null() { 0 } else { (*left).bytes } };
+    let right_handle = unsafe { if right.is_null() { 0 } else { (*right).bytes } };
+    let left_state = slice_state(left_handle);
+    let right_state = slice_state(right_handle);
+    let (Some(left_state), Some(right_state)) = (left_state, right_state) else {
+        return 0;
     };
-    if ptr.is_null() || idx >= len {
+    if left_state.len != right_state.len {
         return 0;
     }
-    unsafe { *ptr.add(idx) }
-}
-
-#[no_mangle]
-pub extern "C" fn capable_rt_string_as_slice(ptr: *const u8, len: usize) -> Handle {
-    let handle = new_handle();
-    with_table(&SLICES, "slice table", |table| {
-        table.insert(
-            handle,
-            SliceState {
-                ptr: ptr as usize,
-                len,
-            },
-        );
-    });
-    handle
+    if left_state.len == 0 {
+        return 1;
+    }
+    if left_state.ptr == 0 || right_state.ptr == 0 {
+        return 0;
+    }
+    let s1 =
+        unsafe { std::slice::from_raw_parts(left_state.ptr as *const u8, left_state.len) };
+    let s2 =
+        unsafe { std::slice::from_raw_parts(right_state.ptr as *const u8, right_state.len) };
+    i8::from(s1 == s2)
 }
 
 #[no_mangle]
@@ -2189,18 +2082,10 @@ fn resolve_rooted_path(root: &Path, rel: &Path) -> Result<PathBuf, FsErr> {
     Ok(full)
 }
 
-fn write_result(
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
-    out_err: *mut i32,
-    result: Result<String, FsErr>,
-) -> u8 {
+fn write_result(out_ok: *mut CapString, out_err: *mut i32, result: Result<String, FsErr>) -> u8 {
     unsafe {
-        if !out_ptr.is_null() {
-            *out_ptr = std::ptr::null();
-        }
-        if !out_len.is_null() {
-            *out_len = 0;
+        if !out_ok.is_null() {
+            (*out_ok).bytes = 0;
         }
         if !out_err.is_null() {
             *out_err = 0;
@@ -2208,18 +2093,10 @@ fn write_result(
     }
     match result {
         Ok(contents) => {
-            let bytes = contents.into_bytes().into_boxed_slice();
-            let len = bytes.len() as u64;
-            let ptr = Box::into_raw(bytes) as *const u8;
+            let handle = to_slice_handle(contents);
             unsafe {
-                if !out_ptr.is_null() {
-                    *out_ptr = ptr;
-                }
-                if !out_len.is_null() {
-                    *out_len = len;
-                }
-                if !out_err.is_null() {
-                    *out_err = 0;
+                if !out_ok.is_null() {
+                    (*out_ok).bytes = handle;
                 }
             }
             0
@@ -2235,19 +2112,14 @@ fn write_result(
     }
 }
 
-/// Write a Result[String, i32] payload using the ResultString ABI (u64 length).
 fn write_string_result(
-    out_ptr: *mut *const u8,
-    out_len: *mut u64,
+    out_ok: *mut CapString,
     out_err: *mut i32,
     result: Result<String, i32>,
 ) -> u8 {
     unsafe {
-        if !out_ptr.is_null() {
-            *out_ptr = std::ptr::null();
-        }
-        if !out_len.is_null() {
-            *out_len = 0;
+        if !out_ok.is_null() {
+            (*out_ok).bytes = 0;
         }
         if !out_err.is_null() {
             *out_err = 0;
@@ -2255,15 +2127,10 @@ fn write_string_result(
     }
     match result {
         Ok(s) => {
-            let len = s.len();
-            let ptr = s.as_ptr();
-            std::mem::forget(s);
+            let handle = to_slice_handle(s);
             unsafe {
-                if !out_ptr.is_null() {
-                    *out_ptr = ptr;
-                }
-                if !out_len.is_null() {
-                    *out_len = len as u64;
+                if !out_ok.is_null() {
+                    (*out_ok).bytes = handle;
                 }
             }
             0
@@ -2279,12 +2146,27 @@ fn write_string_result(
     }
 }
 
-unsafe fn read_str(ptr: *const u8, len: usize) -> Option<String> {
+fn slice_state(handle: Handle) -> Option<SliceState> {
+    with_table(&SLICES, "slice table", |table| table.get(&handle).copied())
+}
+
+fn read_slice_string(handle: Handle) -> Option<String> {
+    if handle == 0 {
+        return Some(String::new());
+    }
+    let state = slice_state(handle)?;
+    if state.ptr == 0 {
+        return Some(String::new());
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(state.ptr as *const u8, state.len) };
+    std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+}
+
+unsafe fn read_cap_string(ptr: *const CapString) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
-    let bytes = std::slice::from_raw_parts(ptr, len);
-    std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+    read_slice_string((*ptr).bytes)
 }
 
 fn normalize_root(root: &Path) -> Option<PathBuf> {

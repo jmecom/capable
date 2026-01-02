@@ -11,15 +11,15 @@ pub linear capability struct FileRead
 pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }
 
 impl ReadFS {
-  pub fn read_to_string(self, path: string) -> Result[string, FsErr] {
+  pub fn read_to_string(self, path: string) -> Result<string, FsErr> {
     return ()
   }
 
-  pub fn read_bytes(self, path: string) -> Result[vec::VecU8, FsErr] {
+  pub fn read_bytes(self, path: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  pub fn list_dir(self, path: string) -> Result[vec::VecString, FsErr] {
+  pub fn list_dir(self, path: string) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
@@ -51,11 +51,11 @@ impl Dir {
     return ()
   }
 
-  pub fn read_bytes(self, name: string) -> Result[vec::VecU8, FsErr] {
+  pub fn read_bytes(self, name: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  pub fn list_dir(self) -> Result[vec::VecString, FsErr] {
+  pub fn list_dir(self) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
@@ -63,7 +63,7 @@ impl Dir {
     return false
   }
 
-  pub fn read_to_string(self, name: string) -> Result[string, FsErr] {
+  pub fn read_to_string(self, name: string) -> Result<string, FsErr> {
     let file = self.open_read(name)
     return file.read_to_string()
   }
@@ -74,7 +74,7 @@ impl Dir {
 }
 
 impl FileRead {
-  pub fn read_to_string(self) -> Result[string, FsErr] {
+  pub fn read_to_string(self) -> Result<string, FsErr> {
     return ()
   }
 

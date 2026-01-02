@@ -10,10 +10,7 @@ pub enum AbiType {
     Bool,
     Handle,
     Ptr,
-    String,
     Result(Box<AbiType>, Box<AbiType>),
-    /// ABI-only return lowering for `Result<String, i32>`.
-    ResultString,
     /// ABI-only return lowering for `Result<T, E>` where out params are used.
     ResultOut(Box<AbiType>, Box<AbiType>),
 }
