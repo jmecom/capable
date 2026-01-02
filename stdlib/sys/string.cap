@@ -10,6 +10,99 @@ pub struct SplitOnce {
   right: string
 }
 
+/// Intrinsic; implemented by the runtime.
+pub fn from_bytes(bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {
+  return Err(buffer::AllocErr::Oom)
+}
+
+fn build_range(s: string, start: i32, end: i32) -> string {
+  if (end <= start) {
+    return ""
+  }
+  let buf_result = buffer::new(0)
+  match (buf_result) {
+    Ok(buf) => {
+      let i = start
+      while (i < end) {
+        match (buf.push(s.byte_at(i))) {
+          Ok(_) => { }
+          Err(_) => { panic() }
+        }
+        i = i + 1
+      }
+      match (buf.to_string()) {
+        Ok(out) => { return out }
+        Err(_) => { panic() }
+      }
+    }
+    Err(_) => { panic() }
+  }
+}
+
+fn lower_ascii_byte(b: u8) -> u8 {
+  match (b) {
+    'A' => { return 'a' }
+    'B' => { return 'b' }
+    'C' => { return 'c' }
+    'D' => { return 'd' }
+    'E' => { return 'e' }
+    'F' => { return 'f' }
+    'G' => { return 'g' }
+    'H' => { return 'h' }
+    'I' => { return 'i' }
+    'J' => { return 'j' }
+    'K' => { return 'k' }
+    'L' => { return 'l' }
+    'M' => { return 'm' }
+    'N' => { return 'n' }
+    'O' => { return 'o' }
+    'P' => { return 'p' }
+    'Q' => { return 'q' }
+    'R' => { return 'r' }
+    'S' => { return 's' }
+    'T' => { return 't' }
+    'U' => { return 'u' }
+    'V' => { return 'v' }
+    'W' => { return 'w' }
+    'X' => { return 'x' }
+    'Y' => { return 'y' }
+    'Z' => { return 'z' }
+    _ => { return b }
+  }
+}
+
+fn upper_ascii_byte(b: u8) -> u8 {
+  match (b) {
+    'a' => { return 'A' }
+    'b' => { return 'B' }
+    'c' => { return 'C' }
+    'd' => { return 'D' }
+    'e' => { return 'E' }
+    'f' => { return 'F' }
+    'g' => { return 'G' }
+    'h' => { return 'H' }
+    'i' => { return 'I' }
+    'j' => { return 'J' }
+    'k' => { return 'K' }
+    'l' => { return 'L' }
+    'm' => { return 'M' }
+    'n' => { return 'N' }
+    'o' => { return 'O' }
+    'p' => { return 'P' }
+    'q' => { return 'Q' }
+    'r' => { return 'R' }
+    's' => { return 'S' }
+    't' => { return 'T' }
+    'u' => { return 'U' }
+    'v' => { return 'V' }
+    'w' => { return 'W' }
+    'x' => { return 'X' }
+    'y' => { return 'Y' }
+    'z' => { return 'Z' }
+    _ => { return b }
+  }
+}
+
 impl string {
   /// Intrinsic; implemented by the runtime.
   pub fn len(self) -> i32 {
@@ -41,39 +134,104 @@ impl string {
     return ()
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn split(self, delim: u8) -> Vec<string> {
-    return ()
+    let out = buffer::vec_string_new()
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let start = 0
+    let i = 0
+    while (i < len) {
+      if (bytes.at(i) == delim) {
+        let part = build_range(self, start, i)
+        match (out.push(part)) {
+          Ok(_) => { }
+          Err(_) => { panic() }
+        }
+        start = i + 1
+      }
+      i = i + 1
+    }
+    let part = build_range(self, start, len)
+    match (out.push(part)) {
+      Ok(_) => { }
+      Err(_) => { panic() }
+    }
+    return out
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn split_once(self, delim: u8) -> Result<SplitOnce, unit> {
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let i = 0
+    while (i < len) {
+      if (bytes.at(i) == delim) {
+        let left = build_range(self, 0, i)
+        let right = build_range(self, i + 1, len)
+        return Ok(SplitOnce {
+          left: left,
+          right: right
+        })
+      }
+      i = i + 1
+    }
     return Err(())
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn trim(self) -> string {
-    return ""
+    let start_trimmed = self.trim_start()
+    return start_trimmed.trim_end()
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn trim_start(self) -> string {
-    return ""
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let i = 0
+    while (i < len) {
+      if (!bytes.at(i).is_whitespace()) {
+        break
+      }
+      i = i + 1
+    }
+    if (i == 0) {
+      return self
+    }
+    return build_range(self, i, len)
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn trim_end(self) -> string {
-    return ""
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    if (len == 0) {
+      return self
+    }
+    let i = len
+    while (i > 0) {
+      if (!bytes.at(i - 1).is_whitespace()) {
+        break
+      }
+      i = i - 1
+    }
+    if (i == len) {
+      return self
+    }
+    if (i == 0) {
+      return ""
+    }
+    return build_range(self, 0, i)
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn trim_prefix(self, prefix: string) -> string {
-    return ""
+    if (self.starts_with(prefix)) {
+      return build_range(self, prefix.len(), self.len())
+    }
+    return self
   }
 
-  /// Intrinsic; implemented by the runtime.
   pub fn trim_suffix(self, suffix: string) -> string {
-    return ""
+    if (self.ends_with(suffix)) {
+      return build_range(self, 0, self.len() - suffix.len())
+    }
+    return self
   }
 
   /// split_lines() is an alias for lines().
@@ -160,10 +318,11 @@ impl string {
   }
 
   pub fn index_of_byte(self, needle: u8) -> Result<i32, unit> {
-    let len = self.len()
+    let bytes = self.as_slice()
+    let len = bytes.len()
     let i = 0
     while (i < len) {
-      if (self.byte_at(i) == needle) {
+      if (bytes.at(i) == needle) {
         return Ok(i)
       }
       i = i + 1
@@ -172,13 +331,14 @@ impl string {
   }
 
   pub fn last_index_of_byte(self, needle: u8) -> Result<i32, unit> {
-    let len = self.len()
+    let bytes = self.as_slice()
+    let len = bytes.len()
     if (len == 0) {
       return Err(())
     }
     let i = len - 1
     while (true) {
-      if (self.byte_at(i) == needle) {
+      if (bytes.at(i) == needle) {
         return Ok(i)
       }
       if (i == 0) {
@@ -197,11 +357,12 @@ impl string {
   }
 
   pub fn count_byte(self, needle: u8) -> i32 {
-    let len = self.len()
+    let bytes = self.as_slice()
+    let len = bytes.len()
     let i = 0
     let count = 0
     while (i < len) {
-      if (self.byte_at(i) == needle) {
+      if (bytes.at(i) == needle) {
         count = count + 1
       }
       i = i + 1
@@ -210,14 +371,77 @@ impl string {
   }
 
   pub fn is_ascii(self) -> bool {
-    let len = self.len()
+    let bytes = self.as_slice()
+    let len = bytes.len()
     let i = 0
     while (i < len) {
-      if (self.byte_at(i) > '\x7f') {
+      if (bytes.at(i) > '\x7f') {
         return false
       }
       i = i + 1
     }
     return true
+  }
+
+  pub fn to_lower_ascii(self) -> string {
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let buf_result = buffer::new(0)
+    match (buf_result) {
+      Ok(buf) => {
+        let i = 0
+        while (i < len) {
+          let b = bytes.at(i)
+          let lower = lower_ascii_byte(b)
+          match (buf.push(lower)) {
+            Ok(_) => { }
+            Err(_) => { panic() }
+          }
+          i = i + 1
+        }
+        match (buf.to_string()) {
+          Ok(out) => { return out }
+          Err(_) => { panic() }
+        }
+      }
+      Err(_) => { panic() }
+    }
+  }
+
+  pub fn to_upper_ascii(self) -> string {
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let buf_result = buffer::new(0)
+    match (buf_result) {
+      Ok(buf) => {
+        let i = 0
+        while (i < len) {
+          let b = bytes.at(i)
+          let upper = upper_ascii_byte(b)
+          match (buf.push(upper)) {
+            Ok(_) => { }
+            Err(_) => { panic() }
+          }
+          i = i + 1
+        }
+        match (buf.to_string()) {
+          Ok(out) => { return out }
+          Err(_) => { panic() }
+        }
+      }
+      Err(_) => { panic() }
+    }
+  }
+
+  pub fn trim_ascii(self) -> string {
+    return self.trim()
+  }
+
+  pub fn find_byte(self, needle: u8) -> Result<i32, unit> {
+    return self.index_of_byte(needle)
+  }
+
+  pub fn rfind_byte(self, needle: u8) -> Result<i32, unit> {
+    return self.last_index_of_byte(needle)
   }
 }

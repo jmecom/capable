@@ -279,6 +279,17 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
+    let mem_buffer_new_default = FnSig {
+        params: vec![AbiType::I32],
+        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
+    let mem_buffer_new_default_abi = FnSig {
+        params: vec![
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+    };
     let mem_buffer_len = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::I32,
@@ -325,6 +336,10 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     };
     let vec_new = FnSig {
         params: vec![AbiType::Handle],
+        ret: AbiType::Handle,
+    };
+    let vec_new_default = FnSig {
+        params: vec![],
         ret: AbiType::Handle,
     };
     let vec_u8_get = FnSig {
@@ -549,6 +564,14 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::String],
         ret: AbiType::Handle,
     };
+    let string_from_bytes = FnSig {
+        params: vec![AbiType::Handle],
+        ret: AbiType::Result(Box::new(AbiType::String), Box::new(AbiType::I32)),
+    };
+    let string_from_bytes_abi = FnSig {
+        params: vec![AbiType::Handle, AbiType::ResultString],
+        ret: AbiType::ResultString,
+    };
     let string_split = FnSig {
         params: vec![AbiType::String],
         ret: AbiType::Handle,
@@ -556,22 +579,6 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     let string_lines = FnSig {
         params: vec![AbiType::String],
         ret: AbiType::Handle,
-    };
-    let string_split_delim = FnSig {
-        params: vec![AbiType::String, AbiType::U8],
-        ret: AbiType::Handle,
-    };
-    let string_trim = FnSig {
-        params: vec![AbiType::String],
-        ret: AbiType::String,
-    };
-    let string_trim_start = FnSig {
-        params: vec![AbiType::String],
-        ret: AbiType::String,
-    };
-    let string_trim_end = FnSig {
-        params: vec![AbiType::String],
-        ret: AbiType::String,
     };
     // Vec lengths.
     let vec_u8_len = FnSig {
@@ -1084,6 +1091,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     );
     // === Buffer + slices ===
     map.insert(
+        "sys.buffer.new".to_string(),
+        FnInfo {
+            sig: mem_buffer_new_default,
+            abi_sig: Some(mem_buffer_new_default_abi),
+            symbol: "capable_rt_buffer_new_default".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.buffer.Alloc__buffer_new".to_string(),
         FnInfo {
             sig: mem_buffer_new,
@@ -1300,6 +1317,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: vec_new,
             abi_sig: None,
             symbol: "capable_rt_vec_string_new".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.vec_string_new".to_string(),
+        FnInfo {
+            sig: vec_new_default,
+            abi_sig: None,
+            symbol: "capable_rt_vec_string_new_default".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },
@@ -1576,6 +1603,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
+        "sys.string.from_bytes".to_string(),
+        FnInfo {
+            sig: string_from_bytes,
+            abi_sig: Some(string_from_bytes_abi),
+            symbol: "capable_rt_string_from_bytes".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
         "sys.string.string__bytes".to_string(),
         FnInfo {
             // bytes() is an alias for as_slice(); both map to the same runtime symbol.
@@ -1602,46 +1639,6 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: string_lines,
             abi_sig: None,
             symbol: "capable_rt_string_split_lines".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__split".to_string(),
-        FnInfo {
-            sig: string_split_delim,
-            abi_sig: None,
-            symbol: "capable_rt_string_split".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__trim".to_string(),
-        FnInfo {
-            sig: string_trim,
-            abi_sig: None,
-            symbol: "capable_rt_string_trim".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__trim_start".to_string(),
-        FnInfo {
-            sig: string_trim_start,
-            abi_sig: None,
-            symbol: "capable_rt_string_trim_start".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.string.string__trim_end".to_string(),
-        FnInfo {
-            sig: string_trim_end,
-            abi_sig: None,
-            symbol: "capable_rt_string_trim_end".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

@@ -15,8 +15,8 @@ use crate::abi::AbiType;
 use crate::ast::{BinaryOp, Literal, UnaryOp};
 
 use super::{
-    CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape, StructLayoutIndex,
-    TypeLayout, ValueRepr,
+    CodegenError, EnumIndex, Flow, FnInfo, FnSig, LocalValue, ResultKind, ResultShape,
+    StructLayoutIndex, TypeLayout, ValueRepr,
 };
 use super::abi_quirks;
 use super::layout::{align_to, resolve_struct_layout, type_layout_for_abi};
@@ -1745,14 +1745,7 @@ fn emit_hir_struct_literal(
                 literal.struct_ty.ty
             ))
         })?;
-    let ptr_ty = module.isa().pointer_type();
-    let align = layout.align.max(1);
-    let slot_size = layout.size.max(1).saturating_add(align - 1);
-    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-        ir::StackSlotKind::ExplicitSlot,
-        slot_size,
-    ));
-    let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
+    let base_ptr = emit_heap_alloc(builder, module, layout.size.max(1) as i32)?;
 
     for field in &literal.fields {
         let Some(field_layout) = layout.fields.get(&field.name) else {
@@ -1783,6 +1776,34 @@ fn emit_hir_struct_literal(
     }
 
     Ok(ValueRepr::Single(base_ptr))
+}
+
+fn emit_heap_alloc(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    size: i32,
+) -> Result<ir::Value, CodegenError> {
+    let handle = builder.ins().iconst(ir::types::I64, 0);
+    let size_val = builder.ins().iconst(ir::types::I32, size as i64);
+    let sig = FnSig {
+        params: vec![AbiType::Handle, AbiType::I32],
+        ret: AbiType::Ptr,
+    };
+    let sig = sig_to_clif(
+        &sig,
+        module.isa().pointer_type(),
+        module.isa().default_call_conv(),
+    );
+    let func_id = module
+        .declare_function("capable_rt_malloc", Linkage::Import, &sig)
+        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+    let local = module.declare_func_in_func(func_id, builder.func);
+    let call_inst = builder.ins().call(local, &[handle, size_val]);
+    let results = builder.inst_results(call_inst);
+    results
+        .get(0)
+        .copied()
+        .ok_or_else(|| CodegenError::Codegen("missing malloc result".to_string()))
 }
 
 /// Emit field access by computing the field address/offset.

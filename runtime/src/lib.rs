@@ -1090,6 +1090,15 @@ pub extern "C" fn capable_rt_buffer_new(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_buffer_new_default(
+    initial_len: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    capable_rt_buffer_new(0, initial_len, out_ok, out_err)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_buffer_len(buffer: Handle) -> i32 {
     with_table(&BUFFERS, "buffer table", |table| {
         table
@@ -1783,6 +1792,11 @@ pub extern "C" fn capable_rt_vec_string_new(_alloc: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_string_new_default() -> Handle {
+    capable_rt_vec_string_new(0)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_string_len(vec: Handle) -> i32 {
     with_table(&VECS_STRING, "vec string table", |table| {
         table
@@ -2142,6 +2156,27 @@ pub extern "C" fn capable_rt_string_as_slice(ptr: *const u8, len: usize) -> Hand
         );
     });
     handle
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_string_from_bytes(
+    slice: Handle,
+    out_ptr: *mut *const u8,
+    out_len: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let (ptr, len) = with_table(&SLICES, "slice table", |table| {
+        table.get(&slice).map(|state| (state.ptr, state.len))
+    })
+    .unwrap_or((0, 0));
+
+    if ptr == 0 || len == 0 {
+        return write_string_result(out_ptr, out_len, out_err, Ok(String::new()));
+    }
+
+    let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
+    let value = String::from_utf8_lossy(bytes).into_owned();
+    write_string_result(out_ptr, out_len, out_err, Ok(value))
 }
 
 #[no_mangle]

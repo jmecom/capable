@@ -1,6 +1,7 @@
 package safe
 module sys::buffer
 use sys::vec
+use sys::string
 
 pub copy opaque struct Alloc
 pub copy opaque struct Buffer
@@ -9,6 +10,16 @@ pub copy opaque struct MutSlice<T>
 
 pub enum AllocErr {
   Oom
+}
+
+/// Intrinsic; implemented by the runtime.
+pub fn new(initial_len: i32) -> Result<Buffer, AllocErr> {
+  return Err(AllocErr::Oom)
+}
+
+/// Intrinsic; implemented by the runtime.
+pub fn vec_string_new() -> vec::Vec<string> {
+  return ()
 }
 
 impl Alloc {
@@ -82,6 +93,10 @@ impl Buffer {
     return Err(AllocErr::Oom)
   }
 
+  pub fn push_str(self, s: string) -> Result<unit, AllocErr> {
+    return self.extend(s.as_slice())
+  }
+
   pub fn is_empty(self) -> bool {
     return false
   }
@@ -92,6 +107,10 @@ impl Buffer {
 
   pub fn as_mut_slice(self) -> MutSlice<u8> {
     return ()
+  }
+
+  pub fn to_string(self) -> Result<string, AllocErr> {
+    return string::from_bytes(self.as_slice())
   }
 }
 
