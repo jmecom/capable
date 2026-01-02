@@ -115,6 +115,61 @@ fn enum_payload_matches(payload: &Ty, arg_ty: &Ty, type_params: &[String], type_
     &expected == arg_ty
 }
 
+fn enforce_vec_method_constraints(
+    receiver_ty: &Ty,
+    method: &str,
+    span: Span,
+) -> Result<(), TypeError> {
+    let base = match receiver_ty {
+        Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+        _ => receiver_ty,
+    };
+    let Ty::Path(name, args) = base else {
+        return Ok(());
+    };
+    if name != "Vec" && name != "sys.vec.Vec" {
+        return Ok(());
+    }
+    if args.len() != 1 {
+        return Err(TypeError::new(
+            "Vec expects exactly one type argument".to_string(),
+            span,
+        ));
+    }
+    let elem = &args[0];
+    let is_u8 = matches!(elem, Ty::Builtin(BuiltinType::U8));
+    let is_i32 = matches!(elem, Ty::Builtin(BuiltinType::I32));
+    let is_string = is_string_ty(elem);
+    match method {
+        "as_slice" | "slice" | "extend_slice" => {
+            if !is_u8 {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        "filter" | "map_add" | "set" => {
+            if !is_u8 && !is_i32 {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        "join" => {
+            if !is_string {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Safe packages cannot mention externs or raw pointer types anywhere.
 pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
     if module.package != PackageSafety::Safe {
@@ -1556,6 +1611,11 @@ pub(super) fn check_expr(
                 module_name,
                 type_params,
             )?;
+            enforce_vec_method_constraints(
+                &receiver_ty,
+                &method_call.method.item,
+                method_call.method.span,
+            )?;
             let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
                 module_name,
@@ -2162,29 +2222,17 @@ pub(super) fn check_expr(
                     Ok(Ty::Builtin(BuiltinType::U8))
                 }
                 // Vec types return Result<T, VecErr>
-                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString" => {
+                Ty::Path(name, args) if name == "Vec" || name == "sys.vec.Vec" => {
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
+                            "Vec expects exactly one type argument".to_string(),
+                            index_expr.span,
+                        ));
+                    }
                     Ok(Ty::Path(
                         "sys.result.Result".to_string(),
                         vec![
-                            stdlib_string_ty(stdlib),
-                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
-                        ],
-                    ))
-                }
-                Ty::Path(name, _) if name == "VecI32" || name == "sys.vec.VecI32" => {
-                    Ok(Ty::Path(
-                        "sys.result.Result".to_string(),
-                        vec![
-                            Ty::Builtin(BuiltinType::I32),
-                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
-                        ],
-                    ))
-                }
-                Ty::Path(name, _) if name == "VecU8" || name == "sys.vec.VecU8" => {
-                    Ok(Ty::Path(
-                        "sys.result.Result".to_string(),
-                        vec![
-                            Ty::Builtin(BuiltinType::U8),
+                            args[0].clone(),
                             Ty::Path("sys.vec.VecErr".to_string(), vec![]),
                         ],
                     ))

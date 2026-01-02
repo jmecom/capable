@@ -1338,7 +1338,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__len".to_string(),
+        "sys.vec.Vec__len__u8".to_string(),
         FnInfo {
             sig: vec_u8_len,
             abi_sig: None,
@@ -1348,7 +1348,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__get".to_string(),
+        "sys.vec.Vec__get__u8".to_string(),
         FnInfo {
             sig: vec_u8_get,
             abi_sig: Some(vec_u8_get_abi),
@@ -1358,7 +1358,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__set".to_string(),
+        "sys.vec.Vec__set__u8".to_string(),
         FnInfo {
             sig: vec_u8_set,
             abi_sig: Some(vec_u8_set_abi),
@@ -1368,7 +1368,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__push".to_string(),
+        "sys.vec.Vec__push__u8".to_string(),
         FnInfo {
             sig: vec_u8_push,
             abi_sig: Some(vec_u8_push_abi),
@@ -1378,7 +1378,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__extend".to_string(),
+        "sys.vec.Vec__extend__u8".to_string(),
         FnInfo {
             sig: vec_u8_extend,
             abi_sig: Some(vec_u8_extend_abi),
@@ -1388,7 +1388,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__filter".to_string(),
+        "sys.vec.Vec__filter__u8".to_string(),
         FnInfo {
             sig: vec_u8_filter,
             abi_sig: None,
@@ -1398,7 +1398,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__map_add".to_string(),
+        "sys.vec.Vec__map_add__u8".to_string(),
         FnInfo {
             sig: vec_u8_map_add,
             abi_sig: None,
@@ -1408,7 +1408,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__slice".to_string(),
+        "sys.vec.Vec__slice".to_string(),
         FnInfo {
             sig: vec_u8_slice,
             abi_sig: Some(vec_u8_slice_abi),
@@ -1418,7 +1418,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__pop".to_string(),
+        "sys.vec.Vec__pop__u8".to_string(),
         FnInfo {
             sig: vec_u8_pop,
             abi_sig: Some(vec_u8_pop_abi),
@@ -1428,7 +1428,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecU8__as_slice".to_string(),
+        "sys.vec.Vec__as_slice".to_string(),
         FnInfo {
             sig: vec_u8_as_slice,
             abi_sig: None,
@@ -1438,7 +1438,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__len".to_string(),
+        "sys.vec.Vec__len__i32".to_string(),
         FnInfo {
             sig: vec_i32_len,
             abi_sig: None,
@@ -1448,7 +1448,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__get".to_string(),
+        "sys.vec.Vec__get__i32".to_string(),
         FnInfo {
             sig: vec_i32_get,
             abi_sig: Some(vec_i32_get_abi),
@@ -1458,7 +1458,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__set".to_string(),
+        "sys.vec.Vec__set__i32".to_string(),
         FnInfo {
             sig: vec_i32_set,
             abi_sig: Some(vec_i32_set_abi),
@@ -1468,7 +1468,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__push".to_string(),
+        "sys.vec.Vec__push__i32".to_string(),
         FnInfo {
             sig: vec_i32_push,
             abi_sig: Some(vec_i32_push_abi),
@@ -1478,7 +1478,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__extend".to_string(),
+        "sys.vec.Vec__extend__i32".to_string(),
         FnInfo {
             sig: vec_i32_extend,
             abi_sig: Some(vec_i32_extend_abi),
@@ -1488,7 +1488,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__filter".to_string(),
+        "sys.vec.Vec__filter__i32".to_string(),
         FnInfo {
             sig: vec_i32_filter,
             abi_sig: None,
@@ -1498,7 +1498,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__map_add".to_string(),
+        "sys.vec.Vec__map_add__i32".to_string(),
         FnInfo {
             sig: vec_i32_map_add,
             abi_sig: None,
@@ -1508,7 +1508,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecI32__pop".to_string(),
+        "sys.vec.Vec__pop__i32".to_string(),
         FnInfo {
             sig: vec_i32_pop,
             abi_sig: Some(vec_i32_pop_abi),
@@ -1518,7 +1518,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecString__len".to_string(),
+        "sys.vec.Vec__len__string".to_string(),
         FnInfo {
             sig: vec_string_len,
             abi_sig: None,
@@ -1528,7 +1528,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecString__get".to_string(),
+        "sys.vec.Vec__get__string".to_string(),
         FnInfo {
             sig: vec_string_get,
             abi_sig: Some(vec_string_get_abi),
@@ -1538,7 +1538,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecString__push".to_string(),
+        "sys.vec.Vec__push__string".to_string(),
         FnInfo {
             sig: vec_string_push,
             abi_sig: Some(vec_string_push_abi),
@@ -1548,7 +1548,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecString__extend".to_string(),
+        "sys.vec.Vec__extend__string".to_string(),
         FnInfo {
             sig: vec_string_extend,
             abi_sig: Some(vec_string_extend_abi),
@@ -1558,7 +1558,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.vec.VecString__pop".to_string(),
+        "sys.vec.Vec__pop__string".to_string(),
         FnInfo {
             sig: vec_string_pop,
             abi_sig: Some(vec_string_pop_abi),

@@ -1075,34 +1075,30 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             // Check if this is a Vec type - if so, desugar to .get() call
             let object_ty = &object.ty().ty;
             let is_vec_type = matches!(object_ty,
-                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString"
-                    || name == "VecI32" || name == "sys.vec.VecI32"
-                    || name == "VecU8" || name == "sys.vec.VecU8"
+                Ty::Path(name, _) if name == "Vec" || name == "sys.vec.Vec"
             );
 
             if is_vec_type {
                 // Desugar vec[i] to vec.get(i)
-                // Get the short type name (e.g., "VecString" from "sys.vec.VecString")
-                let type_name = match object_ty {
-                    Ty::Path(name, _) => {
-                        if name.starts_with("sys.vec.") {
-                            name.strip_prefix("sys.vec.").unwrap()
-                        } else {
-                            name.as_str()
-                        }
-                    }
-                    _ => unreachable!(),
+                let type_args = match object_ty {
+                    Ty::Path(_, args) => args.clone(),
+                    _ => Vec::new(),
                 };
-                let key = format!("sys.vec.{}__get", type_name);
-                let symbol = format!("capable_{}", key.replace('.', "_").replace("__", "_"));
+                if type_args.len() != 1 {
+                    return Err(TypeError::new(
+                        "Vec expects exactly one type argument".to_string(),
+                        index_expr.span,
+                    ));
+                }
+                let symbol = "capable_sys_vec_Vec__get".to_string();
 
                 Ok(HirExpr::Call(crate::hir::HirCall {
                     callee: ResolvedCallee::Function {
                         module: "sys.vec".to_string(),
-                        name: format!("{}__get", type_name),
+                        name: "Vec__get".to_string(),
                         symbol,
                     },
-                    type_args: vec![],
+                    type_args,
                     args: vec![object, index],
                     ret_ty: hir_ty,
                     span: index_expr.span,

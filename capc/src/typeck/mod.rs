@@ -726,18 +726,15 @@ fn lower_type(
                         ));
                     }
                     let elem = &args[0];
-                    let vec_name = match elem {
-                        Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
-                        Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
-                        _ if is_string_ty(elem) => "sys.vec.VecString",
-                        _ => {
-                            return Err(TypeError::new(
-                                "Vec only supports u8, i32, and string element types".to_string(),
-                                path.span,
-                            ))
-                        }
-                    };
-                    return Ok(Ty::Path(vec_name.to_string(), Vec::new()));
+                    if !matches!(elem, Ty::Builtin(BuiltinType::U8) | Ty::Builtin(BuiltinType::I32) | Ty::Param(_))
+                        && !is_string_ty(elem)
+                    {
+                        return Err(TypeError::new(
+                            "Vec only supports u8, i32, and string element types".to_string(),
+                            path.span,
+                        ));
+                    }
+                    return Ok(Ty::Path("sys.vec.Vec".to_string(), args));
                 }
                 return Ok(Ty::Path(joined, args));
             }
@@ -750,18 +747,15 @@ fn lower_type(
                     ));
                 }
                 let elem = &args[0];
-                let vec_name = match elem {
-                    Ty::Builtin(BuiltinType::U8) => "sys.vec.VecU8",
-                    Ty::Builtin(BuiltinType::I32) => "sys.vec.VecI32",
-                    _ if is_string_ty(elem) => "sys.vec.VecString",
-                    _ => {
-                        return Err(TypeError::new(
-                            "Vec only supports u8, i32, and string element types".to_string(),
-                            path.span,
-                        ))
-                    }
-                };
-                return Ok(Ty::Path(vec_name.to_string(), Vec::new()));
+                if !matches!(elem, Ty::Builtin(BuiltinType::U8) | Ty::Builtin(BuiltinType::I32) | Ty::Param(_))
+                    && !is_string_ty(elem)
+                {
+                    return Err(TypeError::new(
+                        "Vec only supports u8, i32, and string element types".to_string(),
+                        path.span,
+                    ));
+                }
+                return Ok(Ty::Path("sys.vec.Vec".to_string(), args));
             }
             Ok(Ty::Path(joined, args))
         }

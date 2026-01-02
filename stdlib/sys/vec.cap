@@ -6,12 +6,6 @@ use sys::buffer
 
 /// Generic Vec marker type.
 pub copy opaque struct Vec<T>
-/// Vec of u8.
-pub copy opaque struct VecU8
-/// Vec of i32.
-pub copy opaque struct VecI32
-/// Vec of string.
-pub copy opaque struct VecString
 
 /// Vec errors.
 pub enum VecErr {
@@ -21,7 +15,7 @@ pub enum VecErr {
   Empty
 }
 
-impl VecU8 {
+impl<T> Vec<T> {
   /// Length in elements.
   pub fn len(self) -> i32 {
     return 0
@@ -33,25 +27,58 @@ impl VecU8 {
   }
 
   /// Get element at index.
-  pub fn get(self, i: i32) -> Result<u8, VecErr> {
+  pub fn get(self, i: i32) -> Result<T, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
   /// Set element at index.
-  pub fn set(self, i: i32, x: u8) -> Result<unit, VecErr> {
+  pub fn set(self, i: i32, x: T) -> Result<unit, VecErr> {
     return Err(VecErr::OutOfRange)
   }
 
   /// Append one element.
-  pub fn push(self, x: u8) -> Result<unit, buffer::AllocErr> {
+  pub fn push(self, x: T) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
-  /// Append another VecU8.
-  pub fn extend(self, other: VecU8) -> Result<unit, buffer::AllocErr> {
+  /// Append another Vec.
+  pub fn extend(self, other: Vec<T>) -> Result<unit, buffer::AllocErr> {
     return Err(buffer::AllocErr::Oom)
   }
 
+  /// Append another Vec (alias).
+  pub fn push_all(self, other: Vec<T>) -> Result<unit, buffer::AllocErr> {
+    return self.extend(other)
+  }
+
+  /// Pop last element.
+  pub fn pop(self) -> Result<T, VecErr> {
+    return Err(VecErr::Empty)
+  }
+
+  /// Remove all elements.
+  pub fn clear(self) -> unit {
+    while (true) {
+      match (self.pop()) {
+        Ok(_) => { }
+        Err(_) => { break }
+      }
+    }
+    return ()
+  }
+
+  /// Filter elements equal to value (numeric vecs only).
+  pub fn filter(self, value: T) -> Vec<T> {
+    return ()
+  }
+
+  /// Add delta to each element (numeric vecs only).
+  pub fn map_add(self, delta: T) -> Vec<T> {
+    return ()
+  }
+}
+
+impl Vec<u8> {
   /// Append a slice of bytes.
   pub fn extend_slice(self, data: Slice<u8>) -> Result<unit, buffer::AllocErr> {
     let len = data.len()
@@ -63,157 +90,18 @@ impl VecU8 {
     return Ok(())
   }
 
-  pub fn push_all(self, other: VecU8) -> Result<unit, buffer::AllocErr> {
-    return self.extend(other)
-  }
-
-  /// Filter elements equal to value.
-  pub fn filter(self, value: u8) -> VecU8 {
-    return ()
-  }
-
-  /// Add delta to each element.
-  pub fn map_add(self, delta: u8) -> VecU8 {
-    return ()
-  }
-
   /// Create a slice view of a range.
   pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, VecErr> {
     return Err(VecErr::OutOfRange)
-  }
-
-  /// Pop last element.
-  pub fn pop(self) -> Result<u8, VecErr> {
-    return Err(VecErr::Empty)
   }
 
   /// Borrow as a slice.
   pub fn as_slice(self) -> Slice<u8> {
     return ()
   }
-
-  /// Remove all elements.
-  pub fn clear(self) -> unit {
-    while (true) {
-      match (self.pop()) {
-        Ok(_) => { }
-        Err(_) => { break }
-      }
-    }
-    return ()
-  }
 }
 
-impl VecI32 {
-  /// Length in elements.
-  pub fn len(self) -> i32 {
-    return 0
-  }
-
-  /// True if empty.
-  pub fn is_empty(self) -> bool {
-    return self.len() == 0
-  }
-
-  /// Get element at index.
-  pub fn get(self, i: i32) -> Result<i32, VecErr> {
-    return Err(VecErr::OutOfRange)
-  }
-
-  /// Set element at index.
-  pub fn set(self, i: i32, x: i32) -> Result<unit, VecErr> {
-    return Err(VecErr::OutOfRange)
-  }
-
-  /// Append one element.
-  pub fn push(self, x: i32) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  /// Append another VecI32.
-  pub fn extend(self, other: VecI32) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  /// Append another VecI32 (alias).
-  pub fn push_all(self, other: VecI32) -> Result<unit, buffer::AllocErr> {
-    return self.extend(other)
-  }
-
-  /// Filter elements equal to value.
-  pub fn filter(self, value: i32) -> VecI32 {
-    return ()
-  }
-
-  /// Add delta to each element.
-  pub fn map_add(self, delta: i32) -> VecI32 {
-    return ()
-  }
-
-  /// Pop last element.
-  pub fn pop(self) -> Result<i32, VecErr> {
-    return Err(VecErr::Empty)
-  }
-
-  /// Remove all elements.
-  pub fn clear(self) -> unit {
-    while (true) {
-      match (self.pop()) {
-        Ok(_) => { }
-        Err(_) => { break }
-      }
-    }
-    return ()
-  }
-}
-
-impl VecString {
-  /// Length in elements.
-  pub fn len(self) -> i32 {
-    return 0
-  }
-
-  /// True if empty.
-  pub fn is_empty(self) -> bool {
-    return self.len() == 0
-  }
-
-  /// Get element at index.
-  pub fn get(self, i: i32) -> Result<string, VecErr> {
-    return Err(VecErr::OutOfRange)
-  }
-
-  /// Append one element.
-  pub fn push(self, x: string) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  /// Append another VecString.
-  pub fn extend(self, other: VecString) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  /// Append another VecString (alias).
-  pub fn push_all(self, other: VecString) -> Result<unit, buffer::AllocErr> {
-    return self.extend(other)
-  }
-
-  /// Pop last element.
-  pub fn pop(self) -> Result<string, VecErr> {
-    return Err(VecErr::Empty)
-  }
-
-  /// Remove all elements.
-  pub fn clear(self) -> unit {
-    while (true) {
-      match (self.pop()) {
-        Ok(_) => { }
-        Err(_) => { break }
-      }
-    }
-    return ()
-  }
-
+impl Vec<string> {
   /// Join elements with a separator.
   pub fn join(self, sep: string) -> Result<string, buffer::AllocErr> {
     let len = self.len()
