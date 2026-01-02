@@ -141,11 +141,13 @@ impl Text {
   }
 
   /// Append a single byte.
+  /// Bytes are not validated as UTF-8; use with ASCII or known UTF-8 bytes.
   pub fn push_byte(self, b: u8) -> Result<unit, buffer::AllocErr> {
     return self.bytes.push(b)
   }
 
   /// Append bytes from a slice.
+  /// Bytes are not validated as UTF-8; use with ASCII or known UTF-8 bytes.
   pub fn extend_slice(self, data: Slice<u8>) -> Result<unit, buffer::AllocErr> {
     return self.bytes.extend_slice(data)
   }
@@ -156,6 +158,7 @@ impl Text {
   }
 
   /// Append bytes from a string view.
+  /// This preserves the UTF-8 bytes of the view.
   pub fn push_str(self, s: string) -> Result<unit, buffer::AllocErr> {
     return self.extend_slice(s.as_slice())
   }
@@ -172,12 +175,14 @@ impl Text {
   }
 
   /// Copy contents into a new string view.
+  /// This allocates a new owned slice for the string view.
   pub fn to_string(self) -> Result<string, buffer::AllocErr> {
     let owned = buffer::copy_slice(self.as_slice())?
     return from_bytes(owned)
   }
 
   /// Free the underlying Vec<u8>.
+  /// All derived views become invalid after this call.
   pub fn free(self, alloc: buffer::Alloc) -> unit {
     alloc.vec_u8_free(self.bytes)
     return ()

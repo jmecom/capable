@@ -222,7 +222,7 @@ Use `capability struct` for authority-bearing tokens. Use `opaque struct` for un
 In the current stdlib:
 
 - `copy capability`: `RootCap`, `Console`, `Args`
-- `copy opaque`: `Alloc`, `Slice`, `MutSlice`, `Vec<T>`
+- `copy opaque`: `Alloc`, `Slice`, `MutSlice`, `Vec<T>`, `Text`
 - `capability` (affine): `ReadFS`, `Filesystem`, `Dir`, `Stdin`
 - `linear capability`: `FileRead`
 
@@ -242,6 +242,8 @@ pub fn main() -> i32 {
 ```
 
 Affine and linear values cannot be used after move. If you move in one branch, it's moved after the join.
+
+Owned text uses move semantics too. Use `string::Text` for building strings and `string` as a view.
 
 ## 10) Linear must be consumed
 

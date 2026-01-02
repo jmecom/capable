@@ -37,7 +37,21 @@ pub fn main(rc: RootCap) -> i32 {
     Ok(x) => { c.assert(x == 1) }
     Err(_) => { c.assert(false); return 1 }
   }
+  let bytes = alloc.vec_u8_new()
+  match (bytes.push('h')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); alloc.vec_i32_free(v); alloc.vec_u8_free(bytes); return 1 }
+  }
+  match (bytes.push('i')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); alloc.vec_i32_free(v); alloc.vec_u8_free(bytes); return 1 }
+  }
+  match (bytes.to_string()) {
+    Ok(s) => { c.assert(s.eq("hi")) }
+    Err(_) => { c.assert(false); alloc.vec_i32_free(v); alloc.vec_u8_free(bytes); return 1 }
+  }
   alloc.vec_i32_free(v)
+  alloc.vec_u8_free(bytes)
   c.println("vec search ok")
   return 0
 }

@@ -1,0 +1,27 @@
+package safe
+module text_basic
+use sys::system
+use sys::string
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let text = string::text_new_with(alloc)
+  match (text.push_str("hi")) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+  }
+  match (text.push_byte('!')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+  }
+  let view = text.as_string()
+  c.assert(view.eq("hi!"))
+  match (text.to_string()) {
+    Ok(s) => { c.assert(s.eq("hi!")) }
+    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+  }
+  text.free(alloc)
+  c.println("text basic ok")
+  return 0
+}
