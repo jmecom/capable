@@ -1,0 +1,38 @@
+package safe
+module vec_string_helpers
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let v = alloc.vec_string_new()
+  let extra = alloc.vec_string_new()
+  match v.push("a") {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.push("b") {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match extra.push("c") {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.extend(extra) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (v.join(",")) {
+    Ok(s) => { c.assert(s.eq("a,b,c")) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.pop() {
+    Ok(x) => { c.assert(x.eq("c")) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  c.println("vec string ok")
+  alloc.vec_string_free(v)
+  alloc.vec_string_free(extra)
+  return 0
+}

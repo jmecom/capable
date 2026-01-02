@@ -546,6 +546,34 @@ fn run_vec_helpers() {
 }
 
 #[test]
+fn run_vec_i32_helpers() {
+    let out_dir = make_out_dir("vec_i32_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/vec_i32_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("vec i32 ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_vec_string_helpers() {
+    let out_dir = make_out_dir("vec_string_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/vec_string_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("vec string ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_net_helpers() {
     let out_dir = make_out_dir("net_helpers");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

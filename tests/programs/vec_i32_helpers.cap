@@ -1,0 +1,51 @@
+package safe
+module vec_i32_helpers
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let v = alloc.vec_i32_new()
+  let extra = alloc.vec_i32_new()
+  match v.push(3) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.push(5) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match extra.push(7) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.extend(extra) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.set(1, 9) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.get(1) {
+    Ok(x) => { c.assert(x == 9) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match v.pop() {
+    Ok(x) => { c.assert(x == 7) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  let filtered = v.filter(3)
+  let mapped = v.map_add(1)
+  match mapped.get(0) {
+    Ok(x) => { c.assert(x == 4) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  c.assert(filtered.len() == 1)
+  c.println("vec i32 ok")
+  alloc.vec_i32_free(filtered)
+  alloc.vec_i32_free(mapped)
+  alloc.vec_i32_free(v)
+  alloc.vec_i32_free(extra)
+  return 0
+}
