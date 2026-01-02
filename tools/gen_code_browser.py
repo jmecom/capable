@@ -41,8 +41,11 @@ def collect_files(root: Path) -> list[Path]:
         if should_skip_dir(rel_dir):
             dirnames[:] = []
             continue
-        if not any(str(rel_dir).replace("\\", "/").startswith(str(base)) for base in INCLUDE_ROOTS):
-            if rel_dir != Path("."):
+        if rel_dir != Path("."):
+            rel_str = str(rel_dir).replace("\\", "/")
+            under_root = any(rel_str.startswith(str(base)) for base in INCLUDE_ROOTS)
+            is_prefix = any(str(base).startswith(rel_str) for base in INCLUDE_ROOTS)
+            if not (under_root or is_prefix):
                 dirnames[:] = []
                 continue
         dirnames[:] = [
