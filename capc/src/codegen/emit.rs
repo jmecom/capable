@@ -15,7 +15,7 @@ use crate::abi::AbiType;
 use crate::ast::{BinaryOp, Literal, UnaryOp};
 
 use super::{
-    CodegenError, EnumIndex, Flow, FnInfo, FnSig, LocalValue, ResultKind, ResultShape,
+    CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape,
     StructLayoutIndex, TypeLayout, ValueRepr,
 };
 use super::abi_quirks;
@@ -37,6 +37,21 @@ struct ResultStringSlots {
 pub(super) struct LoopTarget {
     pub continue_block: ir::Block, // for while: header_block, for: increment_block
     pub exit_block: ir::Block,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum ReturnLowering {
+    Direct,
+    SRet {
+        out_ptr: ir::Value,
+        ret_ty: crate::hir::HirType,
+    },
+    ResultOut {
+        out_ok: Option<ir::Value>,
+        out_err: Option<ir::Value>,
+        ok_ty: crate::hir::HirType,
+        err_ty: crate::hir::HirType,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -94,6 +109,7 @@ impl DeferStack {
         fn_map: &HashMap<String, FnInfo>,
         enum_index: &EnumIndex,
         struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
         module: &mut ObjectModule,
         data_counter: &mut u32,
     ) -> Result<(), CodegenError> {
@@ -105,6 +121,7 @@ impl DeferStack {
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -119,6 +136,7 @@ impl DeferStack {
         fn_map: &HashMap<String, FnInfo>,
         enum_index: &EnumIndex,
         struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
         module: &mut ObjectModule,
         data_counter: &mut u32,
     ) -> Result<(), CodegenError> {
@@ -130,6 +148,7 @@ impl DeferStack {
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -145,6 +164,7 @@ impl DeferStack {
         fn_map: &HashMap<String, FnInfo>,
         enum_index: &EnumIndex,
         struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
         module: &mut ObjectModule,
         data_counter: &mut u32,
     ) -> Result<(), CodegenError> {
@@ -156,6 +176,7 @@ impl DeferStack {
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -170,6 +191,7 @@ impl DeferStack {
         fn_map: &HashMap<String, FnInfo>,
         enum_index: &EnumIndex,
         struct_layouts: &StructLayoutIndex,
+        return_lowering: &ReturnLowering,
         module: &mut ObjectModule,
         data_counter: &mut u32,
     ) -> Result<(), CodegenError> {
@@ -181,6 +203,7 @@ impl DeferStack {
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -203,6 +226,7 @@ pub(super) fn emit_hir_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
+    return_lowering: &ReturnLowering,
     defer_stack: &mut DeferStack,
 ) -> Result<Flow, CodegenError> {
     emit_hir_stmt_inner(
@@ -215,6 +239,7 @@ pub(super) fn emit_hir_stmt(
         module,
         data_counter,
         loop_target,
+        return_lowering,
         defer_stack,
     )
     .map_err(|err| err.with_span(stmt.span()))
@@ -230,6 +255,7 @@ fn emit_hir_stmt_inner(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
+    return_lowering: &ReturnLowering,
     defer_stack: &mut DeferStack,
 ) -> Result<Flow, CodegenError> {
     use crate::hir::HirStmt;
@@ -255,6 +281,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -299,6 +326,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -349,26 +377,96 @@ fn emit_hir_stmt_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
-                defer_stack.emit_all_and_clear(
-                    builder,
-                    locals,
-                    fn_map,
-                    enum_index,
-                    struct_layouts,
-                    module,
-                    data_counter,
-                )?;
-                match value {
-                    ValueRepr::Unit => builder.ins().return_(&[]),
-                    ValueRepr::Single(val) => builder.ins().return_(&[val]),
-                    ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
-                        let values = flatten_value(&value);
-                        builder.ins().return_(&values)
+                match return_lowering {
+                    ReturnLowering::Direct => {
+                        defer_stack.emit_all_and_clear(
+                            builder,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            struct_layouts,
+                            return_lowering,
+                            module,
+                            data_counter,
+                        )?;
+                        match value {
+                            ValueRepr::Unit => builder.ins().return_(&[]),
+                            ValueRepr::Single(val) => builder.ins().return_(&[val]),
+                            ValueRepr::Pair(_, _) | ValueRepr::Result { .. } => {
+                                let values = flatten_value(&value);
+                                builder.ins().return_(&values)
+                            }
+                        };
                     }
-                };
+                    ReturnLowering::SRet { out_ptr, ret_ty } => {
+                        store_out_value(
+                            builder,
+                            *out_ptr,
+                            ret_ty,
+                            value,
+                            struct_layouts,
+                            module,
+                        )?;
+                        defer_stack.emit_all_and_clear(
+                            builder,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            struct_layouts,
+                            return_lowering,
+                            module,
+                            data_counter,
+                        )?;
+                        builder.ins().return_(&[]);
+                    }
+                    ReturnLowering::ResultOut {
+                        out_ok,
+                        out_err,
+                        ok_ty,
+                        err_ty,
+                    } => {
+                        let ValueRepr::Result { tag, ok, err } = value else {
+                            return Err(CodegenError::Unsupported(
+                                "return expects Result value".to_string(),
+                            ));
+                        };
+                        if let Some(out_ok) = out_ok {
+                            store_out_value(
+                                builder,
+                                *out_ok,
+                                ok_ty,
+                                *ok,
+                                struct_layouts,
+                                module,
+                            )?;
+                        }
+                        if let Some(out_err) = out_err {
+                            store_out_value(
+                                builder,
+                                *out_err,
+                                err_ty,
+                                *err,
+                                struct_layouts,
+                                module,
+                            )?;
+                        }
+                        defer_stack.emit_all_and_clear(
+                            builder,
+                            locals,
+                            fn_map,
+                            enum_index,
+                            struct_layouts,
+                            return_lowering,
+                            module,
+                            data_counter,
+                        )?;
+                        builder.ins().return_(&[tag]);
+                    }
+                }
             } else {
                 defer_stack.emit_all_and_clear(
                     builder,
@@ -376,6 +474,7 @@ fn emit_hir_stmt_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -392,6 +491,7 @@ fn emit_hir_stmt_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -413,6 +513,7 @@ fn emit_hir_stmt_inner(
                         module,
                         data_counter,
                         loop_target,
+                        return_lowering,
                         defer_stack,
                     )?;
                     if diverged {
@@ -429,6 +530,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -453,6 +555,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -478,6 +581,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     loop_target,
+                    return_lowering,
                     &mut then_defers,
                 )?;
                 if flow == Flow::Terminated {
@@ -492,6 +596,7 @@ fn emit_hir_stmt_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -517,6 +622,7 @@ fn emit_hir_stmt_inner(
                         module,
                         data_counter,
                         loop_target,
+                        return_lowering,
                         &mut else_defers,
                     )?;
                     if flow == Flow::Terminated {
@@ -531,6 +637,7 @@ fn emit_hir_stmt_inner(
                         fn_map,
                         enum_index,
                         struct_layouts,
+                        return_lowering,
                         module,
                         data_counter,
                     )?;
@@ -564,6 +671,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -597,6 +705,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     body_loop_target,
+                    return_lowering,
                     &mut body_defers,
                 )?;
                 if flow == Flow::Terminated {
@@ -612,6 +721,7 @@ fn emit_hir_stmt_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -646,6 +756,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -663,6 +774,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -714,6 +826,7 @@ fn emit_hir_stmt_inner(
                     module,
                     data_counter,
                     body_loop_target,
+                    return_lowering,
                     &mut body_defers,
                 )?;
                 if flow == Flow::Terminated {
@@ -730,6 +843,7 @@ fn emit_hir_stmt_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -762,6 +876,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -776,6 +891,7 @@ fn emit_hir_stmt_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -794,6 +910,7 @@ fn emit_hir_expr(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -804,6 +921,7 @@ fn emit_hir_expr(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )
@@ -817,6 +935,7 @@ fn emit_hir_expr_inner(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -876,6 +995,7 @@ fn emit_hir_expr_inner(
                                     fn_map,
                                     enum_index,
                                     struct_layouts,
+                                    return_lowering,
                                     module,
                                     data_counter,
                                 )?
@@ -897,6 +1017,7 @@ fn emit_hir_expr_inner(
                                     fn_map,
                                     enum_index,
                                     struct_layouts,
+                                    return_lowering,
                                     module,
                                     data_counter,
                                 )?
@@ -949,6 +1070,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -1023,6 +1145,7 @@ fn emit_hir_expr_inner(
                             fn_map,
                             enum_index,
                             struct_layouts,
+                            return_lowering,
                             module,
                             data_counter,
                         )?;
@@ -1038,9 +1161,30 @@ fn emit_hir_expr_inner(
                 .ok_or_else(|| CodegenError::UnknownFunction(key.clone()))?
                 .clone();
             ensure_abi_sig_handled(&info)?;
+            let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
 
             // Emit arguments
             let mut args = Vec::new();
+            let mut sret_ptr = None;
+            if info.sig.ret == AbiType::Ptr
+                && abi_sig.ret == AbiType::Unit
+                && is_non_opaque_struct_type(&call.ret_ty, struct_layouts)
+            {
+                let layout =
+                    resolve_struct_layout(&call.ret_ty.ty, "", &struct_layouts.layouts).ok_or_else(
+                        || CodegenError::Unsupported("struct layout missing".to_string()),
+                    )?;
+                let ptr_ty = module.isa().pointer_type();
+                let align = layout.align.max(1);
+                let slot_size = layout.size.max(1).saturating_add(align - 1);
+                let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    slot_size,
+                ));
+                let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                args.push(base_ptr);
+                sret_ptr = Some(base_ptr);
+            }
             for arg in &call.args {
                 let value = emit_hir_expr(
                     builder,
@@ -1049,6 +1193,7 @@ fn emit_hir_expr_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -1058,7 +1203,26 @@ fn emit_hir_expr_inner(
             // Handle result out-parameters (same logic as AST version)
             let mut out_slots: Option<ResultStringSlots> = None;
             let mut result_out = None;
-            let abi_sig = info.abi_sig.as_ref().unwrap_or(&info.sig);
+            let result_payloads = match &call.ret_ty.ty {
+                crate::typeck::Ty::Path(name, args)
+                    if name == "sys.result.Result" && args.len() == 2 =>
+                {
+                    match &call.ret_ty.abi {
+                        AbiType::Result(ok_abi, err_abi) => Some((
+                            crate::hir::HirType {
+                                ty: args[0].clone(),
+                                abi: (**ok_abi).clone(),
+                            },
+                            crate::hir::HirType {
+                                ty: args[1].clone(),
+                                abi: (**err_abi).clone(),
+                            },
+                        )),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
 
             if abi_quirks::is_result_string(&abi_sig.ret) {
                 let ptr_ty = module.isa().pointer_type();
@@ -1067,35 +1231,106 @@ fn emit_hir_expr_inner(
                 out_slots = Some(slots);
             }
 
+            enum ResultOutSlot {
+                Scalar(ir::StackSlot, ir::Type, u32),
+                Struct(ir::Value),
+            }
+
             if let AbiType::ResultOut(ok_ty, err_ty) = &abi_sig.ret {
                 let ptr_ty = module.isa().pointer_type();
                 let ok_slot = if **ok_ty == AbiType::Unit {
                     None
                 } else {
-                    let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
-                    let align = ty.bytes().max(1) as u32;
-                    debug_assert!(align.is_power_of_two());
-                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                        ir::StackSlotKind::ExplicitSlot,
-                        aligned_slot_size(ty.bytes().max(1) as u32, align),
-                    ));
-                    let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
-                    args.push(addr);
-                    Some((slot, ty, align))
+                    if let Some((ok_hir, _)) = &result_payloads {
+                        if is_non_opaque_struct_type(ok_hir, struct_layouts) {
+                            let layout = resolve_struct_layout(
+                                &ok_hir.ty,
+                                "",
+                                &struct_layouts.layouts,
+                            )
+                            .ok_or_else(|| {
+                                CodegenError::Unsupported("struct layout missing".to_string())
+                            })?;
+                            let align = layout.align.max(1);
+                            let slot_size = layout.size.max(1).saturating_add(align - 1);
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                slot_size,
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Struct(addr))
+                        } else {
+                            let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+                            let align = ty.bytes().max(1) as u32;
+                            debug_assert!(align.is_power_of_two());
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                aligned_slot_size(ty.bytes().max(1) as u32, align),
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Scalar(slot, ty, align))
+                        }
+                    } else {
+                        let ty = value_type_for_result_out(ok_ty, ptr_ty)?;
+                        let align = ty.bytes().max(1) as u32;
+                        debug_assert!(align.is_power_of_two());
+                        let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                            ir::StackSlotKind::ExplicitSlot,
+                            aligned_slot_size(ty.bytes().max(1) as u32, align),
+                        ));
+                        let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                        args.push(addr);
+                        Some(ResultOutSlot::Scalar(slot, ty, align))
+                    }
                 };
                 let err_slot = if **err_ty == AbiType::Unit {
                     None
                 } else {
-                    let ty = value_type_for_result_out(err_ty, ptr_ty)?;
-                    let align = ty.bytes().max(1) as u32;
-                    debug_assert!(align.is_power_of_two());
-                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                        ir::StackSlotKind::ExplicitSlot,
-                        aligned_slot_size(ty.bytes().max(1) as u32, align),
-                    ));
-                    let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
-                    args.push(addr);
-                    Some((slot, ty, align))
+                    if let Some((_, err_hir)) = &result_payloads {
+                        if is_non_opaque_struct_type(err_hir, struct_layouts) {
+                            let layout = resolve_struct_layout(
+                                &err_hir.ty,
+                                "",
+                                &struct_layouts.layouts,
+                            )
+                            .ok_or_else(|| {
+                                CodegenError::Unsupported("struct layout missing".to_string())
+                            })?;
+                            let align = layout.align.max(1);
+                            let slot_size = layout.size.max(1).saturating_add(align - 1);
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                slot_size,
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Struct(addr))
+                        } else {
+                            let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+                            let align = ty.bytes().max(1) as u32;
+                            debug_assert!(align.is_power_of_two());
+                            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                                ir::StackSlotKind::ExplicitSlot,
+                                aligned_slot_size(ty.bytes().max(1) as u32, align),
+                            ));
+                            let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                            args.push(addr);
+                            Some(ResultOutSlot::Scalar(slot, ty, align))
+                        }
+                    } else {
+                        let ty = value_type_for_result_out(err_ty, ptr_ty)?;
+                        let align = ty.bytes().max(1) as u32;
+                        debug_assert!(align.is_power_of_two());
+                        let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                            ir::StackSlotKind::ExplicitSlot,
+                            aligned_slot_size(ty.bytes().max(1) as u32, align),
+                        ));
+                        let addr = aligned_stack_addr(builder, slot, align, ptr_ty);
+                        args.push(addr);
+                        Some(ResultOutSlot::Scalar(slot, ty, align))
+                    }
                 };
                 result_out = Some((ok_slot, err_slot, ok_ty.clone(), err_ty.clone()));
             }
@@ -1154,27 +1389,37 @@ fn emit_hir_expr_inner(
                     .ok_or_else(|| CodegenError::Codegen("missing result tag".to_string()))?;
                 let (ok_slot, err_slot, ok_ty, err_ty) = result_out
                     .ok_or_else(|| CodegenError::Codegen("missing result slots".to_string()))?;
-                let ok_val = if let Some((slot, ty, align)) = ok_slot {
-                    let addr = aligned_stack_addr(
-                        builder,
-                        slot,
-                        align,
-                        module.isa().pointer_type(),
-                    );
-                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
-                    ValueRepr::Single(val)
+                let ok_val = if let Some(slot) = ok_slot {
+                    match slot {
+                        ResultOutSlot::Scalar(slot, ty, align) => {
+                            let addr = aligned_stack_addr(
+                                builder,
+                                slot,
+                                align,
+                                module.isa().pointer_type(),
+                            );
+                            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                            ValueRepr::Single(val)
+                        }
+                        ResultOutSlot::Struct(ptr) => ValueRepr::Single(ptr),
+                    }
                 } else {
                     ValueRepr::Unit
                 };
-                let err_val = if let Some((slot, ty, align)) = err_slot {
-                    let addr = aligned_stack_addr(
-                        builder,
-                        slot,
-                        align,
-                        module.isa().pointer_type(),
-                    );
-                    let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
-                    ValueRepr::Single(val)
+                let err_val = if let Some(slot) = err_slot {
+                    match slot {
+                        ResultOutSlot::Scalar(slot, ty, align) => {
+                            let addr = aligned_stack_addr(
+                                builder,
+                                slot,
+                                align,
+                                module.isa().pointer_type(),
+                            );
+                            let val = builder.ins().load(ty, MemFlags::new(), addr, 0);
+                            ValueRepr::Single(val)
+                        }
+                        ResultOutSlot::Struct(ptr) => ValueRepr::Single(ptr),
+                    }
                 } else {
                     ValueRepr::Unit
                 };
@@ -1188,6 +1433,8 @@ fn emit_hir_expr_inner(
                         "result out params for {ok_ty:?}/{err_ty:?}"
                     ))),
                 }
+            } else if let Some(ptr) = sret_ptr {
+                Ok(ValueRepr::Single(ptr))
             } else {
                 let mut index = 0;
                 value_from_results(builder, &info.sig.ret, &results, &mut index)
@@ -1201,6 +1448,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -1226,6 +1474,7 @@ fn emit_hir_expr_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 );
@@ -1238,6 +1487,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -1317,6 +1567,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -1350,6 +1601,7 @@ fn emit_hir_expr_inner(
                     module,
                     data_counter,
                     None, // break/continue not supported in expression-context matches
+                    return_lowering,
                     &mut temp_defers,
                 )?;
                 Ok(ValueRepr::Unit)
@@ -1361,6 +1613,7 @@ fn emit_hir_expr_inner(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )
@@ -1373,6 +1626,7 @@ fn emit_hir_expr_inner(
             fn_map,
             enum_index,
             struct_layouts,
+            return_lowering,
             module,
             data_counter,
         ),
@@ -1383,6 +1637,7 @@ fn emit_hir_expr_inner(
             fn_map,
             enum_index,
             struct_layouts,
+            return_lowering,
             module,
             data_counter,
         ),
@@ -1394,6 +1649,7 @@ fn emit_hir_expr_inner(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )
@@ -1524,6 +1780,7 @@ fn emit_hir_index(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1535,6 +1792,7 @@ fn emit_hir_index(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -1547,6 +1805,7 @@ fn emit_hir_index(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -1735,6 +1994,7 @@ fn emit_hir_struct_literal(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1745,7 +2005,14 @@ fn emit_hir_struct_literal(
                 literal.struct_ty.ty
             ))
         })?;
-    let base_ptr = emit_heap_alloc(builder, module, layout.size.max(1) as i32)?;
+    let ptr_ty = module.isa().pointer_type();
+    let align = layout.align.max(1);
+    let slot_size = layout.size.max(1).saturating_add(align - 1);
+    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+        ir::StackSlotKind::ExplicitSlot,
+        slot_size,
+    ));
+    let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
 
     for field in &literal.fields {
         let Some(field_layout) = layout.fields.get(&field.name) else {
@@ -1761,6 +2028,7 @@ fn emit_hir_struct_literal(
             fn_map,
             enum_index,
             struct_layouts,
+            return_lowering,
             module,
             data_counter,
         )?;
@@ -1778,34 +2046,6 @@ fn emit_hir_struct_literal(
     Ok(ValueRepr::Single(base_ptr))
 }
 
-fn emit_heap_alloc(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    size: i32,
-) -> Result<ir::Value, CodegenError> {
-    let handle = builder.ins().iconst(ir::types::I64, 0);
-    let size_val = builder.ins().iconst(ir::types::I32, size as i64);
-    let sig = FnSig {
-        params: vec![AbiType::Handle, AbiType::I32],
-        ret: AbiType::Ptr,
-    };
-    let sig = sig_to_clif(
-        &sig,
-        module.isa().pointer_type(),
-        module.isa().default_call_conv(),
-    );
-    let func_id = module
-        .declare_function("capable_rt_malloc", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local = module.declare_func_in_func(func_id, builder.func);
-    let call_inst = builder.ins().call(local, &[handle, size_val]);
-    let results = builder.inst_results(call_inst);
-    results
-        .get(0)
-        .copied()
-        .ok_or_else(|| CodegenError::Codegen("missing malloc result".to_string()))
-}
-
 /// Emit field access by computing the field address/offset.
 fn emit_hir_field_access(
     builder: &mut FunctionBuilder,
@@ -1814,6 +2054,7 @@ fn emit_hir_field_access(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -1839,6 +2080,7 @@ fn emit_hir_field_access(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -1859,6 +2101,51 @@ fn emit_hir_field_access(
         struct_layouts,
         module,
     )
+}
+
+fn is_non_opaque_struct_type(
+    ty: &crate::hir::HirType,
+    struct_layouts: &StructLayoutIndex,
+) -> bool {
+    resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts).is_some()
+}
+
+fn store_out_value(
+    builder: &mut FunctionBuilder,
+    out_ptr: ir::Value,
+    ty: &crate::hir::HirType,
+    value: ValueRepr,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
+) -> Result<(), CodegenError> {
+    if is_non_opaque_struct_type(ty, struct_layouts) {
+        return store_value_by_ty(
+            builder,
+            out_ptr,
+            0,
+            ty,
+            value,
+            struct_layouts,
+            module,
+        );
+    }
+    match ty.abi {
+        AbiType::I32
+        | AbiType::U32
+        | AbiType::U8
+        | AbiType::Bool
+        | AbiType::Handle
+        | AbiType::Ptr => store_value_by_tykind(
+            builder,
+            out_ptr,
+            &ty.abi,
+            value,
+            module.isa().pointer_type(),
+        ),
+        _ => Err(CodegenError::Unsupported(
+            "return out param type".to_string(),
+        )),
+    }
 }
 
 /// Store a lowered value into memory using a typeck::Ty layout.
@@ -2290,6 +2577,7 @@ fn emit_hir_short_circuit_expr(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -2317,6 +2605,7 @@ fn emit_hir_short_circuit_expr(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -2344,6 +2633,7 @@ fn emit_hir_match_stmt(
     module: &mut ObjectModule,
     data_counter: &mut u32,
     loop_target: Option<LoopTarget>,
+    return_lowering: &ReturnLowering,
     defer_stack: &mut DeferStack,
 ) -> Result<bool, CodegenError> {
     // Emit the scrutinee expression
@@ -2354,6 +2644,7 @@ fn emit_hir_match_stmt(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -2430,6 +2721,7 @@ fn emit_hir_match_stmt(
                 module,
                 data_counter,
                 loop_target,
+                return_lowering,
                 &mut arm_defers,
             )?;
             if flow == Flow::Terminated {
@@ -2446,6 +2738,7 @@ fn emit_hir_match_stmt(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
@@ -2478,6 +2771,7 @@ fn emit_hir_match_expr(
     fn_map: &HashMap<String, FnInfo>,
     enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
@@ -2491,6 +2785,7 @@ fn emit_hir_match_expr(
         fn_map,
         enum_index,
         struct_layouts,
+        return_lowering,
         module,
         data_counter,
     )?;
@@ -2562,6 +2857,7 @@ fn emit_hir_match_expr(
                 module,
                 data_counter,
                 None, // break/continue not allowed in value-producing match
+                return_lowering,
                 &mut arm_defers,
             )?;
             if flow == Flow::Terminated {
@@ -2589,6 +2885,7 @@ fn emit_hir_match_expr(
                     fn_map,
                     enum_index,
                     struct_layouts,
+                    return_lowering,
                     module,
                     data_counter,
                 )?;
@@ -2656,6 +2953,7 @@ fn emit_hir_match_expr(
                 fn_map,
                 enum_index,
                 struct_layouts,
+                return_lowering,
                 module,
                 data_counter,
             )?;
