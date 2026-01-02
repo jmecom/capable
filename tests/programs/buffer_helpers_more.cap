@@ -1,0 +1,37 @@
+package safe
+module buffer_helpers_more
+use sys::buffer
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let buf = match (buffer::new(0)) {
+    Ok(b) => { b }
+    Err(_) => { c.assert(false); panic() }
+  }
+  match (buf.push_line("hi")) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (buf.push_bytes("ok".as_slice())) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  let v = alloc.vec_u8_new()
+  match (v.push('!')) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (buf.extend_vec(v)) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (buf.to_string()) {
+    Ok(s) => { c.assert(s.eq("hi\nok!")) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  alloc.vec_u8_free(v)
+  c.println("buffer helpers ok")
+  return 0
+}

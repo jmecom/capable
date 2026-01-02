@@ -1,0 +1,43 @@
+package safe
+module vec_search_helpers
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let v = alloc.vec_i32_new()
+  match (v.push(1)) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (v.push(2)) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (v.push(1)) {
+    Ok(_) => { }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  c.assert(v.contains(2))
+  c.assert(!v.contains(3))
+  c.assert(v.count(1) == 2)
+  match (v.index_of(1)) {
+    Ok(i) => { c.assert(i == 0) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (v.last_index_of(1)) {
+    Ok(i) => { c.assert(i == 2) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (v.first()) {
+    Ok(x) => { c.assert(x == 1) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (v.last()) {
+    Ok(x) => { c.assert(x == 1) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  alloc.vec_i32_free(v)
+  c.println("vec search ok")
+  return 0
+}

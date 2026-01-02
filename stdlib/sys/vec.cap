@@ -1,10 +1,12 @@
 /// Vec helpers for built-in element types.
+/// Vec<T> is an owned, heap-backed growable container (not a view).
+/// Use Slice/MutSlice for non-owning views into byte data.
 package safe
 module sys::vec
 
 use sys::buffer
 
-/// Generic Vec marker type.
+/// Generic Vec marker type (owned, heap-backed container).
 pub copy opaque struct Vec<T>
 
 /// Vec errors.
@@ -29,6 +31,20 @@ impl<T> Vec<T> {
   /// Get element at index.
   pub fn get(self, i: i32) -> Result<T, VecErr> {
     return Err(VecErr::OutOfRange)
+  }
+
+  /// Get the first element.
+  pub fn first(self) -> Result<T, VecErr> {
+    return self.get(0)
+  }
+
+  /// Get the last element.
+  pub fn last(self) -> Result<T, VecErr> {
+    let len = self.len()
+    if (len == 0) {
+      return Err(VecErr::Empty)
+    }
+    return self.get(len - 1)
   }
 
   /// Set element at index.
@@ -65,6 +81,79 @@ impl<T> Vec<T> {
       }
     }
     return ()
+  }
+
+  /// True if the Vec contains value.
+  pub fn contains(self, value: T) -> bool {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            return true
+          }
+        }
+        Err(_) => { return false }
+      }
+      i = i + 1
+    }
+    return false
+  }
+
+  /// Count occurrences of value.
+  pub fn count(self, value: T) -> i32 {
+    let len = self.len()
+    let i = 0
+    let out = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            out = out + 1
+          }
+        }
+        Err(_) => { return out }
+      }
+      i = i + 1
+    }
+    return out
+  }
+
+  /// Find the first index of value.
+  pub fn index_of(self, value: T) -> Result<i32, VecErr> {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            return Ok(i)
+          }
+        }
+        Err(_) => { return Err(VecErr::OutOfRange) }
+      }
+      i = i + 1
+    }
+    return Err(VecErr::OutOfRange)
+  }
+
+  /// Find the last index of value.
+  pub fn last_index_of(self, value: T) -> Result<i32, VecErr> {
+    let len = self.len()
+    let i = len - 1
+    while (i >= 0) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            return Ok(i)
+          }
+        }
+        Err(_) => { return Err(VecErr::OutOfRange) }
+      }
+      i = i - 1
+    }
+    return Err(VecErr::OutOfRange)
   }
 
   /// Filter elements equal to value (numeric vecs only).

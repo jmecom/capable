@@ -359,6 +359,23 @@ fn run_buffer_to_string() {
 }
 
 #[test]
+fn run_buffer_helpers_more() {
+    let out_dir = make_out_dir("buffer_helpers_more");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/buffer_helpers_more.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("buffer helpers ok"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
 fn run_option_basic() {
     let out_dir = make_out_dir("option_basic");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
@@ -571,6 +588,20 @@ fn run_vec_string_helpers() {
     ]);
     assert_eq!(code, 0);
     assert!(stdout.contains("vec string ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_vec_search_helpers() {
+    let out_dir = make_out_dir("vec_search_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/vec_search_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("vec search ok"), "stdout was: {stdout:?}");
 }
 
 #[test]

@@ -1,17 +1,19 @@
 /// Buffer, slice, and allocation utilities.
-/// Buffer owns growable bytes; Slice/MutSlice are lightweight views.
+/// Buffer owns growable bytes (heap-backed, runtime-managed).
+/// Slice/MutSlice are lightweight, non-owning views into existing bytes.
 package safe
 module sys::buffer
 use sys::vec
 use sys::string
 
-/// Alloc capability for heap operations.
+/// Alloc capability for heap operations (heap-backed allocations).
 pub copy opaque struct Alloc
-/// Growable byte buffer.
+/// Growable byte buffer (heap-backed, owned).
+/// Use Buffer when building strings/bytes incrementally.
 pub copy opaque struct Buffer
-/// Immutable slice view.
+/// Immutable slice view (non-owning).
 pub copy opaque struct Slice<T>
-/// Mutable slice view.
+/// Mutable slice view (non-owning).
 pub copy opaque struct MutSlice<T>
 
 /// Allocation errors.
@@ -22,6 +24,7 @@ pub enum AllocErr {
 
 /// Allocate a new buffer with an initial length of zero or more bytes.
 /// Intrinsic; implemented by the runtime.
+/// This uses the default allocator and returns a heap-backed Buffer.
 pub fn new(initial_len: i32) -> Result<Buffer, AllocErr> {
   return Err(AllocErr::Oom)
 }
@@ -69,7 +72,7 @@ impl Alloc {
     return ()
   }
 
-  /// Allocate a new buffer with an Alloc handle.
+  /// Allocate a new buffer with an Alloc handle (heap-backed).
   pub fn buffer_new(self, initial_len: i32) -> Result<Buffer, AllocErr> {
     return Err(AllocErr::Oom)
   }
@@ -79,7 +82,7 @@ impl Alloc {
     return ()
   }
 
-  /// Create a Vec<u8> with this Alloc.
+  /// Create a Vec<u8> with this Alloc (heap-backed).
   pub fn vec_u8_new(self) -> vec::Vec<u8> {
     return ()
   }
@@ -89,7 +92,7 @@ impl Alloc {
     return ()
   }
 
-  /// Create a Vec<i32> with this Alloc.
+  /// Create a Vec<i32> with this Alloc (heap-backed).
   pub fn vec_i32_new(self) -> vec::Vec<i32> {
     return ()
   }
@@ -99,7 +102,7 @@ impl Alloc {
     return ()
   }
 
-  /// Create a Vec<string> with this Alloc.
+  /// Create a Vec<string> with this Alloc (heap-backed).
   pub fn vec_string_new(self) -> vec::Vec<string> {
     return ()
   }
@@ -126,9 +129,25 @@ impl Buffer {
     return Err(AllocErr::Oom)
   }
 
+  /// Append bytes from a slice (alias).
+  pub fn push_bytes(self, data: Slice<u8>) -> Result<unit, AllocErr> {
+    return self.extend(data)
+  }
+
   /// Append bytes from a string view.
   pub fn push_str(self, s: string) -> Result<unit, AllocErr> {
     return self.extend(s.as_slice())
+  }
+
+  /// Append bytes from a Vec<u8>.
+  pub fn extend_vec(self, v: vec::Vec<u8>) -> Result<unit, AllocErr> {
+    return self.extend(v.as_slice())
+  }
+
+  /// Append a line and a trailing newline.
+  pub fn push_line(self, s: string) -> Result<unit, AllocErr> {
+    self.push_str(s)?
+    return self.push('\n')
   }
 
   /// Return true if empty.
