@@ -433,13 +433,128 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
     .hero .tagline {{
       color: var(--muted);
       font-size: 1.1rem;
+      margin-bottom: 1.5rem;
+    }}
+
+    .hero-code {{
+      margin-bottom: 3rem;
+    }}
+
+    .security-section {{
+      margin-bottom: 3rem;
+    }}
+
+    .security-section h2 {{
+      font-size: 1.4rem;
+      margin-bottom: 1rem;
+      color: var(--accent);
+    }}
+
+    .security-section > p {{
+      font-size: 1rem;
+      margin-bottom: 1.5rem;
+      line-height: 1.7;
+    }}
+
+    .security-comparison {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
       margin-bottom: 2rem;
+    }}
+
+    @media (max-width: 700px) {{
+      .security-comparison {{
+        grid-template-columns: 1fr;
+      }}
+    }}
+
+    .comparison-block {{
+      padding: 1.25rem;
+      border-radius: 6px;
+      border: 1px solid var(--edge);
+    }}
+
+    .comparison-block.problem {{
+      background: rgba(255, 100, 100, 0.05);
+      border-color: rgba(255, 100, 100, 0.2);
+    }}
+
+    .comparison-block.solution {{
+      background: rgba(100, 255, 150, 0.05);
+      border-color: rgba(100, 255, 150, 0.2);
+    }}
+
+    .comparison-block h4 {{
+      font-size: 0.9rem;
+      margin-bottom: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }}
+
+    .comparison-block.problem h4 {{
+      color: #ff8a80;
+    }}
+
+    .comparison-block.solution h4 {{
+      color: #69f0ae;
+    }}
+
+    .comparison-block p {{
+      font-size: 0.9rem;
+      color: var(--ink);
+      line-height: 1.6;
+    }}
+
+    .enforcement {{
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      padding: 1.5rem;
+    }}
+
+    .enforcement h3 {{
+      font-size: 1rem;
+      margin-bottom: 1rem;
+      color: var(--ink);
+    }}
+
+    .enforcement-grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }}
+
+    @media (max-width: 700px) {{
+      .enforcement-grid {{
+        grid-template-columns: 1fr;
+      }}
+    }}
+
+    .enforcement-item strong {{
+      display: block;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }}
+
+    .enforcement-item p {{
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.6;
     }}
 
     .features {{
       display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 1.5rem;
       margin-bottom: 3rem;
+    }}
+
+    @media (max-width: 700px) {{
+      .features {{
+        grid-template-columns: 1fr;
+      }}
     }}
 
     .feature {{
@@ -458,12 +573,6 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
     .feature p {{
       color: var(--muted);
       font-size: 0.9rem;
-    }}
-
-    .example-section h2 {{
-      font-size: 1.1rem;
-      margin-bottom: 1rem;
-      color: var(--muted);
     }}
 
     /* Code blocks */
@@ -714,28 +823,47 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
         <p class="tagline">Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
       </div>
 
+      <pre class="hero-code"><code>{hello_highlighted}</code></pre>
+
+      <div class="security-section">
+        <h2>Capability-Based Security</h2>
+        <p>Capable is a systems language where <strong>authority is a value</strong>. Code cannot perform privileged operations&mdash;filesystem access, networking, console output&mdash;without explicitly receiving a capability token.</p>
+
+        <div class="security-comparison">
+          <div class="comparison-block problem">
+            <h4>The Problem</h4>
+            <p>In typical systems languages, the OS is ambiently available. Any code in your process can call <code>open()</code>, <code>connect()</code>, or <code>exec()</code>. When you pull in a dependency, you're trusting it&mdash;and all of its transitive dependencies&mdash;not to be malicious or compromised.</p>
+          </div>
+          <div class="comparison-block solution">
+            <h4>The Solution</h4>
+            <p>In Capable, safe code can only perform OS actions by calling <code>sys.*</code> functions, and those require capability arguments. A library cannot read your disk unless you pass it a <code>ReadFS</code>. It cannot phone home unless you pass it a <code>Net</code>. Authority flow is explicit and reviewable.</p>
+          </div>
+        </div>
+
+        <div class="enforcement">
+          <h3>Two-Layer Enforcement</h3>
+          <div class="enforcement-grid">
+            <div class="enforcement-item">
+              <strong>Static (Compiler)</strong>
+              <p>No capability value in scope? The code won't compile. Privileged functions only exist in <code>sys.*</code> and require capability arguments. Capability types are opaque&mdash;user code cannot forge them.</p>
+            </div>
+            <div class="enforcement-item">
+              <strong>Dynamic (Runtime)</strong>
+              <p>Capabilities encode attenuation. A <code>ReadFS("./config")</code> cannot escape its root directory. The runtime validates paths, normalizes traversals, and enforces scoped rights.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="features">
         <div class="feature">
-          <h3>Capability-Based Security</h3>
-          <p>Code cannot perform privileged operations (filesystem, network, console) without receiving an explicit capability value. Libraries cannot gain new powers silently.</p>
-        </div>
-        <div class="feature">
-          <h3>Two-Layer Enforcement</h3>
-          <p>Static checking at compile time ensures capabilities are in scope. Runtime validation enforces attenuation bounds (e.g., a ReadFS capability scoped to "./config" cannot escape that directory).</p>
-        </div>
-        <div class="feature">
           <h3>Linear and Affine Types</h3>
-          <p>Move-only types prevent use-after-move. Linear capabilities must be consumed on all code paths. Attenuation methods consume the original capability to prevent keeping both powerful and attenuated versions.</p>
+          <p>Move-only types prevent use-after-move. Linear capabilities must be consumed on all code paths. Attenuation methods consume the original capability&mdash;you can't keep both the powerful and attenuated versions.</p>
         </div>
         <div class="feature">
           <h3>Systems Programming</h3>
           <p>No garbage collector. Explicit memory management. Compiles to native code via Cranelift. Safe code is memory-safe; unsafe code is clearly marked with <code>package unsafe</code>.</p>
         </div>
-      </div>
-
-      <div class="example-section">
-        <h2>Hello World</h2>
-        <pre><code>{hello_highlighted}</code></pre>
       </div>
     </div>
 
