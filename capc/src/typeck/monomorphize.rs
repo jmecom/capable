@@ -817,34 +817,44 @@ impl MonoCtx {
                         .collect::<Result<Vec<_>, _>>()?;
                     return Ok(Ty::Path(name.clone(), args));
                 }
-                let (type_module, base_name, qualified) = split_name(module, name);
                 let args = args
                     .iter()
                     .map(|arg| self.mono_ty(module, arg, subs))
                     .collect::<Result<Vec<_>, _>>()?;
-                let qualified_key = qualify(&type_module, &base_name);
-                if let Some(struct_def) = self.structs.get(&qualified_key).cloned() {
-                    if !struct_def.type_params.is_empty() {
-                        let new_name = self.ensure_struct_instance(&type_module, &struct_def, &args)?;
-                        let name = if qualified {
-                            qualify(&type_module, &new_name)
-                        } else {
-                            new_name
-                        };
-                        return Ok(Ty::Path(name, Vec::new()));
+
+                // Find the type, searching all modules if needed for unqualified names
+                if let Some((type_module, qualified_key)) =
+                    find_type_in_all_modules(name, module, &self.structs, &self.enums)
+                {
+                    let qualified = name.contains('.');
+                    if let Some(struct_def) = self.structs.get(&qualified_key).cloned() {
+                        if !struct_def.type_params.is_empty() {
+                            let new_name = self.ensure_struct_instance(&type_module, &struct_def, &args)?;
+                            let name = if qualified {
+                                qualify(&type_module, &new_name)
+                            } else {
+                                new_name
+                            };
+                            return Ok(Ty::Path(name, Vec::new()));
+                        }
+                        // Non-generic struct - use the qualified key directly
+                        return Ok(Ty::Path(qualified_key, args));
+                    }
+                    if let Some(enum_def) = self.enums.get(&qualified_key).cloned() {
+                        if !enum_def.type_params.is_empty() {
+                            let new_name = self.ensure_enum_instance(&type_module, &enum_def, &args)?;
+                            let name = if qualified {
+                                qualify(&type_module, &new_name)
+                            } else {
+                                new_name
+                            };
+                            return Ok(Ty::Path(name, Vec::new()));
+                        }
+                        // Non-generic enum - use the qualified key directly
+                        return Ok(Ty::Path(qualified_key, args));
                     }
                 }
-                if let Some(enum_def) = self.enums.get(&qualified_key).cloned() {
-                    if !enum_def.type_params.is_empty() {
-                        let new_name = self.ensure_enum_instance(&type_module, &enum_def, &args)?;
-                        let name = if qualified {
-                            qualify(&type_module, &new_name)
-                        } else {
-                            new_name
-                        };
-                        return Ok(Ty::Path(name, Vec::new()));
-                    }
-                }
+                // Type not found in any module - return as-is (may be builtin or error later)
                 Ok(Ty::Path(name.clone(), args))
             }
         }
@@ -939,21 +949,24 @@ impl MonoCtx {
                     let err = self.abi_type_for(module, &args[1])?;
                     return Ok(AbiType::Result(Box::new(ok), Box::new(err)));
                 }
-                let (type_module, base_name, _qualified) = split_name(module, name);
-                let qualified = qualify(&type_module, &base_name);
-                if let Some(info) = self.structs.get(&qualified) {
-                    return Ok(if info.is_opaque {
-                        AbiType::Handle
-                    } else {
-                        AbiType::Ptr
-                    });
-                }
-                if let Some(info) = self.enums.get(&qualified) {
-                    let has_payload = info.variants.iter().any(|variant| variant.payload.is_some());
-                    if has_payload {
-                        return Ok(AbiType::Ptr);
+                // Find the type, searching all modules if needed for unqualified names
+                if let Some((_type_module, qualified_key)) =
+                    find_type_in_all_modules(name, module, &self.structs, &self.enums)
+                {
+                    if let Some(info) = self.structs.get(&qualified_key) {
+                        return Ok(if info.is_opaque {
+                            AbiType::Handle
+                        } else {
+                            AbiType::Ptr
+                        });
                     }
-                    return Ok(AbiType::I32);
+                    if let Some(info) = self.enums.get(&qualified_key) {
+                        let has_payload = info.variants.iter().any(|variant| variant.payload.is_some());
+                        if has_payload {
+                            return Ok(AbiType::Ptr);
+                        }
+                        return Ok(AbiType::I32);
+                    }
                 }
                 Err(TypeError::new(
                     format!("unknown type `{}`", name),
@@ -1016,6 +1029,43 @@ fn split_name(module: &str, name: &str) -> (String, String, bool) {
     } else {
         (module.to_string(), name.to_string(), false)
     }
+}
+
+/// Find the qualified name and module for a type, searching all modules if needed.
+/// Returns (module, qualified_name) or None if not found.
+fn find_type_in_all_modules<'a>(
+    name: &str,
+    current_module: &str,
+    structs: &'a HashMap<String, HirStruct>,
+    enums: &'a HashMap<String, HirEnum>,
+) -> Option<(String, String)> {
+    // First try the direct qualified lookup
+    let (type_module, base_name, qualified) = split_name(current_module, name);
+    let qualified_key = qualify(&type_module, &base_name);
+    if structs.contains_key(&qualified_key) || enums.contains_key(&qualified_key) {
+        return Some((type_module, qualified_key));
+    }
+
+    // If the name was already qualified or we found it, we're done
+    if qualified {
+        return None;
+    }
+
+    // Search all modules for this unqualified type name
+    for key in structs.keys() {
+        if key.ends_with(&format!(".{}", base_name)) {
+            let mod_part = key.rsplit_once('.').map(|(m, _)| m).unwrap_or("");
+            return Some((mod_part.to_string(), key.clone()));
+        }
+    }
+    for key in enums.keys() {
+        if key.ends_with(&format!(".{}", base_name)) {
+            let mod_part = key.rsplit_once('.').map(|(m, _)| m).unwrap_or("");
+            return Some((mod_part.to_string(), key.clone()));
+        }
+    }
+
+    None
 }
 
 fn qualify(module: &str, name: &str) -> String {

@@ -1,0 +1,29 @@
+/// Equality trait for types that can be compared for equality.
+package safe
+module sys::eq
+
+/// Trait for types that support equality comparison.
+pub trait Eq {
+  fn eq(self, other: Self) -> bool;
+}
+
+/// Eq implementation for i32.
+impl Eq for i32 {
+  fn eq(self, other: i32) -> bool {
+    return self == other
+  }
+}
+
+/// Eq implementation for u8.
+impl Eq for u8 {
+  fn eq(self, other: u8) -> bool {
+    return self == other
+  }
+}
+
+/// Eq implementation for bool.
+impl Eq for bool {
+  fn eq(self, other: bool) -> bool {
+    return self == other
+  }
+}

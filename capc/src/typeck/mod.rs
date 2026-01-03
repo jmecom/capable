@@ -912,15 +912,6 @@ fn lower_type(
                             path.span,
                         ));
                     }
-                    let elem = &args[0];
-                    if !matches!(elem, Ty::Builtin(BuiltinType::U8) | Ty::Builtin(BuiltinType::I32) | Ty::Param(_))
-                        && !is_string_ty(elem)
-                    {
-                        return Err(TypeError::new(
-                            "Vec only supports u8, i32, and string element types".to_string(),
-                            path.span,
-                        ));
-                    }
                     return Ok(Ty::Path("sys.vec.Vec".to_string(), args));
                 }
                 return Ok(Ty::Path(joined, args));
@@ -930,15 +921,6 @@ fn lower_type(
                 if args.len() != 1 {
                     return Err(TypeError::new(
                         format!("Vec expects 1 type argument, found {}", args.len()),
-                        path.span,
-                    ));
-                }
-                let elem = &args[0];
-                if !matches!(elem, Ty::Builtin(BuiltinType::U8) | Ty::Builtin(BuiltinType::I32) | Ty::Param(_))
-                    && !is_string_ty(elem)
-                {
-                    return Err(TypeError::new(
-                        "Vec only supports u8, i32, and string element types".to_string(),
                         path.span,
                     ));
                 }

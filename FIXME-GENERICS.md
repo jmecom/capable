@@ -1,14 +1,10 @@
-# FIXME: Generic Collections Need Trait Bounds
+# Generic Collections: Progress and Remaining Work
 
-## Problem
+## Completed
 
-`Vec<T>` currently only supports `u8`, `i32`, and `string` element types. Custom structs are rejected:
+### Phase 1: Basic Vec<T> for Custom Structs
 
-```
-error: Vec only supports u8, i32, and string element types
-```
-
-This prevents natural patterns like:
+`Vec<T>` now supports custom structs for basic operations:
 
 ```rust
 copy struct Entry {
@@ -16,134 +12,72 @@ copy struct Entry {
   value: i32
 }
 
-let entries = alloc.vec_new<Entry>()  // ERROR: not allowed
+let entries = alloc.vec_new<Entry>()  // WORKS!
+entries.push(Entry { key: 1, value: 10 })
+let e = entries.get(0)
 ```
 
-## Root Cause
+**Working methods**: `push`, `pop`, `get`, `set`, `len`, `capacity`, `reserve`, `clear`, `free`
 
-The Vec implementation has methods that assume primitive operator semantics:
+**Changes made**:
+- Removed hardcoded Vec element type restriction in `typeck/mod.rs`
+- Fixed monomorphization to search all modules for user-defined types
+- Created `stdlib/sys/eq.cap` with `Eq` trait and impls for primitives
 
-```rust
-// From stdlib/sys/vec.cap
-impl<T> Vec<T> {
-    pub fn contains(self, value: T) -> bool {
-        ...
-        if (v == value) {  // assumes == works on T
-            return true
-        }
-        ...
-    }
+## Remaining Work
 
-    pub fn map_add(self, delta: T) -> Vec<T> {
-        ...
-        out.push(v + delta)  // assumes + works on T
-        ...
-    }
-}
-```
+### Vec Equality Methods Still Use `==` Directly
 
-These methods use `==` and `+` directly, which only work for primitives. The type checker blocks `Vec<CustomStruct>` to prevent runtime failures.
-
-## Solution: Trait Bounds on Impl Blocks
-
-We need to support **partial trait bounds on impl blocks** so that:
-
-1. Basic Vec operations (push, pop, get, set) work for any `T`
-2. Methods requiring equality only exist when `T: Eq`
-3. Methods requiring ordering only exist when `T: Ord`
-
-### Proposed Syntax
+Methods like `contains`, `filter`, `index_of`, `count` still use `==` which doesn't work for custom structs:
 
 ```rust
-// Base impl - works for all T
-impl<T> Vec<T> {
-    pub fn push(self, x: T) -> Result<unit, AllocErr> { ... }
-    pub fn pop(self) -> Result<T, VecErr> { ... }
-    pub fn get(self, i: i32) -> Result<T, VecErr> { ... }
-    pub fn set(self, i: i32, x: T) -> Result<unit, VecErr> { ... }
-    pub fn len(self) -> i32 { ... }
-}
-
-// Eq-bounded impl - only for T: Eq
-impl<T: Eq> Vec<T> {
-    pub fn contains(self, value: T) -> bool { ... }
-    pub fn index_of(self, value: T) -> Result<i32, VecErr> { ... }
-    pub fn count(self, value: T) -> i32 { ... }
-}
-
-// Numeric-bounded impl - only for numeric types
-impl<T: Add> Vec<T> {
-    pub fn map_add(self, delta: T) -> Vec<T> { ... }
+// Currently in vec.cap:
+if (v == value) {  // doesn't work for structs
+    return true
 }
 ```
 
-### Required Traits
+**Why it's tricky**: When we tried moving these to `impl<T: eq::Eq> Vec<T>`, we encountered issues with method name collisions between type-specific impls (e.g., `impl Vec<u8>` and `impl Vec<i32>` both wanting `map_add`).
+
+### Solutions Needed
+
+1. **Fix method name mangling** for type-specific impls - include type args in method name to avoid collisions
+2. **Or**: Move equality methods to a separate module/struct
+3. **Or**: Keep `==` for primitives, require explicit trait bound for custom types
+
+### Operator Traits (Not Yet Implemented)
+
+To properly use `.eq()` in Vec methods, we need:
+- Trait bounds on impl blocks to work correctly
+- Type checker to resolve trait methods inside bounded impls
+
+### Example of Working Pattern
+
+Custom structs can implement `Eq` and use it in user code:
 
 ```rust
+use sys::eq
+
 trait Eq {
-    fn eq(self, other: Self) -> bool;
+  fn eq(self, other: Self) -> bool;
 }
 
-trait Ord: Eq {
-    fn cmp(self, other: Self) -> i32;  // -1, 0, 1
+copy struct Entry { key: i32, value: i32 }
+
+impl Eq for Entry {
+  fn eq(self, other: Entry) -> bool {
+    return self.key == other.key && self.value == other.value
+  }
 }
 
-trait Add {
-    fn add(self, other: Self) -> Self;
-}
-```
-
-### Builtin Implementations
-
-The compiler should auto-generate trait impls for primitives:
-
-```rust
-impl Eq for i32 {
-    fn eq(self, other: i32) -> bool { return self == other }
-}
-
-impl Eq for u8 {
-    fn eq(self, other: u8) -> bool { return self == other }
-}
-
-impl Eq for string {
-    fn eq(self, other: string) -> bool { return self == other }
+// Works in user code:
+fn are_equal<T: Eq>(a: T, b: T) -> bool {
+  return a.eq(b)
 }
 ```
 
-## Implementation Steps
+## Files Modified
 
-### Phase 1: Impl Block Trait Bounds
-- [ ] Parse trait bounds on impl blocks: `impl<T: Trait> Type<T> { ... }`
-- [ ] During method resolution, check if the concrete type satisfies the bounds
-- [ ] Only make bounded methods available when bounds are satisfied
-
-### Phase 2: Operator Traits
-- [ ] Define `Eq`, `Ord`, `Add`, `Sub`, `Mul`, `Div` traits in stdlib
-- [ ] Compiler generates impls for primitive types
-- [ ] Desugar `a == b` to `a.eq(b)` when `a` is not a primitive (or always?)
-
-### Phase 3: Derive Macros (Optional)
-- [ ] Add `#[derive(Eq)]` to auto-generate equality for structs
-- [ ] Field-by-field comparison for copy structs
-
-## Workaround (Current)
-
-Use parallel vectors instead of `Vec<Struct>`:
-
-```rust
-// Instead of Vec<Entry>
-copy struct HashMap {
-    states: Vec<i32>,   // 0=Empty, 1=Occupied, 2=Deleted
-    keys: Vec<i32>,
-    values: Vec<i32>,
-    ...
-}
-```
-
-## Files to Modify
-
-- `capc/src/typeck/mod.rs` - Remove hardcoded Vec element type restriction (lines 916-923, 936-943)
-- `capc/src/typeck/collect.rs` - Collect trait bounds on impl blocks
-- `capc/src/typeck/check.rs` - Validate trait bounds during method resolution
-- `stdlib/sys/vec.cap` - Split impl blocks by trait bounds
+- `capc/src/typeck/mod.rs` - Removed hardcoded Vec element type restriction
+- `capc/src/typeck/monomorphize.rs` - Added `find_type_in_all_modules` for cross-module type lookup
+- `stdlib/sys/eq.cap` - New file with `Eq` trait and primitive implementations
