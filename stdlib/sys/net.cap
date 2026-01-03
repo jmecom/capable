@@ -1,6 +1,7 @@
 /// Networking capabilities and helpers.
 package unsafe
 module sys::net
+use sys::buffer
 
 /// Network capability.
 pub copy capability struct Net
@@ -45,12 +46,12 @@ impl TcpListener {
 
 impl TcpConn {
   /// Read all available data into a string.
-  pub fn read_to_string(self: &TcpConn) -> Result<string, NetErr> {
+  pub fn read_to_string(self: &TcpConn, alloc: buffer::Alloc) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 
   /// Read up to max_size bytes into a string.
-  pub fn read(self: &TcpConn, max_size: i32) -> Result<string, NetErr> {
+  pub fn read(self: &TcpConn, alloc: buffer::Alloc, max_size: i32) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 

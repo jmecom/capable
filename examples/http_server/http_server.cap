@@ -22,36 +22,36 @@ fn strip_query(raw_path: string, alloc: Alloc) -> string {
   return out
 }
 
-fn sanitize_segment(parts: Vec<string>, i: i32, acc: string, seg: string) -> Result<string, unit> {
+fn sanitize_segment(parts: Vec<string>, i: i32, acc: string, seg: string, alloc: Alloc) -> Result<string, unit> {
   if (seg.len() == 0) {
-    return sanitize_parts(parts, i + 1, acc)
+    return sanitize_parts(parts, i + 1, acc, alloc)
   }
   if (seg == ".") {
-    return sanitize_parts(parts, i + 1, acc)
+    return sanitize_parts(parts, i + 1, acc, alloc)
   }
   if (seg == "..") {
     return Err(())
   }
   if (acc.len() == 0) {
-    return sanitize_parts(parts, i + 1, seg)
+    return sanitize_parts(parts, i + 1, seg, alloc)
   }
-  return sanitize_parts(parts, i + 1, fs::join(acc, seg))
+  return sanitize_parts(parts, i + 1, fs::join(alloc, acc, seg), alloc)
 }
 
-fn sanitize_parts(parts: Vec<string>, i: i32, acc: string) -> Result<string, unit> {
+fn sanitize_parts(parts: Vec<string>, i: i32, acc: string, alloc: Alloc) -> Result<string, unit> {
   if (i >= parts.len()) {
     return Ok(acc)
   }
   let seg_result = parts[i]
   match (seg_result) {
-    Ok(seg) => { return sanitize_segment(parts, i, acc, seg) }
+    Ok(seg) => { return sanitize_segment(parts, i, acc, seg, alloc) }
     Err(_) => { return Err(()) }
   }
 }
 
 fn sanitize_path(raw_path: string, alloc: Alloc) -> Result<string, unit> {
   let parts = raw_path.split(alloc, '/')
-  let result = sanitize_parts(parts, 0, "")
+  let result = sanitize_parts(parts, 0, "", alloc)
   alloc.vec_string_free(parts)
   match (result) {
     Ok(path) => {
@@ -122,7 +122,7 @@ fn serve_forever(c: Console, net: Net, rc: RootCap, alloc: Alloc, root: string) 
   while (true) {
     let conn = listener.accept()?
     defer conn.close()
-    let req = conn.read_to_string()?
+    let req = conn.read_to_string(alloc)?
     let readfs = rc.mint_readfs(root)
     handle_request(conn, readfs, alloc, req)?
     defer c.println("request complete")

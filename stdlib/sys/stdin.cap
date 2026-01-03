@@ -3,13 +3,14 @@ package safe
 module sys::stdin
 
 use sys::io
+use sys::buffer
 
 /// Capability for stdin.
 pub capability struct Stdin
 
 impl Stdin {
   /// Read stdin into a string.
-  pub fn read_to_string(self) -> Result<string, io::IoErr> {
+  pub fn read_to_string(self, alloc: buffer::Alloc) -> Result<string, io::IoErr> {
     return Err(io::IoErr::IoError)
   }
 }

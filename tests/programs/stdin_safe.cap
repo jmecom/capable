@@ -5,7 +5,8 @@ use sys::system
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let stdin = rc.mint_stdin()
-  let code = match stdin.read_to_string() {
+  let alloc = rc.mint_alloc_default()
+  let code = match stdin.read_to_string(alloc) {
     Ok(s) => {
       let n = s.len()
       c.assert(n == 0)

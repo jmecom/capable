@@ -125,11 +125,11 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
     let fs_join = FnSig {
-        params: vec![AbiType::Ptr, AbiType::Ptr],
+        params: vec![AbiType::Handle, AbiType::Ptr, AbiType::Ptr],
         ret: AbiType::Ptr,
     };
     let fs_join_abi = FnSig {
-        params: vec![AbiType::Ptr, AbiType::Ptr, AbiType::Ptr],
+        params: vec![AbiType::Ptr, AbiType::Handle, AbiType::Ptr, AbiType::Ptr],
         ret: AbiType::Unit,
     };
     // Console.
@@ -215,19 +215,28 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
     let net_read_to_string = FnSig {
-        params: vec![AbiType::Handle],
+        params: vec![AbiType::Handle, AbiType::Handle],
         ret: AbiType::Result(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
     };
     let net_read_to_string_abi = FnSig {
-        params: vec![AbiType::Handle, AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32))],
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
+        ],
         ret: AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
     };
     let net_read = FnSig {
-        params: vec![AbiType::Handle, AbiType::I32],
+        params: vec![AbiType::Handle, AbiType::Handle, AbiType::I32],
         ret: AbiType::Result(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
     };
     let net_read_abi = FnSig {
-        params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32))],
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::I32,
+            AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
+        ],
         ret: AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
     };
     let net_write = FnSig {
@@ -266,34 +275,12 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ret: AbiType::Result(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
     };
     let args_at_abi = FnSig {
-        params: vec![AbiType::Handle, AbiType::I32, AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32))],
-        ret: AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
-    };
-    // Slices.
-    let mem_slice_from_ptr = FnSig {
-        params: vec![AbiType::Handle, AbiType::Ptr, AbiType::I32],
-        ret: AbiType::Handle,
-    };
-    let mem_slice_len = FnSig {
-        params: vec![AbiType::Handle],
-        ret: AbiType::I32,
-    };
-    let mem_slice_at = FnSig {
-        params: vec![AbiType::Handle, AbiType::I32],
-        ret: AbiType::U8,
-    };
-    let mem_slice_sub = FnSig {
-        params: vec![AbiType::Handle, AbiType::I32, AbiType::I32],
-        ret: AbiType::Result(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
-    };
-    let mem_slice_sub_abi = FnSig {
         params: vec![
             AbiType::Handle,
             AbiType::I32,
-            AbiType::I32,
-            AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+            AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
         ],
-        ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
+        ret: AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
     };
     // === System + args ===
     map.insert(
@@ -384,11 +371,15 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         "sys.stdin.Stdin__read_to_string".to_string(),
         FnInfo {
             sig: FnSig {
-                params: vec![AbiType::Handle],
+                params: vec![AbiType::Handle, AbiType::Handle],
                 ret: AbiType::Result(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
             },
             abi_sig: Some(FnSig {
-                params: vec![AbiType::Handle, AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32))],
+                params: vec![
+                    AbiType::Handle,
+                    AbiType::Handle,
+                    AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
+                ],
                 ret: AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
             }),
             symbol: "capable_rt_read_stdin_to_string".to_string(),
@@ -831,76 +822,6 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: mem_cast,
             abi_sig: None,
             symbol: "capable_rt_cast_u32_to_u8".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_from_ptr".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Alloc__mut_slice_from_ptr".to_string(),
-        FnInfo {
-            sig: mem_slice_from_ptr,
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_from_ptr".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Slice__slice".to_string(),
-        FnInfo {
-            sig: mem_slice_sub.clone(),
-            abi_sig: Some(mem_slice_sub_abi.clone()),
-            symbol: "capable_rt_slice_sub".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.MutSlice__slice".to_string(),
-        FnInfo {
-            sig: mem_slice_sub,
-            abi_sig: Some(mem_slice_sub_abi),
-            symbol: "capable_rt_mut_slice_sub".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Slice__len".to_string(),
-        FnInfo {
-            sig: mem_slice_len,
-            abi_sig: None,
-            symbol: "capable_rt_slice_len".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.Slice__at".to_string(),
-        FnInfo {
-            sig: mem_slice_at.clone(),
-            abi_sig: None,
-            symbol: "capable_rt_slice_at".to_string(),
-            runtime_symbol: None,
-            is_runtime: true,
-        },
-    );
-    map.insert(
-        "sys.buffer.MutSlice__at".to_string(),
-        FnInfo {
-            sig: mem_slice_at,
-            abi_sig: None,
-            symbol: "capable_rt_mut_slice_at".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

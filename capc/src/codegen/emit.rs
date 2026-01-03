@@ -16,7 +16,7 @@ use crate::ast::{BinaryOp, Literal, UnaryOp};
 
 use super::{
     CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape,
-    StructLayoutIndex, TypeLayout, ValueRepr,
+    StructLayout, StructLayoutIndex, TypeLayout, ValueRepr,
 };
 use super::abi_quirks;
 use super::layout::{align_to, resolve_struct_layout, type_layout_from_index};
@@ -2018,39 +2018,46 @@ fn emit_hir_index(
             let field = layout.fields.get("bytes").ok_or_else(|| {
                 CodegenError::Unsupported("string.bytes field missing".to_string())
             })?;
+            let slice_layout =
+                resolve_struct_layout(&field.ty.ty, "", &struct_layouts.layouts).ok_or_else(
+                    || CodegenError::Unsupported("Slice layout missing".to_string()),
+                )?;
             let addr = ptr_add(builder, base_ptr, field.offset);
-            let handle = builder
-                .ins()
-                .load(ir::types::I64, MemFlags::new(), addr, 0);
-            let result = emit_slice_at(builder, module, handle, index_val)?;
+            let result = emit_slice_index(builder, module, addr, slice_layout, index_val)?;
             Ok(ValueRepr::Single(result))
         }
         crate::typeck::Ty::Path(name, _) if name == "Slice" || name == "sys.buffer.Slice" => {
-            // For Slice[u8], call capable_rt_slice_at(handle, index) -> u8
-            let handle = match object {
-                ValueRepr::Single(h) => h,
+            // For Slice[u8], index into the raw slice.
+            let base_ptr = match object {
+                ValueRepr::Single(ptr) => ptr,
                 _ => {
                     return Err(CodegenError::Codegen(
-                        "expected Slice to be a handle".to_string(),
+                        "expected Slice to be a struct pointer".to_string(),
                     ))
                 }
             };
-
-            let result = emit_slice_at(builder, module, handle, index_val)?;
+            let layout =
+                resolve_struct_layout(object_ty, "", &struct_layouts.layouts).ok_or_else(|| {
+                    CodegenError::Unsupported("Slice layout missing".to_string())
+                })?;
+            let result = emit_slice_index(builder, module, base_ptr, layout, index_val)?;
             Ok(ValueRepr::Single(result))
         }
         crate::typeck::Ty::Path(name, _) if name == "MutSlice" || name == "sys.buffer.MutSlice" => {
-            // For MutSlice[u8], call capable_rt_mut_slice_at(handle, index) -> u8
-            let handle = match object {
-                ValueRepr::Single(h) => h,
+            // For MutSlice[u8], index into the raw slice.
+            let base_ptr = match object {
+                ValueRepr::Single(ptr) => ptr,
                 _ => {
                     return Err(CodegenError::Codegen(
-                        "expected MutSlice to be a handle".to_string(),
+                        "expected MutSlice to be a struct pointer".to_string(),
                     ))
                 }
             };
-
-            let result = emit_mut_slice_at(builder, module, handle, index_val)?;
+            let layout =
+                resolve_struct_layout(object_ty, "", &struct_layouts.layouts).ok_or_else(|| {
+                    CodegenError::Unsupported("MutSlice layout missing".to_string())
+                })?;
+            let result = emit_slice_index(builder, module, base_ptr, layout, index_val)?;
             Ok(ValueRepr::Single(result))
         }
         _ => Err(CodegenError::Codegen(format!(
@@ -2060,92 +2067,63 @@ fn emit_hir_index(
     }
 }
 
-/// Emit a call to the runtime slice at function.
-/// Returns a u8 value at the given index.
-fn emit_slice_at(
+/// Emit a bounds-checked slice index.
+fn emit_slice_index(
     builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    handle: Value,
+    module: &ObjectModule,
+    slice_base: Value,
+    slice_layout: &StructLayout,
     index: Value,
 ) -> Result<Value, CodegenError> {
-    use cranelift_codegen::ir::{AbiParam, Signature};
-
     let ptr_ty = module.isa().pointer_type();
+    let ptr_field = slice_layout
+        .fields
+        .get("ptr")
+        .ok_or_else(|| CodegenError::Unsupported("Slice.ptr field missing".to_string()))?;
+    let len_field = slice_layout
+        .fields
+        .get("len")
+        .ok_or_else(|| CodegenError::Unsupported("Slice.len field missing".to_string()))?;
+    let ptr_addr = ptr_add(builder, slice_base, ptr_field.offset);
+    let len_addr = ptr_add(builder, slice_base, len_field.offset);
+    let raw_ptr = builder.ins().load(ptr_ty, MemFlags::new(), ptr_addr, 0);
+    let len_val = builder
+        .ins()
+        .load(ir::types::I32, MemFlags::new(), len_addr, 0);
+    let zero_i32 = builder.ins().iconst(ir::types::I32, 0);
+    let idx_nonneg = builder
+        .ins()
+        .icmp(IntCC::SignedGreaterThanOrEqual, index, zero_i32);
+    let idx_lt = builder
+        .ins()
+        .icmp(IntCC::SignedLessThan, index, len_val);
+    let ptr_nonnull = builder.ins().icmp_imm(IntCC::NotEqual, raw_ptr, 0);
+    let in_bounds = builder.ins().band(idx_nonneg, idx_lt);
+    let in_bounds = builder.ins().band(in_bounds, ptr_nonnull);
 
-    // Build signature: (handle, i32) -> u8
-    let mut sig = Signature::new(module.isa().default_call_conv());
-    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
-    sig.params.push(AbiParam::new(ir::types::I32));
-    sig.returns.push(AbiParam::new(ir::types::I8));
+    let ok_block = builder.create_block();
+    let err_block = builder.create_block();
+    let done_block = builder.create_block();
+    builder.append_block_param(done_block, ir::types::I8);
+    builder.ins().brif(in_bounds, ok_block, &[], err_block, &[]);
 
-    // Declare and import the runtime function
-    let func_id = module
-        .declare_function("capable_rt_slice_at", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local_func = module.declare_func_in_func(func_id, builder.func);
+    builder.switch_to_block(ok_block);
+    builder.seal_block(ok_block);
+    let idx_ptr = builder.ins().uextend(ptr_ty, index);
+    let addr = builder.ins().iadd(raw_ptr, idx_ptr);
+    let value = builder
+        .ins()
+        .load(ir::types::I8, MemFlags::new(), addr, 0);
+    builder.ins().jump(done_block, &[value]);
 
-    // Call the function
-    let call_inst = builder.ins().call(local_func, &[handle, index]);
-    let results = builder.inst_results(call_inst);
-    Ok(results[0])
-}
+    builder.switch_to_block(err_block);
+    builder.seal_block(err_block);
+    let zero_i8 = builder.ins().iconst(ir::types::I8, 0);
+    builder.ins().jump(done_block, &[zero_i8]);
 
-/// Emit a call to the runtime slice_from_ptr helper.
-fn emit_slice_from_ptr(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    ptr: Value,
-    len: Value,
-) -> Result<Value, CodegenError> {
-    use cranelift_codegen::ir::{AbiParam, Signature};
-
-    let ptr_ty = module.isa().pointer_type();
-
-    // Build signature: (handle, ptr, i32) -> handle
-    let mut sig = Signature::new(module.isa().default_call_conv());
-    sig.params.push(AbiParam::new(ir::types::I64));
-    sig.params.push(AbiParam::new(ptr_ty));
-    sig.params.push(AbiParam::new(ir::types::I32));
-    sig.returns.push(AbiParam::new(ir::types::I64));
-
-    let func_id = module
-        .declare_function("capable_rt_slice_from_ptr", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local_func = module.declare_func_in_func(func_id, builder.func);
-    let default_alloc = builder.ins().iconst(ir::types::I64, 0);
-    let call_inst = builder.ins().call(local_func, &[default_alloc, ptr, len]);
-    let results = builder.inst_results(call_inst);
-    Ok(results[0])
-}
-
-/// Emit a call to the runtime mutable slice at function.
-/// Returns a u8 value at the given index.
-fn emit_mut_slice_at(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    handle: Value,
-    index: Value,
-) -> Result<Value, CodegenError> {
-    use cranelift_codegen::ir::{AbiParam, Signature};
-
-    let ptr_ty = module.isa().pointer_type();
-
-    // Build signature: (handle, i32) -> u8
-    let mut sig = Signature::new(module.isa().default_call_conv());
-    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
-    sig.params.push(AbiParam::new(ir::types::I32));
-    sig.returns.push(AbiParam::new(ir::types::I8));
-
-    // Declare and import the runtime function
-    let func_id = module
-        .declare_function("capable_rt_mut_slice_at", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local_func = module.declare_func_in_func(func_id, builder.func);
-
-    // Call the function
-    let call_inst = builder.ins().call(local_func, &[handle, index]);
-    let results = builder.inst_results(call_inst);
-    Ok(results[0])
+    builder.switch_to_block(done_block);
+    builder.seal_block(done_block);
+    Ok(builder.block_params(done_block)[0])
 }
 
 fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
@@ -3383,7 +3361,6 @@ fn emit_string(
         .ins()
         .global_value(module.isa().pointer_type(), global);
     let len = builder.ins().iconst(ir::types::I32, value.len() as i64);
-    let slice_handle = emit_slice_from_ptr(builder, module, ptr, len)?;
 
     let string_ty = crate::typeck::Ty::Path("sys.string.string".to_string(), Vec::new());
     let layout = resolve_struct_layout(&string_ty, "", &struct_layouts.layouts).ok_or_else(|| {
@@ -3391,6 +3368,16 @@ fn emit_string(
     })?;
     let field = layout.fields.get("bytes").ok_or_else(|| {
         CodegenError::Unsupported("string.bytes field missing".to_string())
+    })?;
+    let slice_layout =
+        resolve_struct_layout(&field.ty.ty, "", &struct_layouts.layouts).ok_or_else(|| {
+            CodegenError::Unsupported("Slice layout missing".to_string())
+        })?;
+    let slice_ptr = slice_layout.fields.get("ptr").ok_or_else(|| {
+        CodegenError::Unsupported("Slice.ptr field missing".to_string())
+    })?;
+    let slice_len = slice_layout.fields.get("len").ok_or_else(|| {
+        CodegenError::Unsupported("Slice.len field missing".to_string())
     })?;
     let ptr_ty = module.isa().pointer_type();
     let align = layout.align.max(1);
@@ -3401,9 +3388,12 @@ fn emit_string(
     ));
     let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
     let addr = ptr_add(builder, base_ptr, field.offset);
+    let ptr_addr = ptr_add(builder, addr, slice_ptr.offset);
+    let len_addr = ptr_add(builder, addr, slice_len.offset);
     builder
         .ins()
-        .store(MemFlags::new(), slice_handle, addr, 0);
+        .store(MemFlags::new(), ptr, ptr_addr, 0);
+    builder.ins().store(MemFlags::new(), len, len_addr, 0);
     Ok(ValueRepr::Single(base_ptr))
 }
 

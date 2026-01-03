@@ -107,6 +107,6 @@ impl FileRead {
 }
 
 /// Join two path segments with a platform separator.
-pub fn join(a: string, b: string) -> string {
+pub fn join(alloc: buffer::Alloc, a: string, b: string) -> string {
   return ""
 }

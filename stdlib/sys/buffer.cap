@@ -9,9 +9,15 @@ use sys::unsafe_ptr
 /// Alloc capability for heap operations (heap-backed allocations).
 pub copy opaque struct Alloc
 /// Immutable slice view (non-owning).
-pub copy opaque struct Slice<T>
+pub copy struct Slice<T> {
+  ptr: *T,
+  len: i32
+}
 /// Mutable slice view (non-owning).
-pub copy opaque struct MutSlice<T>
+pub copy struct MutSlice<T> {
+  ptr: *T,
+  len: i32
+}
 
 /// Allocation errors.
 pub enum AllocErr {
@@ -64,12 +70,12 @@ impl Alloc {
 
   /// Create an immutable slice from a raw pointer.
   pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice<u8> {
-    return ()
+    return Slice<u8> { ptr: ptr, len: len }
   }
 
   /// Create a mutable slice from a raw pointer.
   pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice<u8> {
-    return ()
+    return MutSlice<u8> { ptr: ptr, len: len }
   }
 
   /// Create a Vec<u8> with this Alloc (heap-backed).
@@ -124,28 +130,56 @@ impl Alloc {
 impl Slice<u8> {
   /// Length in bytes.
   pub fn len(self) -> i32 {
-    return 0
+    return self.len
   }
 
   /// Index into the slice.
   pub fn at(self, i: i32) -> u8 {
-    return 0
+    if (i < 0 || i >= self.len) {
+      return 0u8
+    }
+    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
+    return unsafe_ptr::ptr_read<u8>(ptr)
   }
 
   /// Create a subslice view.
   pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, SliceErr> {
-    return Err(SliceErr::OutOfRange)
+    if (start < 0 || len < 0) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start > self.len) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start + len > self.len) {
+      return Err(SliceErr::OutOfRange)
+    }
+    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, start)
+    return Ok(Slice<u8> { ptr: ptr, len: len })
   }
 }
 
 impl MutSlice<u8> {
   /// Index into the mutable slice.
   pub fn at(self, i: i32) -> u8 {
-    return 0
+    if (i < 0 || i >= self.len) {
+      return 0u8
+    }
+    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
+    return unsafe_ptr::ptr_read<u8>(ptr)
   }
 
   /// Create a mutable subslice view.
   pub fn slice(self, start: i32, len: i32) -> Result<MutSlice<u8>, SliceErr> {
-    return Err(SliceErr::OutOfRange)
+    if (start < 0 || len < 0) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start > self.len) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start + len > self.len) {
+      return Err(SliceErr::OutOfRange)
+    }
+    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, start)
+    return Ok(MutSlice<u8> { ptr: ptr, len: len })
   }
 }

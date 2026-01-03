@@ -40,4 +40,6 @@ Fixes applied from review:
 
 Current known issues/workarounds:
 
-- Result<*T> in stdlib generics triggers a typechecker mismatch (expected Ptr(Path("T", [])) vs Ptr(Param("T"))), so Vec internals avoid Result<*T> and use null checks instead.
+- Result<*T> still trips a typechecker mismatch (Param vs Path) in some generic
+  cases. Workaround: sys.vec allows limited arithmetic on type params so Vec<T>
+  can compute sizes; see tests/programs/result_ptr_generic.cap for coverage.
