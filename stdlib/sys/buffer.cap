@@ -228,7 +228,7 @@ impl Slice<u8> {
   /// Index into the slice.
   pub fn at(self, i: i32) -> u8 {
     if (i < 0 || i >= self.len) {
-      return 0u8
+      panic()
     }
     let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
     return unsafe_ptr::ptr_read<u8>(ptr)
@@ -239,7 +239,7 @@ impl MutSlice<u8> {
   /// Index into the mutable slice.
   pub fn at(self, i: i32) -> u8 {
     if (i < 0 || i >= self.len) {
-      return 0u8
+      panic()
     }
     let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
     return unsafe_ptr::ptr_read<u8>(ptr)
