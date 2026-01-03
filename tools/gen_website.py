@@ -51,7 +51,7 @@ def highlight_cap(code: str) -> str:
     # Tokenize with regex
     token_pattern = re.compile(
         r'(///.*?$|//.*?$)'           # comments
-        r'|("(?:[^"\\]|\\.)*")'        # strings
+        r'|("(?:[^"\\\n]|\\.)*")'     # strings (no newlines)
         r'|(\b\d+\b)'                  # numbers
         r'|(\b[a-zA-Z_][a-zA-Z0-9_]*\b)'  # identifiers
         r'|([^\s\w]+)'                 # operators/punctuation
@@ -345,8 +345,6 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
       top: 0; left: 0;
       width: 100%; height: 100%;
       pointer-events: none;
-      background-image: radial-gradient(rgba(186, 204, 212, 0.18) 1px, transparent 1px);
-      background-size: 24px 24px;
       z-index: 0;
     }}
 
@@ -811,7 +809,7 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
   </style>
 </head>
 <body>
-  <div id="dot-grid"></div>
+  <canvas id="dot-grid"></canvas>
 
   <header>
     <div class="logo">Capable</div>
@@ -1010,6 +1008,86 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
     if (modules.length > 0) {{
       renderModule(modules[0]);
     }}
+
+    // Interactive dot grid animation
+    (function() {{
+      const canvas = document.getElementById('dot-grid');
+      const ctx = canvas.getContext('2d');
+
+      let width, height;
+      let dots = [];
+      let mouse = {{ x: -1000, y: -1000 }};
+      const SPACING = 28;
+      const DOT_RADIUS = 1;
+      const INFLUENCE_RADIUS = 120;
+      const BASE_COLOR = [186, 204, 212];
+      const HOVER_COLOR = [245, 124, 108];
+
+      function resize() {{
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+        initDots();
+      }}
+
+      function initDots() {{
+        dots = [];
+        const offsetX = (width % SPACING) / 2;
+        const offsetY = (height % SPACING) / 2;
+        for (let x = offsetX; x < width; x += SPACING) {{
+          for (let y = offsetY; y < height; y += SPACING) {{
+            dots.push({{ originX: x, originY: y, x: x, y: y }});
+          }}
+        }}
+      }}
+
+      function animate() {{
+        ctx.clearRect(0, 0, width, height);
+
+        for (const dot of dots) {{
+          const dx = mouse.x - dot.originX;
+          const dy = mouse.y - dot.originY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          let color, alpha;
+
+          if (dist < INFLUENCE_RADIUS) {{
+            const t = 1 - dist / INFLUENCE_RADIUS;
+            const force = t * 10;
+            const angle = Math.atan2(dy, dx);
+            dot.x = dot.originX - Math.cos(angle) * force;
+            dot.y = dot.originY - Math.sin(angle) * force;
+            color = HOVER_COLOR;
+            alpha = 0.15 + t * 0.45;
+          }} else {{
+            dot.x += (dot.originX - dot.x) * 0.1;
+            dot.y += (dot.originY - dot.y) * 0.1;
+            color = BASE_COLOR;
+            alpha = 0.12;
+          }}
+
+          ctx.beginPath();
+          ctx.arc(dot.x, dot.y, DOT_RADIUS, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${{color[0]}}, ${{color[1]}}, ${{color[2]}}, ${{alpha}})`;
+          ctx.fill();
+        }}
+
+        requestAnimationFrame(animate);
+      }}
+
+      canvas.style.pointerEvents = 'none';
+      window.addEventListener('resize', resize);
+      window.addEventListener('mousemove', (e) => {{
+        mouse.x = e.clientX;
+        mouse.y = e.clientY;
+      }});
+      window.addEventListener('mouseleave', () => {{
+        mouse.x = -1000;
+        mouse.y = -1000;
+      }});
+
+      resize();
+      animate();
+    }})();
   </script>
 </body>
 </html>
