@@ -8,6 +8,7 @@ This is an experimental and toy project. Inspired by [Austral](https://austral-l
 fn main(rc: RootCap) {
   // Mint a capability from the root
   let console = rc.mint_console();
+  let alloc = rc.mint_alloc_default();
 
   // Acquire a ReadFS capability at ./here.
   // We pass this capability struct to functions that require
@@ -16,7 +17,7 @@ fn main(rc: RootCap) {
   let fs = rc.mint_readfs("./here");
 
   // Attempt to read beyond the capability's scopes: this will print "blocked".
-  match fs.read_to_string("../etc/passwd") {
+  match fs.read_to_string(alloc, "../etc/passwd") {
     Ok(_)  => console.println("BUG: escaped"),
     Err(_) => console.println("blocked"),
   }

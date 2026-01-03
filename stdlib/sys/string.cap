@@ -8,7 +8,7 @@ use sys::buffer
 use sys::bytes
 use sys::vec
 
-/// String view backed by a byte slice handle.
+/// String view backed by a byte slice (non-owning).
 pub copy struct string {
   bytes: Slice<u8>
 }
@@ -26,11 +26,12 @@ pub struct SplitOnce {
 }
 
 /// Wrap a slice as a string view (no copy).
+/// The view is only valid while the slice's backing storage is alive.
 pub fn from_bytes(bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {
   return Ok(string { bytes: bytes })
 }
 
-/// Copy a slice into an owned string view using the provided allocator.
+/// Copy a slice into a new owned string view using the provided allocator.
 pub fn from_bytes_copy(alloc: buffer::Alloc, bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {
   let owned = buffer::copy_slice(alloc, bytes)?
   return Ok(string { bytes: owned })
@@ -210,6 +211,7 @@ impl string {
   }
 
   /// Create a subslice view of this string by byte offset.
+  /// The view is invalid if the backing storage is freed.
   pub fn slice(self, start: i32, len: i32) -> Result<string, buffer::SliceErr> {
     let sub = self.as_slice().slice(start, len)?
     return Ok(string { bytes: sub })
@@ -225,7 +227,7 @@ impl string {
     return self.bytes.at(index)
   }
 
-  /// Borrow the underlying byte slice.
+  /// Borrow the underlying byte slice (no copy).
   pub fn as_slice(self) -> Slice<u8> {
     return self.bytes
   }

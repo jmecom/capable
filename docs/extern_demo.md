@@ -32,5 +32,5 @@ capable still works
 ## Notes
 
 - The extern function is declared as `extern fn demo_log(msg: string) -> unit`.
-- `demo_log` expects a raw pointer + length; the compiler lowers `string` as `(ptr, len)`.
+- `demo_log` expects a raw pointer + length; the compiler lowers `string` as a struct with a `bytes` slice `{ ptr, len }`.
 - Only `package unsafe` modules may declare `extern`.

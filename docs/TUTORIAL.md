@@ -162,10 +162,11 @@ use sys::fs
 
 pub fn main(rc: RootCap) -> i32 {
   let fs = rc.mint_filesystem("./config")
+  let alloc = rc.mint_alloc_default()
   let dir = fs.root_dir()
   let file = dir.open_read("app.txt")
 
-  match file.read_to_string() {
+  match file.read_to_string(alloc) {
     Ok(s) => { rc.mint_console().println(s); return 0 }
     Err(e) => { return 1 }
   }
@@ -222,7 +223,9 @@ Use `capability struct` for authority-bearing tokens. Use `opaque struct` for un
 In the current stdlib:
 
 - `copy capability`: `RootCap`, `Console`, `Args`
-- `copy opaque`: `Alloc`, `Slice`, `MutSlice`, `Vec<T>`, `Text`
+- `copy opaque`: `Alloc`, `Vec<T>`
+- `copy struct`: `Slice<T>`, `MutSlice<T>`, `string`
+- `struct`: `Text`
 - `capability` (affine): `ReadFS`, `Filesystem`, `Dir`, `Stdin`
 - `linear capability`: `FileRead`
 
@@ -243,7 +246,7 @@ pub fn main() -> i32 {
 
 Affine and linear values cannot be used after move. If you move in one branch, it's moved after the join.
 
-Owned text uses move semantics too. Use `string::Text` for building strings and `string` as a view.
+Owned text uses move semantics too. Use `string::Text` for building strings and `string` as a non-owning view into existing bytes (views become invalid after the backing storage is freed).
 
 ## 10) Linear must be consumed
 
@@ -259,7 +262,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Linear values must be consumed along every path. You can consume them with a terminal method (like `FileRead.close()` or `read_to_string()`), or with `drop(x)` as a last resort.
+Linear values must be consumed along every path. You can consume them with a terminal method (like `FileRead.close()` or `read_to_string(alloc)`), or with `drop(x)` as a last resort.
 
 ## 11) Borrow-lite: &T parameters
 

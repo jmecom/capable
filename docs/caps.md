@@ -81,7 +81,7 @@ impl Dir {
 }
 ```
 
-Not every opaque handle is a capability. Use `capability` for authority-bearing tokens (filesystem, console, stdin); use `opaque` for unforgeable data handles (slices, vectors).
+Not every opaque handle is a capability. Use `capability` for authority-bearing tokens (filesystem, console, stdin); use `opaque` for unforgeable data handles (allocators, vectors). Slices are plain structs in the stdlib, but pointer types remain unsafe for user code.
 
 ### 3) Root authority comes from `RootCap`
 The entrypoint receives a root capability:

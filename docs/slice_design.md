@@ -34,7 +34,7 @@ Properties:
 An owning, growable UTF-8 string builder backed by `Vec<u8>`.
 Conceptually similar to Rust `String` and Go `strings.Builder`.
 
-### 2.2 `Slice[T]` and `MutSlice[T]` (non-owning views)
+### 2.3 `Slice[T]` and `MutSlice[T]` (non-owning views)
 Non-owning views into contiguous memory.
 
 Properties:
@@ -45,7 +45,7 @@ Properties:
 - safe code cannot access the underlying pointer or do arithmetic
 
 Implementation detail:
-- internally may be `{ ptr, len }`, but pointer is not exposed to safe code.
+- implemented as `{ ptr, len }` in the stdlib, but pointer types remain unsafe for user code.
 
 ---
 
@@ -58,24 +58,28 @@ Allocation is explicit (Zig-like). Functions that allocate accept an allocator v
 opaque struct Alloc
 opaque struct Vec[T]     // move-only owner
 
-fn vec_u8_new(a: Alloc) -> Vec[u8]
-fn vec_len[T](v: &Vec[T]) -> usize
-fn vec_push[T](v: &mut Vec[T], x: T) -> Result[unit, AllocErr]
-fn vec_free[T](a: Alloc, v: Vec[T]) -> unit         // consumes v
+impl Alloc {
+  fn vec_u8_new(self) -> Vec<u8>
+  fn vec_u8_with_capacity(self, cap: i32) -> Result<Vec<u8>, AllocErr>
+  fn vec_u8_free(self, v: Vec<u8>) -> unit
+}
 ````
 
 ### 3.2 Views
 
 ```cap
-opaque struct Slice[T]
-opaque struct MutSlice[T]
+struct Slice[T] { ptr: *T, len: i32 }
+struct MutSlice[T] { ptr: *T, len: i32 }
 
-fn vec_as_slice(b: &Vec[u8]) -> Slice[u8]
-fn vec_as_mut_slice(b: &Vec[u8]) -> MutSlice[u8]
+impl Vec<u8> {
+  fn as_slice(self) -> Slice<u8>
+}
 
-fn slice_len[T](s: Slice[T]) -> usize
-fn slice_at[T](s: Slice[T], i: usize) -> &T                 // bounds-checked
-fn slice_sub[T](s: Slice[T], start: usize, n: usize) -> Slice[T] // bounds-checked
+impl Slice<u8> {
+  fn len(self) -> i32
+  fn at(self, i: i32) -> u8                 // bounds-checked
+  fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, SliceErr>
+}
 ```
 
 Note: For `T` that are Copy, `slice_get` may return `Option[T]`.
@@ -89,7 +93,7 @@ Note: For `T` that are Copy, `slice_get` may return `Option[T]`.
 Safe indexing gives “systems parsing” without unsafe pointer math:
 
 ```cap
-fn parse_u16_be(buf: Slice[u8], off: usize) -> Result[u16, Err] {
+fn parse_u16_be(buf: Slice<u8>, off: i32) -> Result<u16, Err> {
   let b0 = buf.at(off)        // bounds checked
   let b1 = buf.at(off + 1)
   Ok(((b0 as u16) << 8) | (b1 as u16))
@@ -101,13 +105,13 @@ fn parse_u16_be(buf: Slice[u8], off: usize) -> Result[u16, Err] {
 `sys.fs` provides methods that return owned bytes (`Vec<u8>`) and/or `string`:
 
 ```cap
-fn ReadFS.read_bytes(self, path: string) -> Result[Vec[u8], FsErr]
+fn ReadFS.read_bytes(self, alloc: Alloc, path: string) -> Result<Vec<u8>, FsErr>
 ```
 
 Usage:
 
 * safe code receives `Vec<u8>`
-* parses it via `Slice[u8]`
+* parses it via `Slice<u8>`
 * frees it (explicitly or with `defer`)
 
 ---
@@ -118,14 +122,14 @@ OS APIs typically want `(ptr, len)`.
 
 In Capable:
 
-* safe code supplies `Slice[u8]` / `MutSlice[u8]`
+* safe code supplies `Slice<u8>` / `MutSlice<u8>`
 * `sys.*` converts internally and calls the OS
 
 Example shapes:
 
 ```cap
-Socket.send(data: Slice[u8]) -> Result[usize, Err]
-File.write(data: Slice[u8]) -> Result[usize, Err]
+Socket.send(data: Slice<u8>) -> Result<usize, Err>
+File.write(data: Slice<u8>) -> Result<usize, Err>
 ```
 
 Safe code never manipulates the raw pointers.
