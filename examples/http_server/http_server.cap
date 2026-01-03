@@ -16,10 +16,15 @@ fn arg_or_default(args: Args, index: i32, default: string) -> string {
 }
 
 fn strip_query(raw_path: string, alloc: Alloc) -> string {
-  let parts = raw_path.split(alloc, '?')
-  let out = parts[0].unwrap_or("")
-  alloc.vec_string_free(parts)
-  return out
+  match (raw_path.index_of_byte('?')) {
+    Ok(i) => {
+      match (raw_path.slice_range(0, i)) {
+        Ok(view) => { return view }
+        Err(_) => { return raw_path }
+      }
+    }
+    Err(_) => { return raw_path }
+  }
 }
 
 fn sanitize_segment(parts: Vec<string>, i: i32, acc: string, seg: string, alloc: Alloc) -> Result<string, unit> {
@@ -66,13 +71,28 @@ fn sanitize_path(raw_path: string, alloc: Alloc) -> Result<string, unit> {
 
 fn parse_request_line(line: string, alloc: Alloc) -> Result<string, unit> {
   let trimmed = line.trim(alloc)
-  match (trimmed.split_once(alloc, ' ')) {
-    Ok(parts) => {
-      if (parts.left != "GET") {
-        return Err(())
-      }
-      match (parts.right.split_once(alloc, ' ')) {
-        Ok(rest) => { return sanitize_path(strip_query(rest.left, alloc), alloc) }
+  match (trimmed.index_of_byte(' ')) {
+    Ok(space0) => {
+      match (trimmed.slice_range(0, space0)) {
+        Ok(method) => {
+          if (method != "GET") {
+            return Err(())
+          }
+          match (trimmed.slice_range(space0 + 1, trimmed.len())) {
+            Ok(rest) => {
+              match (rest.index_of_byte(' ')) {
+                Ok(space1) => {
+                  match (rest.slice_range(0, space1)) {
+                    Ok(path) => { return sanitize_path(strip_query(path, alloc), alloc) }
+                    Err(_) => { return Err(()) }
+                  }
+                }
+                Err(_) => { return Err(()) }
+              }
+            }
+            Err(_) => { return Err(()) }
+          }
+        }
         Err(_) => { return Err(()) }
       }
     }

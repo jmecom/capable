@@ -40,7 +40,7 @@ pub fn main(rc: RootCap) -> i32 {
   let b = v.get(1)
   let filtered = v.filter('B')
   let mapped = v.map_add('\x01')
-  let slice = v.slice(1, 2)
+  let slice = v.slice_range(1, 3)
   match (b) {
     Ok(x) => {
       c.assert(len == 3 && x == 'B')

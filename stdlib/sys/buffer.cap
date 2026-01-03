@@ -126,6 +126,21 @@ impl Alloc {
     return ()
   }
 
+  /// Allocate a new empty Text.
+  pub fn text_new(self) -> string::Text {
+    return string::text_new(self)
+  }
+
+  /// Allocate a new empty Text with capacity.
+  pub fn text_with_capacity(self, capacity: i32) -> Result<string::Text, AllocErr> {
+    return string::text_with_capacity(self, capacity)
+  }
+
+  /// Copy a string view into a new Text.
+  pub fn text_from(self, s: string) -> Result<string::Text, AllocErr> {
+    return string::text_from(self, s)
+  }
+
   /// Create a Vec<T> with this Alloc (heap-backed).
   pub fn vec_new<T>(self) -> vec::Vec<T> {
     return vec::new_with<T>(self)
@@ -143,23 +158,14 @@ impl Alloc {
   }
 }
 
-impl Slice<u8> {
-  /// Length in bytes.
+impl<T> Slice<T> {
+  /// Length in elements.
   pub fn len(self) -> i32 {
     return self.len
   }
 
-  /// Index into the slice.
-  pub fn at(self, i: i32) -> u8 {
-    if (i < 0 || i >= self.len) {
-      return 0u8
-    }
-    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
-    return unsafe_ptr::ptr_read<u8>(ptr)
-  }
-
   /// Create a subslice view.
-  pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, SliceErr> {
+  pub fn slice(self, start: i32, len: i32) -> Result<Slice<T>, SliceErr> {
     if (start < 0 || len < 0) {
       return Err(SliceErr::OutOfRange)
     }
@@ -169,12 +175,12 @@ impl Slice<u8> {
     if (start + len > self.len) {
       return Err(SliceErr::OutOfRange)
     }
-    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, start)
-    return Ok(Slice<u8> { ptr: ptr, len: len })
+    let ptr = unsafe_ptr::ptr_add<T>(self.ptr, start)
+    return Ok(Slice<T> { ptr: ptr, len: len })
   }
 
   /// Create a subslice view using start/end bounds (end is exclusive).
-  pub fn slice_range(self, start: i32, end: i32) -> Result<Slice<u8>, SliceErr> {
+  pub fn slice_range(self, start: i32, end: i32) -> Result<Slice<T>, SliceErr> {
     if (start < 0 || end < 0) {
       return Err(SliceErr::OutOfRange)
     }
@@ -182,6 +188,50 @@ impl Slice<u8> {
       return Err(SliceErr::OutOfRange)
     }
     return self.slice(start, end - start)
+  }
+}
+
+impl<T> MutSlice<T> {
+  /// Length in elements.
+  pub fn len(self) -> i32 {
+    return self.len
+  }
+
+  /// Create a mutable subslice view.
+  pub fn slice(self, start: i32, len: i32) -> Result<MutSlice<T>, SliceErr> {
+    if (start < 0 || len < 0) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start > self.len) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start + len > self.len) {
+      return Err(SliceErr::OutOfRange)
+    }
+    let ptr = unsafe_ptr::ptr_add<T>(self.ptr, start)
+    return Ok(MutSlice<T> { ptr: ptr, len: len })
+  }
+
+  /// Create a mutable subslice view using start/end bounds (end is exclusive).
+  pub fn slice_range(self, start: i32, end: i32) -> Result<MutSlice<T>, SliceErr> {
+    if (start < 0 || end < 0) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start > end) {
+      return Err(SliceErr::OutOfRange)
+    }
+    return self.slice(start, end - start)
+  }
+}
+
+impl Slice<u8> {
+  /// Index into the slice.
+  pub fn at(self, i: i32) -> u8 {
+    if (i < 0 || i >= self.len) {
+      return 0u8
+    }
+    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
+    return unsafe_ptr::ptr_read<u8>(ptr)
   }
 }
 
@@ -193,31 +243,5 @@ impl MutSlice<u8> {
     }
     let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
     return unsafe_ptr::ptr_read<u8>(ptr)
-  }
-
-  /// Create a mutable subslice view.
-  pub fn slice(self, start: i32, len: i32) -> Result<MutSlice<u8>, SliceErr> {
-    if (start < 0 || len < 0) {
-      return Err(SliceErr::OutOfRange)
-    }
-    if (start > self.len) {
-      return Err(SliceErr::OutOfRange)
-    }
-    if (start + len > self.len) {
-      return Err(SliceErr::OutOfRange)
-    }
-    let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, start)
-    return Ok(MutSlice<u8> { ptr: ptr, len: len })
-  }
-
-  /// Create a mutable subslice view using start/end bounds (end is exclusive).
-  pub fn slice_range(self, start: i32, end: i32) -> Result<MutSlice<u8>, SliceErr> {
-    if (start < 0 || end < 0) {
-      return Err(SliceErr::OutOfRange)
-    }
-    if (start > end) {
-      return Err(SliceErr::OutOfRange)
-    }
-    return self.slice(start, end - start)
   }
 }

@@ -6,7 +6,7 @@ use sys::string
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
-  let text = string::text_new(alloc)
+  let text = alloc.text_new()
   match (text.push_str("hi")) {
     Ok(_) => { }
     Err(_) => { c.assert(false); return 1 }
@@ -30,6 +30,26 @@ pub fn main(rc: RootCap) -> i32 {
   }
   match (text.to_string()) {
     Ok(s) => { c.assert(s.eq("hi\nok!")) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match (alloc.text_from("cap")) {
+    Ok(t2) => {
+      match (t2.to_string()) {
+        Ok(s) => { c.assert(s.eq("cap")) }
+        Err(_) => { c.assert(false); return 1 }
+      }
+      t2.free(alloc)
+    }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  match ("owned".to_text(alloc)) {
+    Ok(t3) => {
+      match (t3.to_string()) {
+        Ok(s) => { c.assert(s.eq("owned")) }
+        Err(_) => { c.assert(false); return 1 }
+      }
+      t3.free(alloc)
+    }
     Err(_) => { c.assert(false); return 1 }
   }
   alloc.vec_u8_free(v)

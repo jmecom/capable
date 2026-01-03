@@ -48,6 +48,8 @@ The stdlib exposes low-level pointer helpers in `sys::unsafe_ptr` for unsafe
 code. The surface is intentionally small and explicit:
 - `ptr_is_null` only checks nullness; it does not imply ownership or validity.
 - `memcpy` and `memmove` are available for unsafe code and lowered in codegen.
+- `sizeof`/`alignof` are compile-time layout queries exposed as intrinsics so the
+  compiler, not user code, defines layout and ABI details.
 
 ## ABI and lowering notes
 - Opaque structs lower to handles; field access is special-cased in codegen.

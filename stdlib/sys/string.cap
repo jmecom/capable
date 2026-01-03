@@ -223,6 +223,7 @@ impl string {
   }
 
   /// Create a subslice view of this string using start/end bounds (end exclusive).
+  /// Offsets are byte indices (no UTF-8 validation).
   pub fn slice_range(self, start: i32, end: i32) -> Result<string, buffer::SliceErr> {
     let sub = self.as_slice().slice_range(start, end)?
     return Ok(string { bytes: sub })
