@@ -13,8 +13,9 @@ TODO-MEMORY
 
 4) Owned string and slice memory model
    - string is a view over Slice<u8>; Text is owned Vec<u8>.
-   - Safe non-stdlib modules may not return or store Slice/MutSlice to reduce
+   - Done: Safe non-stdlib modules may not return or store Slice/MutSlice to reduce
      use-after-free hazards until a real lifetime model exists.
+   - Done: typecheck coverage for slice returns and struct/enum fields.
 
 5) Unsafe pointer API completeness
    - Done: memcpy/memmove added to sys::unsafe_ptr and lowered in codegen.

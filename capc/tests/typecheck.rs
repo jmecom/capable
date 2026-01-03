@@ -718,6 +718,28 @@ fn typecheck_slice_return_fails() {
 }
 
 #[test]
+fn typecheck_slice_struct_field_fails() {
+    let source = load_program("should_fail_slice_struct_field.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("Slice types cannot appear in structs in safe modules"));
+}
+
+#[test]
+fn typecheck_slice_enum_field_fails() {
+    let source = load_program("should_fail_slice_enum_field.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("Slice types cannot appear in enums in safe modules"));
+}
+
+#[test]
 fn typecheck_slice_unsafe_ok() {
     let source = load_program("slice_unsafe.cap");
     let module = parse_module(&source).expect("parse module");
