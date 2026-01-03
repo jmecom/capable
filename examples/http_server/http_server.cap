@@ -69,44 +69,46 @@ fn sanitize_path(raw_path: string, alloc: Alloc) -> Result<string, unit> {
   }
 }
 
-fn parse_request_line(line: string, alloc: Alloc) -> Result<string, unit> {
-  let trimmed = line.trim(alloc)
-  match (trimmed.index_of_byte(' ')) {
-    Ok(space0) => {
-      match (trimmed.slice_range(0, space0)) {
-        Ok(method) => {
-          if (method != "GET") {
-            return Err(())
-          }
-          match (trimmed.slice_range(space0 + 1, trimmed.len())) {
-            Ok(rest) => {
-              match (rest.index_of_byte(' ')) {
-                Ok(space1) => {
-                  match (rest.slice_range(0, space1)) {
-                    Ok(path) => { return sanitize_path(strip_query(path, alloc), alloc) }
-                    Err(_) => { return Err(()) }
-                  }
-                }
-                Err(_) => { return Err(()) }
-              }
-            }
-            Err(_) => { return Err(()) }
-          }
-        }
-        Err(_) => { return Err(()) }
-      }
-    }
-    Err(_) => { return Err(()) }
+enum ParseErr {
+  MissingSpace,
+  BadMethod,
+  BadSlice
+}
+
+fn index_or_space(s: string) -> Result<i32, ParseErr> {
+  match (s.index_of_byte(' ')) {
+    Ok(i) => { return Ok(i) }
+    Err(_) => { return Err(ParseErr::MissingSpace) }
   }
 }
 
-fn parse_request_path(req: string, alloc: Alloc) -> Result<string, unit> {
+fn slice_or_err(s: string, start: i32, end: i32) -> Result<string, ParseErr> {
+  match (s.slice_range(start, end)) {
+    Ok(v) => { return Ok(v) }
+    Err(_) => { return Err(ParseErr::BadSlice) }
+  }
+}
+
+fn parse_request_line(line: string, alloc: Alloc) -> Result<string, ParseErr> {
+  let trimmed = line.trim(alloc)
+  let space0 = index_or_space(trimmed)?
+  let method = slice_or_err(trimmed, 0, space0)?
+  if (method != "GET") {
+    return Err(ParseErr::BadMethod)
+  }
+  let rest = slice_or_err(trimmed, space0 + 1, trimmed.len())?
+  let space1 = index_or_space(rest)?
+  let path = slice_or_err(rest, 0, space1)?
+  return sanitize_path(strip_query(path, alloc), alloc)
+}
+
+fn parse_request_path(req: string, alloc: Alloc) -> Result<string, ParseErr> {
   let lines = req.lines(alloc)
   let line_result = lines[0]
   alloc.vec_string_free(lines)
   match (line_result) {
     Ok(line) => { return parse_request_line(line, alloc) }
-    Err(_) => { return Err(()) }
+    Err(_) => { return Err(ParseErr::BadSlice) }
   }
 }
 
