@@ -1,15 +1,12 @@
 TODO-MEMORY
 
 1) Make Alloc real in runtime
-   - Runtime still uses libc::malloc directly for Vec/Slice/string buffers.
-   - Alloc handles are now passed and stored in Vec headers, but not used for
-     allocation/free. Add an allocator vtable/bridge or syscall hook so
-     Alloc controls allocation, like Zig-style explicit allocators.
+   - Done: all allocating runtime paths take an Alloc handle and use it for
+     malloc/free; current backend is libc, but the ABI keeps alloc explicit.
 
 2) Fix Result<*T> typechecker bug
-   - Generics with pointer payloads in Result still mismatch (Param vs Path).
-   - Remove Vec workaround once typechecker + monomorphizer agree on pointer
-     payload generics.
+   - Done: type equivalence treats type params vs unqualified paths consistently
+     in enum payload matching and Ok/Err checks.
 
 3) Remove remaining runtime Vec intrinsics
    - Done: runtime Vec tables removed; Vec/Slice operations are pure Cap.
@@ -21,9 +18,9 @@ TODO-MEMORY
 
 5) Unsafe pointer API completeness
    - Done: memcpy/memmove added to sys::unsafe_ptr and lowered in codegen.
-   - Document expectations around ptr_is_null and ownership.
+   - Done: ptr_is_null/ownership expectations documented.
 
 6) ABI + lowering docs update
-   - Document: opaque structs lowered to handles, field access is special-cased
+   - Done: opaque structs lowered to handles, field access is special-cased
      in codegen, sret + ResultOut behavior, alloc-passing convention, and
      Slice/string layout.

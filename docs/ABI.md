@@ -31,6 +31,12 @@ out-params:
 Runtime-backed intrinsics keep their original ABI (no sret) and are wrapped by
 compiler-generated stubs when needed.
 
+## Allocation convention
+
+APIs that allocate accept an explicit `Alloc` handle. The handle is passed
+through to the runtime and currently backed by libc `malloc`/`free`, but the ABI
+keeps the allocator explicit for future custom allocator support.
+
 ## Status
 
 - Inline-by-value struct returns are not implemented yet.

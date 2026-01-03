@@ -24,6 +24,7 @@ pub extern fn ptr_cast<T>(ptr: *u8) -> *T
 pub extern fn ptr_cast_u8<T>(ptr: *T) -> *u8
 
 /// Return true if the pointer is null.
+/// This does not imply ownership or validity beyond null/non-null.
 pub extern fn ptr_is_null<T>(ptr: *T) -> bool
 
 /// Copy `count` elements from `src` to `dst` (no overlap).

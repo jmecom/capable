@@ -40,7 +40,10 @@ fn record_expr_type(
 fn infer_enum_args(template: &Ty, actual: &Ty, inferred: &mut HashMap<String, Ty>) -> bool {
     match template {
         Ty::Param(name) => match inferred.get(name) {
-            Some(existing) => existing == actual,
+            Some(existing) => {
+                existing == actual
+                    || matches!(actual, Ty::Path(actual_name, args) if actual_name == name && args.is_empty())
+            }
             None => {
                 inferred.insert(name.clone(), actual.clone());
                 true
@@ -112,7 +115,59 @@ fn apply_enum_type_args(ty: &Ty, type_params: &[String], type_args: &[Ty]) -> Ty
 
 fn enum_payload_matches(payload: &Ty, arg_ty: &Ty, type_params: &[String], type_args: &[Ty]) -> bool {
     let expected = apply_enum_type_args(payload, type_params, type_args);
-    &expected == arg_ty
+    ty_equivalent_for_params(&expected, arg_ty, type_params)
+}
+
+fn ty_equivalent_for_params(left: &Ty, right: &Ty, type_params: &[String]) -> bool {
+    match (left, right) {
+        (Ty::Param(name), Ty::Path(other, args))
+            if args.is_empty() && name == other && type_params.contains(name) =>
+        {
+            true
+        }
+        (Ty::Path(name, args), Ty::Param(other))
+            if args.is_empty() && name == other && type_params.contains(other) =>
+        {
+            true
+        }
+        (Ty::Ptr(l), Ty::Ptr(r)) | (Ty::Ref(l), Ty::Ref(r)) => {
+            ty_equivalent_for_params(l, r, type_params)
+        }
+        (Ty::Path(name, args), Ty::Path(other, other_args))
+            if name == other && args.len() == other_args.len() =>
+        {
+            args.iter()
+                .zip(other_args.iter())
+                .all(|(a, b)| ty_equivalent_for_params(a, b, type_params))
+        }
+        _ => left == right,
+    }
+}
+
+fn ty_equivalent_for_set(left: &Ty, right: &Ty, type_params: &HashSet<String>) -> bool {
+    match (left, right) {
+        (Ty::Param(name), Ty::Path(other, args))
+            if args.is_empty() && name == other && type_params.contains(name) =>
+        {
+            true
+        }
+        (Ty::Path(name, args), Ty::Param(other))
+            if args.is_empty() && name == other && type_params.contains(other) =>
+        {
+            true
+        }
+        (Ty::Ptr(l), Ty::Ptr(r)) | (Ty::Ref(l), Ty::Ref(r)) => {
+            ty_equivalent_for_set(l, r, type_params)
+        }
+        (Ty::Path(name, args), Ty::Path(other, other_args))
+            if name == other && args.len() == other_args.len() =>
+        {
+            args.iter()
+                .zip(other_args.iter())
+                .all(|(a, b)| ty_equivalent_for_set(a, b, type_params))
+        }
+        _ => left == right,
+    }
 }
 
 fn enforce_vec_method_constraints(
@@ -1423,7 +1478,7 @@ pub(super) fn check_expr(
                     if let Ty::Path(ty_name, args) = ret_ty {
                         if ty_name == "sys.result.Result" && args.len() == 2 {
                             let expected = if name == "Ok" { &args[0] } else { &args[1] };
-                            if &arg_ty != expected {
+                            if !ty_equivalent_for_set(&arg_ty, expected, type_params) {
                                 return Err(TypeError::new(
                                     format!("{name} argument type mismatch: expected {expected:?}, got {arg_ty:?}"),
                                     call.args[0].span(),
