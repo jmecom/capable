@@ -1052,8 +1052,13 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
 
           if (dist < INFLUENCE_RADIUS) {{
             const t = 1 - dist / INFLUENCE_RADIUS;
-            color = HOVER_COLOR;
-            alpha = 0.1 + t * 0.4;
+            // Blend between base and hover color
+            color = [
+              BASE_COLOR[0] + (HOVER_COLOR[0] - BASE_COLOR[0]) * t * 0.5,
+              BASE_COLOR[1] + (HOVER_COLOR[1] - BASE_COLOR[1]) * t * 0.5,
+              BASE_COLOR[2] + (HOVER_COLOR[2] - BASE_COLOR[2]) * t * 0.5
+            ];
+            alpha = 0.1 + t * 0.15;
           }} else {{
             color = BASE_COLOR;
             alpha = 0.1;
