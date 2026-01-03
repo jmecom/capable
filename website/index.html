@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capable</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #baccd4;
+      --muted: #77758a;
+      --surface: #10121c;
+      --panel: #1a1c28;
+      --edge: #252834;
+      --accent: #f57c6c;
+      --accent-hover: #ff9a8f;
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+
+    body {
+      font-family: var(--mono);
+      color: var(--ink);
+      background: var(--surface);
+      line-height: 1.6;
+      font-size: 15px;
+    }
+
+    #dot-grid {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      background-image: radial-gradient(rgba(186, 204, 212, 0.08) 0.7px, transparent 0.7px);
+      background-size: 22px 22px;
+      z-index: 0;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      padding: 0 1.5rem;
+      height: 52px;
+      border-bottom: 1px solid rgba(186, 204, 212, 0.1);
+      background: rgba(16, 18, 28, 0.95);
+      backdrop-filter: blur(10px);
+    }
+
+    .logo {
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: 0.05em;
+      color: var(--ink);
+    }
+
+    nav {
+      display: flex;
+      gap: 0.25rem;
+    }
+
+    .tab {
+      padding: 0.5rem 1rem;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+
+    .tab:hover {
+      color: var(--ink);
+      background: rgba(186, 204, 212, 0.05);
+    }
+
+    .tab.active {
+      color: var(--accent);
+      background: rgba(245, 124, 108, 0.1);
+    }
+
+    .header-right {
+      margin-left: auto;
+    }
+
+    .header-right a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+    }
+
+    .header-right a:hover {
+      color: var(--ink);
+    }
+
+    main {
+      position: relative;
+      z-index: 1;
+      min-height: calc(100vh - 52px);
+    }
+
+    .page {
+      display: none;
+      padding: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    /* Home page */
+    .hero {
+      margin-bottom: 3rem;
+    }
+
+    .hero h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .hero .tagline {
+      color: var(--muted);
+      font-size: 1.1rem;
+      margin-bottom: 2rem;
+    }
+
+    .features {
+      display: grid;
+      gap: 1.5rem;
+      margin-bottom: 3rem;
+    }
+
+    .feature {
+      padding: 1.25rem;
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+    }
+
+    .feature h3 {
+      color: var(--accent);
+      font-size: 0.95rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature p {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .example-section h2 {
+      font-size: 1.1rem;
+      margin-bottom: 1rem;
+      color: var(--muted);
+    }
+
+    /* Code blocks */
+    pre, .code-block {
+      background: #0e0f18;
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    code {
+      font-family: var(--mono);
+    }
+
+    /* Syntax highlighting */
+    .hl-keyword { color: #c792ea; }
+    .hl-type { color: #82aaff; }
+    .hl-string { color: #c3e88d; }
+    .hl-number { color: #f78c6c; }
+    .hl-comment { color: #546e7a; font-style: italic; }
+
+    /* Tutorial page */
+    #tutorial-content {
+      line-height: 1.7;
+    }
+
+    #tutorial-content h1 {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--edge);
+    }
+
+    #tutorial-content h2 {
+      font-size: 1.4rem;
+      margin-top: 2.5rem;
+      margin-bottom: 1rem;
+      color: var(--accent);
+    }
+
+    #tutorial-content h3 {
+      font-size: 1.1rem;
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+    }
+
+    #tutorial-content p {
+      margin-bottom: 1rem;
+    }
+
+    #tutorial-content ul {
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+
+    #tutorial-content li {
+      margin-bottom: 0.25rem;
+    }
+
+    #tutorial-content code {
+      background: rgba(245, 124, 108, 0.1);
+      padding: 0.15em 0.4em;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+
+    #tutorial-content pre code {
+      background: transparent;
+      padding: 0;
+    }
+
+    #tutorial-content .code-block {
+      margin-bottom: 1.5rem;
+    }
+
+    #tutorial-content hr {
+      border: none;
+      border-top: 1px solid var(--edge);
+      margin: 2rem 0;
+    }
+
+    #tutorial-content a {
+      color: var(--accent);
+    }
+
+    /* Stdlib page */
+    .stdlib-layout {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      gap: 2rem;
+      max-width: 1200px;
+    }
+
+    .stdlib-nav {
+      position: sticky;
+      top: 70px;
+      max-height: calc(100vh - 90px);
+      overflow-y: auto;
+      padding: 1rem;
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+    }
+
+    .stdlib-nav h3 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .module-link {
+      display: block;
+      padding: 0.4rem 0.6rem;
+      color: var(--ink);
+      text-decoration: none;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    .module-link:hover {
+      background: rgba(186, 204, 212, 0.05);
+    }
+
+    .module-link.active {
+      background: rgba(245, 124, 108, 0.1);
+      color: var(--accent);
+    }
+
+    .stdlib-content {
+      min-width: 0;
+    }
+
+    .module-header {
+      margin-bottom: 1.5rem;
+    }
+
+    .module-header h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .module-path {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .module-docs {
+      margin-bottom: 1.5rem;
+      padding: 1rem;
+      background: var(--panel);
+      border-radius: 6px;
+    }
+
+    .item-section h3 {
+      font-size: 1rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 2rem 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--edge);
+    }
+
+    .item {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid rgba(186, 204, 212, 0.05);
+    }
+
+    .item:last-child {
+      border-bottom: none;
+    }
+
+    .item-sig {
+      color: var(--accent);
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    .item-impl {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 0.25rem;
+    }
+
+    .item-docs {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+    }
+
+    .source-toggle {
+      display: inline-block;
+      margin-top: 1.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      border-radius: 4px;
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .source-toggle:hover {
+      background: rgba(245, 124, 108, 0.1);
+    }
+
+    .source-code {
+      margin-top: 1rem;
+    }
+
+    @media (max-width: 800px) {
+      .stdlib-layout {
+        grid-template-columns: 1fr;
+      }
+      .stdlib-nav {
+        position: static;
+        max-height: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="dot-grid"></div>
+
+  <header>
+    <div class="logo">Capable</div>
+    <nav>
+      <button class="tab active" data-page="home">Home</button>
+      <button class="tab" data-page="tutorial">Tutorial</button>
+      <button class="tab" data-page="stdlib">Stdlib</button>
+    </nav>
+    <div class="header-right">
+      <a href="https://github.com/jmecom/capable" target="_blank">GitHub</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- Home Page -->
+    <div id="home" class="page active">
+      <div class="hero">
+        <h1>Capable</h1>
+        <p class="tagline">Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+      </div>
+
+      <div class="features">
+        <div class="feature">
+          <h3>Capability-Based Security</h3>
+          <p>Code cannot perform privileged operations (filesystem, network, console) without receiving an explicit capability value. Libraries cannot gain new powers silently.</p>
+        </div>
+        <div class="feature">
+          <h3>Two-Layer Enforcement</h3>
+          <p>Static checking at compile time ensures capabilities are in scope. Runtime validation enforces attenuation bounds (e.g., a ReadFS capability scoped to "./config" cannot escape that directory).</p>
+        </div>
+        <div class="feature">
+          <h3>Linear and Affine Types</h3>
+          <p>Move-only types prevent use-after-move. Linear capabilities must be consumed on all code paths. Attenuation methods consume the original capability to prevent keeping both powerful and attenuated versions.</p>
+        </div>
+        <div class="feature">
+          <h3>Systems Programming</h3>
+          <p>No garbage collector. Explicit memory management. Compiles to native code via Cranelift. Safe code is memory-safe; unsafe code is clearly marked with <code>package unsafe</code>.</p>
+        </div>
+      </div>
+
+      <div class="example-section">
+        <h2>Hello World</h2>
+        <pre><code><span class="hl-keyword">module</span> hello
+<span class="hl-keyword">use</span> sys::system
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main(rc: <span class="hl-type">RootCap</span>) -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> c = rc.mint_console()
+  c.println(&quot;hello, world&quot;)
+  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+}</code></pre>
+      </div>
+    </div>
+
+    <!-- Tutorial Page -->
+    <div id="tutorial" class="page">
+      <div id="tutorial-content">
+        <h1>Capable in 15 Minutes</h1>
+<p>Capable is a small capability-secure systems language. The main idea: authority is a value. If you didn't receive a capability, you can't do the thing.</p>
+<p>This tutorial is a quick tour of the current language slice and the capability model.</p>
+<h2>1) Hello, console</h2>
+<pre class="code-block"><code><span class="hl-keyword">module</span> hello
+<span class="hl-keyword">use</span> sys::system
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main(rc: <span class="hl-type">RootCap</span>) -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> c = rc.mint_console()
+  c.println(&quot;hello&quot;)
+  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+}</code></pre>
+<p><code>RootCap</code> is the root authority passed to <code>main</code>. It can mint narrower capabilities (console, filesystem, etc.).</p>
+<h2>2) Basic syntax</h2>
+<pre class="code-block"><code><span class="hl-keyword">module</span> basics
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> add(a: <span class="hl-type">i32</span>, b: <span class="hl-type">i32</span>) -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">return</span> a + b
+}
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main() -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> x = <span class="hl-number">1</span>
+  <span class="hl-keyword">let</span> y: <span class="hl-type">i32</span> = <span class="hl-number">2</span>
+  <span class="hl-keyword">if</span> (x &lt; y) {
+    <span class="hl-keyword">return</span> add(x, y)
+  } <span class="hl-keyword">else</span> {
+    <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+  }
+}</code></pre>
+<ul>
+<li>Statements: <code>let</code>, assignment, <code>if</code>, <code>while</code>, <code>for</code>, <code>return</code>, <code>match</code>, <code>defer</code>.</li>
+<li>Expressions: literals, calls, binary ops, unary ops, method calls.</li>
+<li>Modules + imports: <code>module ...</code> and <code>use ...</code> (aliases by last path segment).</li>
+<li>If a function returns <code>unit</code>, you can omit the <code>-> unit</code> annotation.</li>
+<li><code>for { ... }</code> is an infinite loop (Go style); <code>for i in a..b</code> is range.</li>
+<li>Integer arithmetic traps on overflow.</li>
+<li>Variable shadowing is not allowed.</li>
+</ul>
+<h2>3) Structs and enums</h2>
+<pre class="code-block"><code><span class="hl-keyword">module</span> types
+
+<span class="hl-keyword">struct</span> Pair { left: <span class="hl-type">i32</span>, right: <span class="hl-type">i32</span> }
+
+<span class="hl-keyword">enum</span> Color { Red, Green, Blue }</code></pre>
+<p>Structs and enums are nominal types. Enums are currently unit variants only.</p>
+<h2>4) Defer</h2>
+<p><code>defer</code> schedules a function or method call to run when the current scope</p>
+<p>exits (LIFO order). Arguments are evaluated at the defer site.</p>
+<pre class="code-block"><code><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main(rc: <span class="hl-type">RootCap</span>) -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> c = rc.mint_console()
+  c.println(&quot;start<span class="hl-string">&quot;)
+  defer c.println(&quot;</span>cleanup<span class="hl-string">&quot;)
+  c.println(&quot;</span>end&quot;)
+  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+}</code></pre>
+<p>Current restriction: the deferred expression must be a call.</p>
+<h2>5) Methods</h2>
+<p>Methods are defined in <code>impl</code> blocks and lower to <code>Type__method</code> at compile time.</p>
+<pre class="code-block"><code><span class="hl-keyword">module</span> methods
+
+<span class="hl-keyword">struct</span> Pair { left: <span class="hl-type">i32</span>, right: <span class="hl-type">i32</span> }
+
+<span class="hl-keyword">impl</span> Pair {
+  <span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> sum(self) -&gt; <span class="hl-type">i32</span> { <span class="hl-keyword">return</span> self.left + self.right }
+  <span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> add(self, x: <span class="hl-type">i32</span>) -&gt; <span class="hl-type">i32</span> { <span class="hl-keyword">return</span> self.sum() + x }
+  <span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> peek(self: &amp;Pair) -&gt; <span class="hl-type">i32</span> { <span class="hl-keyword">return</span> self.left }
+}</code></pre>
+<p>Method receivers can be <code>self</code> (move) or <code>self: &T</code> (borrow‑lite, read‑only).</p>
+<h2>6) Results, match, and <code>?</code></h2>
+<pre class="code-block"><code><span class="hl-keyword">module</span> results
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main() -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> ok: <span class="hl-type">Result</span>[<span class="hl-type">i32</span>, <span class="hl-type">i32</span>] = <span class="hl-type">Ok</span>(<span class="hl-number">10</span>)
+  <span class="hl-keyword">match</span> ok {
+    <span class="hl-type">Ok</span>(x) =&gt; { <span class="hl-keyword">return</span> x }
+    <span class="hl-type">Err</span>(e) =&gt; { <span class="hl-keyword">return</span> <span class="hl-number">0</span> }
+  }
+}</code></pre>
+<p><code>Result[T, E]</code> is the only generic type today and is special-cased by the compiler.</p>
+<p>Inside a function that returns <code>Result</code>, you can use <code>?</code> to unwrap or return early:</p>
+<pre class="code-block"><code><span class="hl-keyword">module</span> results_try
+
+<span class="hl-keyword">fn</span> read_value() -&gt; <span class="hl-type">Result</span>[<span class="hl-type">i32</span>, <span class="hl-type">i32</span>] {
+  <span class="hl-keyword">return</span> <span class="hl-type">Ok</span>(<span class="hl-number">7</span>)
+}
+
+<span class="hl-keyword">fn</span> use_value() -&gt; <span class="hl-type">Result</span>[<span class="hl-type">i32</span>, <span class="hl-type">i32</span>] {
+  <span class="hl-keyword">let</span> v = read_value()?
+  <span class="hl-keyword">return</span> <span class="hl-type">Ok</span>(v + <span class="hl-number">1</span>)
+}</code></pre>
+<p>You can also unwrap with defaults:</p>
+<pre class="code-block"><code><span class="hl-keyword">let</span> v = make().unwrap_or(<span class="hl-number">0</span>)
+<span class="hl-keyword">let</span> e = make().unwrap_err_or(<span class="hl-number">0</span>)</code></pre>
+<p>Matches must be exhaustive; use <code>_</code> to cover the rest:</p>
+<pre class="code-block"><code><span class="hl-keyword">match</span> flag {
+  <span class="hl-keyword">true</span> =&gt; { }
+  <span class="hl-keyword">false</span> =&gt; { }
+}</code></pre>
+<p>You can also use <code>if let</code> as a single-arm <code>match</code>:</p>
+<pre class="code-block"><code><span class="hl-keyword">if</span> <span class="hl-keyword">let</span> <span class="hl-type">Ok</span>(x) = make() {
+  <span class="hl-keyword">return</span> x
+} <span class="hl-keyword">else</span> {
+  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+}</code></pre>
+<h2>7) Capabilities and attenuation</h2>
+<p>Capabilities live in <code>sys.*</code> and are declared with the <code>capability</code> keyword (capability types are opaque). You can only get them from <code>RootCap</code>.</p>
+<pre class="code-block"><code><span class="hl-keyword">module</span> read_config
+<span class="hl-keyword">use</span> sys::system
+<span class="hl-keyword">use</span> sys::fs
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main(rc: <span class="hl-type">RootCap</span>) -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> fs = rc.mint_filesystem(&quot;./config<span class="hl-string">&quot;)
+  let dir = fs.root_dir()
+  let file = dir.open_read(&quot;</span>app.txt&quot;)
+
+  <span class="hl-keyword">match</span> file.read_to_string() {
+    <span class="hl-type">Ok</span>(s) =&gt; { rc.mint_console().println(s); <span class="hl-keyword">return</span> <span class="hl-number">0</span> }
+    <span class="hl-type">Err</span>(e) =&gt; { <span class="hl-keyword">return</span> <span class="hl-number">1</span> }
+  }
+}</code></pre>
+<p>This is attenuation: each step narrows authority. There is no safe API to widen back.</p>
+<p>To make attenuation one-way at compile time, any method that returns a capability must take <code>self</code> by value. Methods that take <code>&self</code> cannot return capabilities.</p>
+<p>Example of what is rejected (and why):</p>
+<pre class="code-block"><code><span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> <span class="hl-type">Dir</span>
+<span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> <span class="hl-type">FileRead</span>
+
+<span class="hl-keyword">impl</span> <span class="hl-type">Dir</span> {
+  <span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> open(self: &amp;<span class="hl-type">Dir</span>, name: <span class="hl-type">string</span>) -&gt; <span class="hl-type">FileRead</span> {
+    <span class="hl-keyword">let</span> file = self.open_read(name)
+    <span class="hl-keyword">return</span> file
+  }
+}</code></pre>
+<p>Why this is rejected:</p>
+<ul>
+<li><code>Dir</code> can read many files (more power).</li>
+<li><code>FileRead</code> can read one file (less power).</li>
+<li>The bad example lets you keep the more powerful <code>Dir</code> and also get a <code>FileRead</code>.</li>
+<li>We want “one-way” attenuation: when you make something less powerful, you give up the more powerful one.</li>
+</ul>
+<p>So methods that return capabilities must take <code>self</code> by value, which consumes the old capability.</p>
+<h2>8) Capability, opaque, copy, affine, linear</h2>
+<p><code>capability struct</code> is the explicit “this is an authority token” marker. Capability types are always opaque (no public fields, no user construction) and default to affine unless marked <code>copy</code> or <code>linear</code>. This exists so the capability surface is obvious in code and the compiler can enforce one‑way attenuation (methods returning capabilities must take <code>self</code> by value).</p>
+<p>Structs can declare their kind:</p>
+<pre class="code-block"><code><span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> Token           <span class="hl-comment">// affine by default (move-only)</span>
+<span class="hl-keyword">copy</span> <span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> <span class="hl-type">RootCap</span>    <span class="hl-comment">// unrestricted (copyable)</span>
+<span class="hl-keyword">linear</span> <span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> <span class="hl-type">FileRead</span> <span class="hl-comment">// must be consumed</span></code></pre>
+<p>Kinds:</p>
+<ul>
+<li><strong>Unrestricted</strong> (copy): can be reused freely.</li>
+<li><strong>Affine</strong> (default for capability/opaque): move-only, dropping is OK.</li>
+<li><strong>Linear</strong>: move-only and must be consumed on all paths.</li>
+</ul>
+<p>Use <code>capability struct</code> for authority-bearing tokens. Use <code>opaque struct</code> for unforgeable data types that aren’t capabilities.</p>
+<p>In the current stdlib:</p>
+<ul>
+<li><code>copy capability</code>: <code>RootCap</code>, <code>Console</code>, <code>Args</code></li>
+<li><code>copy opaque</code>: <code>Alloc</code>, <code>Buffer</code>, <code>Slice</code>, <code>MutSlice</code>, <code>VecU8</code>, <code>VecI32</code>, <code>VecString</code></li>
+<li><code>capability</code> (affine): <code>ReadFS</code>, <code>Filesystem</code>, <code>Dir</code>, <code>Stdin</code></li>
+<li><code>linear capability</code>: <code>FileRead</code></li>
+</ul>
+<h2>9) Moves and use-after-move</h2>
+<pre class="code-block"><code><span class="hl-keyword">module</span> moves
+
+<span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> Token
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main() -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> t = Token{}
+  <span class="hl-keyword">let</span> u = t
+  <span class="hl-keyword">let</span> v = t  <span class="hl-comment">// error: use of moved value</span>
+  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+}</code></pre>
+<p>Affine and linear values cannot be used after move. If you move in one branch, it's moved after the join.</p>
+<h2>10) Linear must be consumed</h2>
+<pre class="code-block"><code><span class="hl-keyword">module</span> <span class="hl-keyword">linear</span>
+
+<span class="hl-keyword">linear</span> <span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> Ticket
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main() -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> t = Ticket{}
+  <span class="hl-keyword">drop</span>(t)   <span class="hl-comment">// consumes t</span>
+  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+}</code></pre>
+<p>Linear values must be consumed along every path. You can consume them with a terminal method (like <code>FileRead.close()</code> or <code>read_to_string()</code>), or with <code>drop(x)</code> as a last resort.</p>
+<h2>11) Borrow-lite: &T parameters</h2>
+<p>There is a small borrow feature for read-only access in function parameters and locals.</p>
+<pre class="code-block"><code><span class="hl-keyword">module</span> borrow
+
+<span class="hl-keyword">capability</span> <span class="hl-keyword">struct</span> Cap
+
+<span class="hl-keyword">impl</span> Cap {
+  <span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> ping(self: &amp;Cap) -&gt; <span class="hl-type">i32</span> { <span class="hl-keyword">return</span> <span class="hl-number">1</span> }
+}
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> twice(c: &amp;Cap) -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> a = c.ping()
+  <span class="hl-keyword">let</span> b = c.ping()
+  <span class="hl-keyword">return</span> a + b
+}</code></pre>
+<p>Rules:</p>
+<ul>
+<li><code>&T</code> is allowed on parameters and locals.</li>
+<li>Reference locals must be initialized from another local value.</li>
+<li>References cannot be stored in structs, enums, or returned.</li>
+<li>References are read-only: they can only satisfy <code>&T</code> parameters.</li>
+<li>Passing a value to <code>&T</code> implicitly borrows it.</li>
+</ul>
+<p>This avoids a full borrow checker while making non-consuming observers ergonomic.</p>
+<h2>12) Safety boundary</h2>
+<p><code>package safe</code> is default. Raw pointers and extern calls require <code>package unsafe</code>.</p>
+<pre class="code-block"><code><span class="hl-keyword">package</span> <span class="hl-keyword">unsafe</span>
+<span class="hl-keyword">module</span> ffi
+
+<span class="hl-keyword">extern</span> <span class="hl-keyword">fn</span> some_ffi(x: <span class="hl-type">i32</span>) -&gt; <span class="hl-type">i32</span></code></pre>
+<h2>13) Raw pointers and unsafe</h2>
+<p>Raw pointers are available as <code>*T</code>, but <strong>only</strong> in <code>package unsafe</code>.</p>
+<pre class="code-block"><code><span class="hl-keyword">package</span> <span class="hl-keyword">unsafe</span>
+<span class="hl-keyword">module</span> pointers
+
+<span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main(rc: <span class="hl-type">RootCap</span>) -&gt; <span class="hl-type">i32</span> {
+  <span class="hl-keyword">let</span> alloc = rc.mint_alloc_default()
+  <span class="hl-keyword">let</span> ptr: *<span class="hl-type">u8</span> = alloc.malloc(<span class="hl-number">16</span>)
+  alloc.free(ptr)
+  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+}</code></pre>
+<p>There is no borrow checker for pointers. Use them only inside <code>package unsafe</code>.</p>
+<h2>14) What exists today (quick list)</h2>
+<ul>
+<li>Methods, modules, enums, match, while, if</li>
+<li>Opaque capability handles in <code>sys.*</code></li>
+<li>Linear/affine checking with control-flow joins</li>
+<li>Borrow-lite <code>&T</code> parameters</li>
+</ul>
+<hr>
+<p>That should be enough to read and write small Capable programs, and understand how attenuation and linearity fit together.</p>
+      </div>
+    </div>
+
+    <!-- Stdlib Page -->
+    <div id="stdlib" class="page">
+      <div class="stdlib-layout">
+        <div class="stdlib-nav">
+          <h3>Modules</h3>
+          <div id="module-list"></div>
+        </div>
+        <div class="stdlib-content" id="module-content">
+          <p class="module-path">Select a module from the sidebar</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Tab navigation
+    const tabs = document.querySelectorAll('.tab');
+    const pages = document.querySelectorAll('.page');
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const pageId = tab.dataset.page;
+
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        pages.forEach(p => {
+          p.classList.toggle('active', p.id === pageId);
+        });
+      });
+    });
+
+    // Stdlib browser
+    const modules = [{"path": "/Users/jm/Development/capable-2/stdlib/sys/args.cap", "module": "sys::args", "docs": [], "items": [{"kind": "struct", "sig": "pub copy capability struct Args", "docs": []}, {"kind": "enum", "sig": "pub enum ArgsErr", "docs": []}, {"kind": "method", "impl": "Args", "sig": "pub fn len(self) -> i32", "docs": []}, {"kind": "method", "impl": "Args", "sig": "pub fn at(self, index: i32) -> Result<string, ArgsErr>", "docs": []}], "source": "package safe\nmodule sys::args\n\npub copy capability struct Args\n\npub enum ArgsErr {\n  OutOfRange\n}\n\nimpl Args {\n  pub fn len(self) -> i32 {\n    return 0\n  }\n\n  pub fn at(self, index: i32) -> Result<string, ArgsErr> {\n    return Err(ArgsErr::OutOfRange)\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/buffer.cap", "module": "sys::buffer", "docs": [], "items": [{"kind": "struct", "sig": "pub copy opaque struct Alloc", "docs": []}, {"kind": "struct", "sig": "pub copy opaque struct Buffer", "docs": []}, {"kind": "struct", "sig": "pub copy opaque struct Slice<T>", "docs": []}, {"kind": "struct", "sig": "pub copy opaque struct MutSlice<T>", "docs": []}, {"kind": "enum", "sig": "pub enum AllocErr", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn new(initial_len: i32) -> Result<Buffer, AllocErr>", "docs": ["Intrinsic; implemented by the runtime."]}, {"kind": "fn", "impl": null, "sig": "pub fn vec_string_new() -> vec::Vec<string>", "docs": ["Intrinsic; implemented by the runtime."]}, {"kind": "method", "impl": "Alloc", "sig": "pub fn malloc(self, size: i32) -> *u8", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn free(self, ptr: *u8) -> unit", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn cast_u8_to_u32(self, ptr: *u8) -> *u32", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn cast_u32_to_u8(self, ptr: *u32) -> *u8", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice<u8>", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice<u8>", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn buffer_new(self, initial_len: i32) -> Result<Buffer, AllocErr>", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn buffer_free(self, b: Buffer) -> unit", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn vec_u8_new(self) -> vec::Vec<u8>", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn vec_u8_free(self, v: vec::Vec<u8>) -> unit", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn vec_i32_new(self) -> vec::Vec<i32>", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn vec_i32_free(self, v: vec::Vec<i32>) -> unit", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn vec_string_new(self) -> vec::Vec<string>", "docs": []}, {"kind": "method", "impl": "Alloc", "sig": "pub fn vec_string_free(self, v: vec::Vec<string>) -> unit", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn len(self) -> i32", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn push(self, x: u8) -> Result<unit, AllocErr>", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn extend(self, data: Slice<u8>) -> Result<unit, AllocErr>", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn push_str(self, s: string) -> Result<unit, AllocErr>", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn is_empty(self) -> bool", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn as_slice(self) -> Slice<u8>", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn as_mut_slice(self) -> MutSlice<u8>", "docs": []}, {"kind": "method", "impl": "Buffer", "sig": "pub fn to_string(self) -> Result<string, AllocErr>", "docs": []}, {"kind": "method", "impl": "Slice<u8>", "sig": "pub fn len(self) -> i32", "docs": []}, {"kind": "method", "impl": "Slice<u8>", "sig": "pub fn at(self, i: i32) -> u8", "docs": []}, {"kind": "method", "impl": "MutSlice<u8>", "sig": "pub fn at(self, i: i32) -> u8", "docs": []}], "source": "package safe\nmodule sys::buffer\nuse sys::vec\nuse sys::string\n\npub copy opaque struct Alloc\npub copy opaque struct Buffer\npub copy opaque struct Slice<T>\npub copy opaque struct MutSlice<T>\n\npub enum AllocErr {\n  Oom\n}\n\n/// Intrinsic; implemented by the runtime.\npub fn new(initial_len: i32) -> Result<Buffer, AllocErr> {\n  return Err(AllocErr::Oom)\n}\n\n/// Intrinsic; implemented by the runtime.\npub fn vec_string_new() -> vec::Vec<string> {\n  return ()\n}\n\nimpl Alloc {\n  pub fn malloc(self, size: i32) -> *u8 {\n    return ()\n  }\n\n  pub fn free(self, ptr: *u8) -> unit {\n    return ()\n  }\n\n  pub fn cast_u8_to_u32(self, ptr: *u8) -> *u32 {\n    return ()\n  }\n\n  pub fn cast_u32_to_u8(self, ptr: *u32) -> *u8 {\n    return ()\n  }\n\n  pub fn slice_from_ptr(self, ptr: *u8, len: i32) -> Slice<u8> {\n    return ()\n  }\n\n  pub fn mut_slice_from_ptr(self, ptr: *u8, len: i32) -> MutSlice<u8> {\n    return ()\n  }\n\n  pub fn buffer_new(self, initial_len: i32) -> Result<Buffer, AllocErr> {\n    return Err(AllocErr::Oom)\n  }\n\n  pub fn buffer_free(self, b: Buffer) -> unit {\n    return ()\n  }\n\n  pub fn vec_u8_new(self) -> vec::Vec<u8> {\n    return ()\n  }\n\n  pub fn vec_u8_free(self, v: vec::Vec<u8>) -> unit {\n    return ()\n  }\n\n  pub fn vec_i32_new(self) -> vec::Vec<i32> {\n    return ()\n  }\n\n  pub fn vec_i32_free(self, v: vec::Vec<i32>) -> unit {\n    return ()\n  }\n\n  pub fn vec_string_new(self) -> vec::Vec<string> {\n    return ()\n  }\n\n  pub fn vec_string_free(self, v: vec::Vec<string>) -> unit {\n    return ()\n  }\n}\n\nimpl Buffer {\n  pub fn len(self) -> i32 {\n    return 0\n  }\n\n  pub fn push(self, x: u8) -> Result<unit, AllocErr> {\n    return Err(AllocErr::Oom)\n  }\n\n  pub fn extend(self, data: Slice<u8>) -> Result<unit, AllocErr> {\n    return Err(AllocErr::Oom)\n  }\n\n  pub fn push_str(self, s: string) -> Result<unit, AllocErr> {\n    return self.extend(s.as_slice())\n  }\n\n  pub fn is_empty(self) -> bool {\n    return false\n  }\n\n  pub fn as_slice(self) -> Slice<u8> {\n    return ()\n  }\n\n  pub fn as_mut_slice(self) -> MutSlice<u8> {\n    return ()\n  }\n\n  pub fn to_string(self) -> Result<string, AllocErr> {\n    return string::from_bytes(self.as_slice())\n  }\n}\n\nimpl Slice<u8> {\n  pub fn len(self) -> i32 {\n    return 0\n  }\n\n  pub fn at(self, i: i32) -> u8 {\n    return 0\n  }\n}\n\nimpl MutSlice<u8> {\n  pub fn at(self, i: i32) -> u8 {\n    return 0\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/bytes.cap", "module": "sys::bytes", "docs": [], "items": [{"kind": "method", "impl": "u8", "sig": "pub fn is_whitespace(self) -> bool", "docs": []}], "source": "package safe\nmodule sys::bytes\nimpl u8 {\n  pub fn is_whitespace(self) -> bool {\n    if (self == 32u8 || self == 9u8 || self == 10u8 || self == 13u8) {\n      return true\n    }\n    return false\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/console.cap", "module": "sys::console", "docs": [], "items": [{"kind": "struct", "sig": "pub copy capability struct Console", "docs": []}, {"kind": "method", "impl": "Console", "sig": "pub fn print(self, s: string) -> unit", "docs": []}, {"kind": "method", "impl": "Console", "sig": "pub fn println(self, s: string) -> unit", "docs": []}, {"kind": "method", "impl": "Console", "sig": "pub fn print_i32(self, v: i32) -> unit", "docs": []}, {"kind": "method", "impl": "Console", "sig": "pub fn println_i32(self, v: i32) -> unit", "docs": []}, {"kind": "method", "impl": "Console", "sig": "pub fn assert(self, cond: bool) -> unit", "docs": []}], "source": "package unsafe\nmodule sys::console\n\npub copy capability struct Console\n\nimpl Console {\n  pub fn print(self, s: string) -> unit {\n    return ()\n  }\n\n  pub fn println(self, s: string) -> unit {\n    return ()\n  }\n\n  pub fn print_i32(self, v: i32) -> unit {\n    return ()\n  }\n\n  pub fn println_i32(self, v: i32) -> unit {\n    return ()\n  }\n\n  pub fn assert(self, cond: bool) -> unit {\n    return ()\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/fs.cap", "module": "sys::fs", "docs": [], "items": [{"kind": "struct", "sig": "pub capability struct ReadFS", "docs": []}, {"kind": "struct", "sig": "pub capability struct Filesystem", "docs": []}, {"kind": "struct", "sig": "pub capability struct Dir", "docs": []}, {"kind": "struct", "sig": "pub linear capability struct FileRead", "docs": []}, {"kind": "enum", "sig": "pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }", "docs": []}, {"kind": "method", "impl": "ReadFS", "sig": "pub fn read_to_string(self, path: string) -> Result<string, FsErr>", "docs": []}, {"kind": "method", "impl": "ReadFS", "sig": "pub fn read_bytes(self, path: string) -> Result<vec::Vec<u8>, FsErr>", "docs": []}, {"kind": "method", "impl": "ReadFS", "sig": "pub fn list_dir(self, path: string) -> Result<vec::Vec<string>, FsErr>", "docs": []}, {"kind": "method", "impl": "ReadFS", "sig": "pub fn exists(self, path: string) -> bool", "docs": []}, {"kind": "method", "impl": "ReadFS", "sig": "pub fn close(self) -> unit", "docs": []}, {"kind": "method", "impl": "Filesystem", "sig": "pub fn root_dir(self) -> Dir", "docs": []}, {"kind": "method", "impl": "Filesystem", "sig": "pub fn close(self) -> unit", "docs": []}, {"kind": "method", "impl": "Dir", "sig": "pub fn subdir(self, name: string) -> Dir", "docs": []}, {"kind": "method", "impl": "Dir", "sig": "pub fn open_read(self, name: string) -> FileRead", "docs": []}, {"kind": "method", "impl": "Dir", "sig": "pub fn read_bytes(self, name: string) -> Result<vec::Vec<u8>, FsErr>", "docs": []}, {"kind": "method", "impl": "Dir", "sig": "pub fn list_dir(self) -> Result<vec::Vec<string>, FsErr>", "docs": []}, {"kind": "method", "impl": "Dir", "sig": "pub fn exists(self, name: string) -> bool", "docs": []}, {"kind": "method", "impl": "Dir", "sig": "pub fn read_to_string(self, name: string) -> Result<string, FsErr>", "docs": []}, {"kind": "method", "impl": "Dir", "sig": "pub fn close(self) -> unit", "docs": []}, {"kind": "method", "impl": "FileRead", "sig": "pub fn read_to_string(self) -> Result<string, FsErr>", "docs": []}, {"kind": "method", "impl": "FileRead", "sig": "pub fn close(self) -> unit", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn join(a: string, b: string) -> string", "docs": []}], "source": "package unsafe\nmodule sys::fs\n\nuse sys::vec\n\npub capability struct ReadFS\npub capability struct Filesystem\npub capability struct Dir\npub linear capability struct FileRead\n\npub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }\n\nimpl ReadFS {\n  pub fn read_to_string(self, path: string) -> Result<string, FsErr> {\n    return ()\n  }\n\n  pub fn read_bytes(self, path: string) -> Result<vec::Vec<u8>, FsErr> {\n    return Err(FsErr::IoError)\n  }\n\n  pub fn list_dir(self, path: string) -> Result<vec::Vec<string>, FsErr> {\n    return Err(FsErr::IoError)\n  }\n\n  pub fn exists(self, path: string) -> bool {\n    return false\n  }\n\n  pub fn close(self) -> unit {\n    return ()\n  }\n}\n\nimpl Filesystem {\n  pub fn root_dir(self) -> Dir {\n    return ()\n  }\n\n  pub fn close(self) -> unit {\n    return ()\n  }\n}\n\nimpl Dir {\n  pub fn subdir(self, name: string) -> Dir {\n    return ()\n  }\n\n  pub fn open_read(self, name: string) -> FileRead {\n    return ()\n  }\n\n  pub fn read_bytes(self, name: string) -> Result<vec::Vec<u8>, FsErr> {\n    return Err(FsErr::IoError)\n  }\n\n  pub fn list_dir(self) -> Result<vec::Vec<string>, FsErr> {\n    return Err(FsErr::IoError)\n  }\n\n  pub fn exists(self, name: string) -> bool {\n    return false\n  }\n\n  pub fn read_to_string(self, name: string) -> Result<string, FsErr> {\n    let file = self.open_read(name)\n    return file.read_to_string()\n  }\n\n  pub fn close(self) -> unit {\n    return ()\n  }\n}\n\nimpl FileRead {\n  pub fn read_to_string(self) -> Result<string, FsErr> {\n    return ()\n  }\n\n  pub fn close(self) -> unit {\n    return ()\n  }\n}\n\npub fn join(a: string, b: string) -> string {\n  return \"\"\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/io.cap", "module": "sys::io", "docs": [], "items": [{"kind": "enum", "sig": "pub enum IoErr", "docs": []}], "source": "package safe\nmodule sys::io\n\npub enum IoErr {\n  IoError\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/math.cap", "module": "sys::math", "docs": [], "items": [{"kind": "fn", "impl": null, "sig": "pub fn add_wrap_i32(a: i32, b: i32) -> i32 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn sub_wrap_i32(a: i32, b: i32) -> i32 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn mul_wrap_i32(a: i32, b: i32) -> i32 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn add_wrap_u32(a: u32, b: u32) -> u32 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn sub_wrap_u32(a: u32, b: u32) -> u32 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn mul_wrap_u32(a: u32, b: u32) -> u32 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn add_wrap_u8(a: u8, b: u8) -> u8 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn sub_wrap_u8(a: u8, b: u8) -> u8 { return 0 }", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn mul_wrap_u8(a: u8, b: u8) -> u8 { return 0 }", "docs": []}], "source": "package safe\nmodule sys::math\n\npub fn add_wrap_i32(a: i32, b: i32) -> i32 { return 0 }\npub fn sub_wrap_i32(a: i32, b: i32) -> i32 { return 0 }\npub fn mul_wrap_i32(a: i32, b: i32) -> i32 { return 0 }\n\npub fn add_wrap_u32(a: u32, b: u32) -> u32 { return 0 }\npub fn sub_wrap_u32(a: u32, b: u32) -> u32 { return 0 }\npub fn mul_wrap_u32(a: u32, b: u32) -> u32 { return 0 }\n\npub fn add_wrap_u8(a: u8, b: u8) -> u8 { return 0 }\npub fn sub_wrap_u8(a: u8, b: u8) -> u8 { return 0 }\npub fn mul_wrap_u8(a: u8, b: u8) -> u8 { return 0 }\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/mem.cap", "module": "sys::mem", "docs": [], "items": [], "source": "package unsafe\nmodule sys::mem\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/net.cap", "module": "sys::net", "docs": [], "items": [{"kind": "struct", "sig": "pub copy capability struct Net", "docs": []}, {"kind": "struct", "sig": "pub copy capability struct TcpListener", "docs": []}, {"kind": "struct", "sig": "pub linear capability struct TcpConn", "docs": []}, {"kind": "enum", "sig": "pub enum NetErr", "docs": []}, {"kind": "method", "impl": "Net", "sig": "pub fn listen(self, host: string, port: i32) -> Result<TcpListener, NetErr>", "docs": []}, {"kind": "method", "impl": "Net", "sig": "pub fn connect(self, host: string, port: i32) -> Result<TcpConn, NetErr>", "docs": []}, {"kind": "method", "impl": "TcpListener", "sig": "pub fn accept(self: &TcpListener) -> Result<TcpConn, NetErr>", "docs": []}, {"kind": "method", "impl": "TcpListener", "sig": "pub fn close(self) -> unit", "docs": []}, {"kind": "method", "impl": "TcpConn", "sig": "pub fn read_to_string(self: &TcpConn) -> Result<string, NetErr>", "docs": []}, {"kind": "method", "impl": "TcpConn", "sig": "pub fn read(self: &TcpConn, max_size: i32) -> Result<string, NetErr>", "docs": []}, {"kind": "method", "impl": "TcpConn", "sig": "pub fn write(self: &TcpConn, data: string) -> Result<unit, NetErr>", "docs": []}, {"kind": "method", "impl": "TcpConn", "sig": "pub fn close(self) -> unit", "docs": []}], "source": "package unsafe\nmodule sys::net\n\npub copy capability struct Net\npub copy capability struct TcpListener\npub linear capability struct TcpConn\n\npub enum NetErr {\n  InvalidAddress,\n  IoError,\n  InvalidData\n}\n\nimpl Net {\n  pub fn listen(self, host: string, port: i32) -> Result<TcpListener, NetErr> {\n    return Err(NetErr::IoError)\n  }\n\n  pub fn connect(self, host: string, port: i32) -> Result<TcpConn, NetErr> {\n    return Err(NetErr::IoError)\n  }\n}\n\nimpl TcpListener {\n  pub fn accept(self: &TcpListener) -> Result<TcpConn, NetErr> {\n    return Err(NetErr::IoError)\n  }\n\n  pub fn close(self) -> unit {\n    return ()\n  }\n}\n\nimpl TcpConn {\n  pub fn read_to_string(self: &TcpConn) -> Result<string, NetErr> {\n    return Err(NetErr::IoError)\n  }\n\n  pub fn read(self: &TcpConn, max_size: i32) -> Result<string, NetErr> {\n    return Err(NetErr::IoError)\n  }\n\n  pub fn write(self: &TcpConn, data: string) -> Result<unit, NetErr> {\n    return Err(NetErr::IoError)\n  }\n\n  pub fn close(self) -> unit {\n    return ()\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/result.cap", "module": "sys::result", "docs": [], "items": [{"kind": "enum", "sig": "pub enum Result<T, E>", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn is_ok(self) -> bool", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn is_err(self) -> bool", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn unwrap_or(self, default: T) -> T", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn unwrap_err_or(self, default: E) -> E", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn ok(self) -> T", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn err(self) -> E", "docs": []}], "source": "package safe\nmodule sys::result\n\npub enum Result<T, E> {\n  Ok(T),\n  Err(E)\n}\n\nimpl<T, E> Result<T, E> {\n  pub fn is_ok(self) -> bool {\n    match self {\n      Result::Ok(_) => { return true }\n      Result::Err(_) => { return false }\n    }\n  }\n\n  pub fn is_err(self) -> bool {\n    match self {\n      Result::Ok(_) => { return false }\n      Result::Err(_) => { return true }\n    }\n  }\n\n  pub fn unwrap_or(self, default: T) -> T {\n    match self {\n      Result::Ok(val) => { return val }\n      Result::Err(_) => { return default }\n    }\n  }\n\n  pub fn unwrap_err_or(self, default: E) -> E {\n    match self {\n      Result::Ok(_) => { return default }\n      Result::Err(err) => { return err }\n    }\n  }\n\n  pub fn ok(self) -> T {\n    match self {\n      Result::Ok(val) => { return val }\n      Result::Err(_) => { panic() }\n    }\n  }\n\n  pub fn err(self) -> E {\n    match self {\n      Result::Ok(_) => { panic() }\n      Result::Err(err) => { return err }\n    }\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/stdin.cap", "module": "sys::stdin", "docs": [], "items": [{"kind": "struct", "sig": "pub capability struct Stdin", "docs": []}, {"kind": "method", "impl": "Stdin", "sig": "pub fn read_to_string(self) -> Result<string, io::IoErr>", "docs": []}], "source": "package safe\nmodule sys::stdin\n\nuse sys::io\n\npub capability struct Stdin\n\nimpl Stdin {\n  pub fn read_to_string(self) -> Result<string, io::IoErr> {\n    return Err(io::IoErr::IoError)\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/string.cap", "module": "sys::string", "docs": [], "items": [{"kind": "struct", "sig": "pub copy struct string", "docs": []}, {"kind": "struct", "sig": "pub struct SplitOnce", "docs": []}, {"kind": "fn", "impl": null, "sig": "pub fn from_bytes(bytes: Slice<u8>) -> Result<string, buffer::AllocErr>", "docs": []}, {"kind": "fn", "impl": null, "sig": "fn build_range(s: string, start: i32, end: i32) -> string", "docs": []}, {"kind": "fn", "impl": null, "sig": "fn lower_ascii_byte(b: u8) -> u8", "docs": []}, {"kind": "fn", "impl": null, "sig": "fn upper_ascii_byte(b: u8) -> u8", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn len(self) -> i32", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn byte_at(self, index: i32) -> u8", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn as_slice(self) -> Slice<u8>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn bytes(self) -> Slice<u8>", "docs": ["bytes() is an alias for as_slice()."]}, {"kind": "method", "impl": "string", "sig": "pub fn split_whitespace(self) -> Vec<string>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn lines(self) -> Vec<string>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn split(self, delim: u8) -> Vec<string>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn split_once(self, delim: u8) -> Result<SplitOnce, unit>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn trim(self) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn trim_start(self) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn trim_end(self) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn trim_prefix(self, prefix: string) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn trim_suffix(self, suffix: string) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn split_lines(self) -> Vec<string>", "docs": ["split_lines() is an alias for lines()."]}, {"kind": "method", "impl": "string", "sig": "pub fn starts_with(self, prefix: string) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn ends_with(self, suffix: string) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn starts_with_byte(self, prefix: u8) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn ends_with_byte(self, suffix: u8) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn eq(self, other: string) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn is_empty(self) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn byte_at_checked(self, index: i32) -> Result<u8, unit>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn index_of_byte(self, needle: u8) -> Result<i32, unit>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn last_index_of_byte(self, needle: u8) -> Result<i32, unit>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn contains_byte(self, needle: u8) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn count_byte(self, needle: u8) -> i32", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn is_ascii(self) -> bool", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn to_lower_ascii(self) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn to_upper_ascii(self) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn trim_ascii(self) -> string", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn find_byte(self, needle: u8) -> Result<i32, unit>", "docs": []}, {"kind": "method", "impl": "string", "sig": "pub fn rfind_byte(self, needle: u8) -> Result<i32, unit>", "docs": []}], "source": "package safe\nmodule sys::string\n\nuse sys::buffer\nuse sys::bytes\nuse sys::vec\n\npub copy struct string {\n  bytes: Slice<u8>\n}\n\npub struct SplitOnce {\n  left: string,\n  right: string\n}\n\npub fn from_bytes(bytes: Slice<u8>) -> Result<string, buffer::AllocErr> {\n  return Ok(string { bytes: bytes })\n}\n\nfn build_range(s: string, start: i32, end: i32) -> string {\n  if (end <= start) {\n    return \"\"\n  }\n  let buf_result = buffer::new(0)\n  match (buf_result) {\n    Ok(buf) => {\n      let i = start\n      while (i < end) {\n        match (buf.push(s.byte_at(i))) {\n          Ok(_) => { }\n          Err(_) => { panic() }\n        }\n        i = i + 1\n      }\n      match (buf.to_string()) {\n        Ok(out) => { return out }\n        Err(_) => { panic() }\n      }\n    }\n    Err(_) => { panic() }\n  }\n}\n\nfn lower_ascii_byte(b: u8) -> u8 {\n  match (b) {\n    'A' => { return 'a' }\n    'B' => { return 'b' }\n    'C' => { return 'c' }\n    'D' => { return 'd' }\n    'E' => { return 'e' }\n    'F' => { return 'f' }\n    'G' => { return 'g' }\n    'H' => { return 'h' }\n    'I' => { return 'i' }\n    'J' => { return 'j' }\n    'K' => { return 'k' }\n    'L' => { return 'l' }\n    'M' => { return 'm' }\n    'N' => { return 'n' }\n    'O' => { return 'o' }\n    'P' => { return 'p' }\n    'Q' => { return 'q' }\n    'R' => { return 'r' }\n    'S' => { return 's' }\n    'T' => { return 't' }\n    'U' => { return 'u' }\n    'V' => { return 'v' }\n    'W' => { return 'w' }\n    'X' => { return 'x' }\n    'Y' => { return 'y' }\n    'Z' => { return 'z' }\n    _ => { return b }\n  }\n}\n\nfn upper_ascii_byte(b: u8) -> u8 {\n  match (b) {\n    'a' => { return 'A' }\n    'b' => { return 'B' }\n    'c' => { return 'C' }\n    'd' => { return 'D' }\n    'e' => { return 'E' }\n    'f' => { return 'F' }\n    'g' => { return 'G' }\n    'h' => { return 'H' }\n    'i' => { return 'I' }\n    'j' => { return 'J' }\n    'k' => { return 'K' }\n    'l' => { return 'L' }\n    'm' => { return 'M' }\n    'n' => { return 'N' }\n    'o' => { return 'O' }\n    'p' => { return 'P' }\n    'q' => { return 'Q' }\n    'r' => { return 'R' }\n    's' => { return 'S' }\n    't' => { return 'T' }\n    'u' => { return 'U' }\n    'v' => { return 'V' }\n    'w' => { return 'W' }\n    'x' => { return 'X' }\n    'y' => { return 'Y' }\n    'z' => { return 'Z' }\n    _ => { return b }\n  }\n}\n\nimpl string {\n  pub fn len(self) -> i32 {\n    return self.bytes.len()\n  }\n\n  pub fn byte_at(self, index: i32) -> u8 {\n    return self.bytes.at(index)\n  }\n\n  pub fn as_slice(self) -> Slice<u8> {\n    return self.bytes\n  }\n\n  /// bytes() is an alias for as_slice().\n  pub fn bytes(self) -> Slice<u8> {\n    return self.as_slice()\n  }\n\n  pub fn split_whitespace(self) -> Vec<string> {\n    let out = buffer::vec_string_new()\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let i = 0\n    while (i < len) {\n      while (i < len && bytes.at(i).is_whitespace()) {\n        i = i + 1\n      }\n      if (i >= len) {\n        break\n      }\n      let start = i\n      while (i < len && !bytes.at(i).is_whitespace()) {\n        i = i + 1\n      }\n      let part = build_range(self, start, i)\n      match (out.push(part)) {\n        Ok(_) => { }\n        Err(_) => { panic() }\n      }\n    }\n    return out\n  }\n\n  pub fn lines(self) -> Vec<string> {\n    let out = buffer::vec_string_new()\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let start = 0\n    let i = 0\n    while (i < len) {\n      if (bytes.at(i) == '\\n') {\n        let end = i\n        if (end > start && bytes.at(end - 1) == '\\r') {\n          end = end - 1\n        }\n        let part = build_range(self, start, end)\n        match (out.push(part)) {\n          Ok(_) => { }\n          Err(_) => { panic() }\n        }\n        start = i + 1\n      }\n      i = i + 1\n    }\n    if (start < len) {\n      let end = len\n      if (end > start && bytes.at(end - 1) == '\\r') {\n        end = end - 1\n      }\n      let part = build_range(self, start, end)\n      match (out.push(part)) {\n        Ok(_) => { }\n        Err(_) => { panic() }\n      }\n    }\n    return out\n  }\n\n  pub fn split(self, delim: u8) -> Vec<string> {\n    let out = buffer::vec_string_new()\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let start = 0\n    let i = 0\n    while (i < len) {\n      if (bytes.at(i) == delim) {\n        let part = build_range(self, start, i)\n        match (out.push(part)) {\n          Ok(_) => { }\n          Err(_) => { panic() }\n        }\n        start = i + 1\n      }\n      i = i + 1\n    }\n    let part = build_range(self, start, len)\n    match (out.push(part)) {\n      Ok(_) => { }\n      Err(_) => { panic() }\n    }\n    return out\n  }\n\n  pub fn split_once(self, delim: u8) -> Result<SplitOnce, unit> {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let i = 0\n    while (i < len) {\n      if (bytes.at(i) == delim) {\n        let left = build_range(self, 0, i)\n        let right = build_range(self, i + 1, len)\n        return Ok(SplitOnce {\n          left: left,\n          right: right\n        })\n      }\n      i = i + 1\n    }\n    return Err(())\n  }\n\n  pub fn trim(self) -> string {\n    let start_trimmed = self.trim_start()\n    return start_trimmed.trim_end()\n  }\n\n  pub fn trim_start(self) -> string {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let i = 0\n    while (i < len) {\n      if (!bytes.at(i).is_whitespace()) {\n        break\n      }\n      i = i + 1\n    }\n    if (i == 0) {\n      return self\n    }\n    return build_range(self, i, len)\n  }\n\n  pub fn trim_end(self) -> string {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    if (len == 0) {\n      return self\n    }\n    let i = len\n    while (i > 0) {\n      if (!bytes.at(i - 1).is_whitespace()) {\n        break\n      }\n      i = i - 1\n    }\n    if (i == len) {\n      return self\n    }\n    if (i == 0) {\n      return \"\"\n    }\n    return build_range(self, 0, i)\n  }\n\n  pub fn trim_prefix(self, prefix: string) -> string {\n    if (self.starts_with(prefix)) {\n      return build_range(self, prefix.len(), self.len())\n    }\n    return self\n  }\n\n  pub fn trim_suffix(self, suffix: string) -> string {\n    if (self.ends_with(suffix)) {\n      return build_range(self, 0, self.len() - suffix.len())\n    }\n    return self\n  }\n\n  /// split_lines() is an alias for lines().\n  pub fn split_lines(self) -> Vec<string> {\n    return self.lines()\n  }\n\n  pub fn starts_with(self, prefix: string) -> bool {\n    let self_len = self.len()\n    let prefix_len = prefix.len()\n    if (prefix_len > self_len) {\n      return false\n    }\n    let i = 0\n    while (i < prefix_len) {\n      if self.byte_at(i) != prefix.byte_at(i) {\n        return false\n      }\n      i = i + 1\n    }\n    return true\n  }\n\n  pub fn ends_with(self, suffix: string) -> bool {\n    let self_len = self.len()\n    let suffix_len = suffix.len()\n    if (suffix_len > self_len) {\n      return false\n    }\n    let i = 0\n    while (i < suffix_len) {\n      let idx = self_len - suffix_len + i\n      if self.byte_at(idx) != suffix.byte_at(i) {\n        return false\n      }\n      i = i + 1\n    }\n    return true\n  }\n\n  pub fn starts_with_byte(self, prefix: u8) -> bool {\n    if (self.len() == 0) {\n      return false\n    }\n    return self.byte_at(0) == prefix\n  }\n\n  pub fn ends_with_byte(self, suffix: u8) -> bool {\n    let len = self.len()\n    if (len == 0) {\n      return false\n    }\n    return self.byte_at(len - 1) == suffix\n  }\n\n  pub fn eq(self, other: string) -> bool {\n    let self_len = self.len()\n    let other_len = other.len()\n    if (self_len != other_len) {\n      return false\n    }\n    let i = 0\n    while (i < self_len) {\n      if self.byte_at(i) != other.byte_at(i) {\n        return false\n      }\n      i = i + 1\n    }\n    return true\n  }\n\n  pub fn is_empty(self) -> bool {\n    return self.len() == 0\n  }\n\n  pub fn byte_at_checked(self, index: i32) -> Result<u8, unit> {\n    if (index < 0) {\n      return Err(())\n    }\n    if (index >= self.len()) {\n      return Err(())\n    }\n    return Ok(self.byte_at(index))\n  }\n\n  pub fn index_of_byte(self, needle: u8) -> Result<i32, unit> {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let i = 0\n    while (i < len) {\n      if (bytes.at(i) == needle) {\n        return Ok(i)\n      }\n      i = i + 1\n    }\n    return Err(())\n  }\n\n  pub fn last_index_of_byte(self, needle: u8) -> Result<i32, unit> {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    if (len == 0) {\n      return Err(())\n    }\n    let i = len - 1\n    while (true) {\n      if (bytes.at(i) == needle) {\n        return Ok(i)\n      }\n      if (i == 0) {\n        break\n      }\n      i = i - 1\n    }\n    return Err(())\n  }\n\n  pub fn contains_byte(self, needle: u8) -> bool {\n    match (self.index_of_byte(needle)) {\n      Ok(_) => { return true }\n      Err(_) => { return false }\n    }\n  }\n\n  pub fn count_byte(self, needle: u8) -> i32 {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let i = 0\n    let count = 0\n    while (i < len) {\n      if (bytes.at(i) == needle) {\n        count = count + 1\n      }\n      i = i + 1\n    }\n    return count\n  }\n\n  pub fn is_ascii(self) -> bool {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let i = 0\n    while (i < len) {\n      if (bytes.at(i) > '\\x7f') {\n        return false\n      }\n      i = i + 1\n    }\n    return true\n  }\n\n  pub fn to_lower_ascii(self) -> string {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let buf_result = buffer::new(0)\n    match (buf_result) {\n      Ok(buf) => {\n        let i = 0\n        while (i < len) {\n          let b = bytes.at(i)\n          let lower = lower_ascii_byte(b)\n          match (buf.push(lower)) {\n            Ok(_) => { }\n            Err(_) => { panic() }\n          }\n          i = i + 1\n        }\n        match (buf.to_string()) {\n          Ok(out) => { return out }\n          Err(_) => { panic() }\n        }\n      }\n      Err(_) => { panic() }\n    }\n  }\n\n  pub fn to_upper_ascii(self) -> string {\n    let bytes = self.as_slice()\n    let len = bytes.len()\n    let buf_result = buffer::new(0)\n    match (buf_result) {\n      Ok(buf) => {\n        let i = 0\n        while (i < len) {\n          let b = bytes.at(i)\n          let upper = upper_ascii_byte(b)\n          match (buf.push(upper)) {\n            Ok(_) => { }\n            Err(_) => { panic() }\n          }\n          i = i + 1\n        }\n        match (buf.to_string()) {\n          Ok(out) => { return out }\n          Err(_) => { panic() }\n        }\n      }\n      Err(_) => { panic() }\n    }\n  }\n\n  pub fn trim_ascii(self) -> string {\n    return self.trim()\n  }\n\n  pub fn find_byte(self, needle: u8) -> Result<i32, unit> {\n    return self.index_of_byte(needle)\n  }\n\n  pub fn rfind_byte(self, needle: u8) -> Result<i32, unit> {\n    return self.last_index_of_byte(needle)\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/system.cap", "module": "sys::system", "docs": [], "items": [{"kind": "struct", "sig": "pub copy capability struct RootCap", "docs": []}, {"kind": "method", "impl": "RootCap", "sig": "pub fn mint_console(self) -> console::Console", "docs": []}, {"kind": "method", "impl": "RootCap", "sig": "pub fn mint_readfs(self, root: string) -> fs::ReadFS", "docs": []}, {"kind": "method", "impl": "RootCap", "sig": "pub fn mint_filesystem(self, root: string) -> fs::Filesystem", "docs": []}, {"kind": "method", "impl": "RootCap", "sig": "pub fn mint_alloc_default(self) -> buffer::Alloc", "docs": []}, {"kind": "method", "impl": "RootCap", "sig": "pub fn mint_args(self) -> args::Args", "docs": []}, {"kind": "method", "impl": "RootCap", "sig": "pub fn mint_stdin(self) -> stdin::Stdin", "docs": []}, {"kind": "method", "impl": "RootCap", "sig": "pub fn mint_net(self) -> net::Net", "docs": []}], "source": "package unsafe\nmodule sys::system\nuse sys::console\nuse sys::fs\nuse sys::args\nuse sys::stdin\nuse sys::buffer\nuse sys::net\n\npub copy capability struct RootCap\n\nimpl RootCap {\n  pub fn mint_console(self) -> console::Console {\n    return ()\n  }\n\n  pub fn mint_readfs(self, root: string) -> fs::ReadFS {\n    return ()\n  }\n\n  pub fn mint_filesystem(self, root: string) -> fs::Filesystem {\n    return ()\n  }\n\n  pub fn mint_alloc_default(self) -> buffer::Alloc {\n    return ()\n  }\n\n  pub fn mint_args(self) -> args::Args {\n    return ()\n  }\n\n  pub fn mint_stdin(self) -> stdin::Stdin {\n    return ()\n  }\n\n  pub fn mint_net(self) -> net::Net {\n    return ()\n  }\n}\n"}, {"path": "/Users/jm/Development/capable-2/stdlib/sys/vec.cap", "module": "sys::vec", "docs": [], "items": [{"kind": "struct", "sig": "pub copy opaque struct Vec<T>", "docs": []}, {"kind": "struct", "sig": "pub copy opaque struct VecU8", "docs": []}, {"kind": "struct", "sig": "pub copy opaque struct VecI32", "docs": []}, {"kind": "struct", "sig": "pub copy opaque struct VecString", "docs": []}, {"kind": "enum", "sig": "pub enum VecErr", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn len(self) -> i32", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn is_empty(self) -> bool", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn get(self, i: i32) -> Result<u8, VecErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn set(self, i: i32, x: u8) -> Result<unit, VecErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn push(self, x: u8) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn extend(self, other: VecU8) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn extend_slice(self, data: Slice<u8>) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn push_all(self, other: VecU8) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn filter(self, value: u8) -> VecU8", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn map_add(self, delta: u8) -> VecU8", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, VecErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn pop(self) -> Result<u8, VecErr>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn as_slice(self) -> Slice<u8>", "docs": []}, {"kind": "method", "impl": "VecU8", "sig": "pub fn clear(self) -> unit", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn len(self) -> i32", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn is_empty(self) -> bool", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn get(self, i: i32) -> Result<i32, VecErr>", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn set(self, i: i32, x: i32) -> Result<unit, VecErr>", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn push(self, x: i32) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn extend(self, other: VecI32) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn push_all(self, other: VecI32) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn filter(self, value: i32) -> VecI32", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn map_add(self, delta: i32) -> VecI32", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn pop(self) -> Result<i32, VecErr>", "docs": []}, {"kind": "method", "impl": "VecI32", "sig": "pub fn clear(self) -> unit", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn len(self) -> i32", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn is_empty(self) -> bool", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn get(self, i: i32) -> Result<string, VecErr>", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn push(self, x: string) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn extend(self, other: VecString) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn push_all(self, other: VecString) -> Result<unit, buffer::AllocErr>", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn pop(self) -> Result<string, VecErr>", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn clear(self) -> unit", "docs": []}, {"kind": "method", "impl": "VecString", "sig": "pub fn join(self, sep: string) -> Result<string, buffer::AllocErr>", "docs": []}], "source": "package safe\nmodule sys::vec\n\nuse sys::buffer\n\npub copy opaque struct Vec<T>\npub copy opaque struct VecU8\npub copy opaque struct VecI32\npub copy opaque struct VecString\n\npub enum VecErr {\n  OutOfRange,\n  Empty\n}\n\nimpl VecU8 {\n  pub fn len(self) -> i32 {\n    return 0\n  }\n\n  pub fn is_empty(self) -> bool {\n    return self.len() == 0\n  }\n\n  pub fn get(self, i: i32) -> Result<u8, VecErr> {\n    return Err(VecErr::OutOfRange)\n  }\n\n  pub fn set(self, i: i32, x: u8) -> Result<unit, VecErr> {\n    return Err(VecErr::OutOfRange)\n  }\n\n  pub fn push(self, x: u8) -> Result<unit, buffer::AllocErr> {\n    return Err(buffer::AllocErr::Oom)\n  }\n\n  pub fn extend(self, other: VecU8) -> Result<unit, buffer::AllocErr> {\n    return Err(buffer::AllocErr::Oom)\n  }\n\n  pub fn extend_slice(self, data: Slice<u8>) -> Result<unit, buffer::AllocErr> {\n    let len = data.len()\n    let i = 0\n    while (i < len) {\n      self.push(data.at(i))?\n      i = i + 1\n    }\n    return Ok(())\n  }\n\n  pub fn push_all(self, other: VecU8) -> Result<unit, buffer::AllocErr> {\n    return self.extend(other)\n  }\n\n  pub fn filter(self, value: u8) -> VecU8 {\n    return ()\n  }\n\n  pub fn map_add(self, delta: u8) -> VecU8 {\n    return ()\n  }\n\n  pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, VecErr> {\n    return Err(VecErr::OutOfRange)\n  }\n\n  pub fn pop(self) -> Result<u8, VecErr> {\n    return Err(VecErr::Empty)\n  }\n\n  pub fn as_slice(self) -> Slice<u8> {\n    return ()\n  }\n\n  pub fn clear(self) -> unit {\n    while (true) {\n      match (self.pop()) {\n        Ok(_) => { }\n        Err(_) => { break }\n      }\n    }\n    return ()\n  }\n}\n\nimpl VecI32 {\n  pub fn len(self) -> i32 {\n    return 0\n  }\n\n  pub fn is_empty(self) -> bool {\n    return self.len() == 0\n  }\n\n  pub fn get(self, i: i32) -> Result<i32, VecErr> {\n    return Err(VecErr::OutOfRange)\n  }\n\n  pub fn set(self, i: i32, x: i32) -> Result<unit, VecErr> {\n    return Err(VecErr::OutOfRange)\n  }\n\n  pub fn push(self, x: i32) -> Result<unit, buffer::AllocErr> {\n    return Err(buffer::AllocErr::Oom)\n  }\n\n  pub fn extend(self, other: VecI32) -> Result<unit, buffer::AllocErr> {\n    return Err(buffer::AllocErr::Oom)\n  }\n\n  pub fn push_all(self, other: VecI32) -> Result<unit, buffer::AllocErr> {\n    return self.extend(other)\n  }\n\n  pub fn filter(self, value: i32) -> VecI32 {\n    return ()\n  }\n\n  pub fn map_add(self, delta: i32) -> VecI32 {\n    return ()\n  }\n\n  pub fn pop(self) -> Result<i32, VecErr> {\n    return Err(VecErr::Empty)\n  }\n\n  pub fn clear(self) -> unit {\n    while (true) {\n      match (self.pop()) {\n        Ok(_) => { }\n        Err(_) => { break }\n      }\n    }\n    return ()\n  }\n}\n\nimpl VecString {\n  pub fn len(self) -> i32 {\n    return 0\n  }\n\n  pub fn is_empty(self) -> bool {\n    return self.len() == 0\n  }\n\n  pub fn get(self, i: i32) -> Result<string, VecErr> {\n    return Err(VecErr::OutOfRange)\n  }\n\n  pub fn push(self, x: string) -> Result<unit, buffer::AllocErr> {\n    return Err(buffer::AllocErr::Oom)\n  }\n\n  pub fn extend(self, other: VecString) -> Result<unit, buffer::AllocErr> {\n    return Err(buffer::AllocErr::Oom)\n  }\n\n  pub fn push_all(self, other: VecString) -> Result<unit, buffer::AllocErr> {\n    return self.extend(other)\n  }\n\n  pub fn pop(self) -> Result<string, VecErr> {\n    return Err(VecErr::Empty)\n  }\n\n  pub fn clear(self) -> unit {\n    while (true) {\n      match (self.pop()) {\n        Ok(_) => { }\n        Err(_) => { break }\n      }\n    }\n    return ()\n  }\n\n  pub fn join(self, sep: string) -> Result<string, buffer::AllocErr> {\n    let len = self.len()\n    let buf = buffer::new(0)?\n    let i = 0\n    while (i < len) {\n      let part = match (self.get(i)) {\n        Ok(v) => { v }\n        Err(_) => { panic() }\n      }\n      if (i > 0) {\n        buf.push_str(sep)?\n      }\n      buf.push_str(part)?\n      i = i + 1\n    }\n    return buf.to_string()\n  }\n}\n"}];
+    const moduleList = document.getElementById('module-list');
+    const moduleContent = document.getElementById('module-content');
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function highlightCode(code) {
+      const keywords = new Set(['fn', 'let', 'if', 'else', 'while', 'for', 'return', 'match', 'struct', 'enum', 'impl', 'pub', 'use', 'module', 'package', 'defer', 'capability', 'linear', 'copy', 'opaque', 'extern', 'true', 'false', 'in', 'break', 'continue', 'drop', 'unsafe', 'safe']);
+      const types = new Set(['i32', 'u8', 'u32', 'i64', 'u64', 'bool', 'unit', 'string', 'Result', 'Ok', 'Err', 'RootCap', 'Console', 'Args', 'Stdin', 'Alloc', 'Buffer', 'Slice', 'MutSlice', 'VecU8', 'VecI32', 'VecString', 'ReadFS', 'Filesystem', 'Dir', 'FileRead', 'Net', 'TcpListener', 'TcpConn']);
+
+      return code.replace(/(\/\/\/.*?$|\/\/.*?$)|("(?:[^"\\]|\\.)*")|(\d+)|([a-zA-Z_][a-zA-Z0-9_]*)/gm, (match, comment, str, num, ident) => {
+        if (comment) return `<span class="hl-comment">${escapeHtml(comment)}</span>`;
+        if (str) return `<span class="hl-string">${escapeHtml(str)}</span>`;
+        if (num) return `<span class="hl-number">${escapeHtml(num)}</span>`;
+        if (ident) {
+          if (keywords.has(ident)) return `<span class="hl-keyword">${ident}</span>`;
+          if (types.has(ident)) return `<span class="hl-type">${ident}</span>`;
+          return ident;
+        }
+        return match;
+      });
+    }
+
+    function renderModule(mod) {
+      const kinds = { struct: 'Structs', enum: 'Enums', fn: 'Functions', method: 'Methods' };
+      let html = `
+        <div class="module-header">
+          <h2>${escapeHtml(mod.module)}</h2>
+          <div class="module-path">${escapeHtml(mod.path)}</div>
+        </div>
+      `;
+
+      if (mod.docs && mod.docs.length) {
+        html += `<div class="module-docs">${mod.docs.map(d => `<div>${escapeHtml(d)}</div>`).join('')}</div>`;
+      }
+
+      for (const kind of ['struct', 'enum', 'fn', 'method']) {
+        const items = mod.items.filter(i => i.kind === kind);
+        if (items.length === 0) continue;
+
+        html += `<div class="item-section"><h3>${kinds[kind]}</h3>`;
+        for (const item of items) {
+          html += `<div class="item">`;
+          html += `<div class="item-sig">${escapeHtml(item.sig)}</div>`;
+          if (item.impl) {
+            html += `<div class="item-impl">impl ${escapeHtml(item.impl)}</div>`;
+          }
+          if (item.docs && item.docs.length) {
+            html += `<div class="item-docs">${item.docs.map(d => escapeHtml(d)).join(' ')}</div>`;
+          }
+          html += `</div>`;
+        }
+        html += `</div>`;
+      }
+
+      html += `<button class="source-toggle" onclick="toggleSource(this)">Show Source</button>`;
+      html += `<div class="source-code" style="display:none"><pre><code>${highlightCode(mod.source)}</code></pre></div>`;
+
+      moduleContent.innerHTML = html;
+    }
+
+    window.toggleSource = function(btn) {
+      const source = btn.nextElementSibling;
+      if (source.style.display === 'none') {
+        source.style.display = 'block';
+        btn.textContent = 'Hide Source';
+      } else {
+        source.style.display = 'none';
+        btn.textContent = 'Show Source';
+      }
+    };
+
+    // Build module list
+    modules.forEach((mod, i) => {
+      const link = document.createElement('div');
+      link.className = 'module-link' + (i === 0 ? ' active' : '');
+      link.textContent = mod.module;
+      link.onclick = () => {
+        document.querySelectorAll('.module-link').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        renderModule(mod);
+      };
+      moduleList.appendChild(link);
+    });
+
+    // Load first module
+    if (modules.length > 0) {
+      renderModule(modules[0]);
+    }
+  </script>
+</body>
+</html>
