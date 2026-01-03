@@ -707,6 +707,17 @@ fn typecheck_slice_safe_ok() {
 }
 
 #[test]
+fn typecheck_slice_return_fails() {
+    let source = load_program("should_fail_slice_return.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("Slice types cannot be returned from safe modules"));
+}
+
+#[test]
 fn typecheck_slice_unsafe_ok() {
     let source = load_program("slice_unsafe.cap");
     let module = parse_module(&source).expect("parse module");

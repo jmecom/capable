@@ -152,6 +152,11 @@ Mitigations (recommended):
 2. **Simple restriction (v0.2):** slices derived from a `Vec<u8>` may not escape the current function scope (easy rule).
 3. Prefer **arenas** for complex lifetimes: allocate many objects, free once.
 
+Current rule (implemented):
+- Safe non-stdlib modules may not return `Slice<T>` / `MutSlice<T>` values or
+  embed them in structs/enums. This keeps view lifetimes local until a richer
+  lifetime system exists.
+
 ---
 
 ## 7. Security rationale

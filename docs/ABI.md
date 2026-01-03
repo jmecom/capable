@@ -36,3 +36,13 @@ compiler-generated stubs when needed.
 - Inline-by-value struct returns are not implemented yet.
 - These rules apply to non-opaque structs only. Opaque/capability types remain
   handles and return directly.
+
+## Slice + string layout
+
+`Slice<T>` and `string` are plain structs in the stdlib and are passed by value:
+
+- `Slice<T>` layout: `{ ptr: *T, len: i32 }`
+- `string` layout: `{ bytes: Slice<u8> }`
+
+`string` values are views into UTF-8 byte storage; they do not imply ownership
+in the ABI. Owned text is represented by `string::Text` (backed by `Vec<u8>`).

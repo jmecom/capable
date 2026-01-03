@@ -64,6 +64,7 @@ We want explicit, Zig-like control without GC, but without letting safe libs cor
 - Safe indexing is bounds-checked (at least in debug / safe mode).
 - No “escape hatch” from slice to raw pointer in safe code.
 - `Slice[T]` is implemented as `{ ptr, len }` in the stdlib, but pointer types remain unsafe for user code.
+- Safe non-stdlib modules may not return or store `Slice<T>` / `MutSlice<T>` values.
 
 ### 3.2 Explicit allocators (optional dependency, not a security boundary)
 Capable may expose explicit allocation via an `Alloc` handle:

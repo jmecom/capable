@@ -203,6 +203,12 @@ pub(super) fn validate_package_safety(
                             span,
                         ));
                     }
+                    if let Some(span) = type_contains_slice(&func.ret) {
+                        return Err(TypeError::new(
+                            "Slice types cannot be returned from safe modules".to_string(),
+                            span,
+                        ));
+                    }
                 }
             }
             Item::Impl(impl_block) => {
@@ -213,6 +219,12 @@ pub(super) fn validate_package_safety(
                     if let Some(span) = type_contains_ptr_fn(method) {
                         return Err(TypeError::new(
                             "raw pointer types require `package unsafe`".to_string(),
+                            span,
+                        ));
+                    }
+                    if let Some(span) = type_contains_slice(&method.ret) {
+                        return Err(TypeError::new(
+                            "Slice types cannot be returned from safe modules".to_string(),
                             span,
                         ));
                     }
@@ -228,12 +240,24 @@ pub(super) fn validate_package_safety(
                         span,
                     ));
                 }
+                if let Some(span) = type_contains_slice_struct(decl) {
+                    return Err(TypeError::new(
+                        "Slice types cannot appear in structs in safe modules".to_string(),
+                        span,
+                    ));
+                }
             }
             Item::Enum(decl) => {
                 if !is_stdlib {
                     if let Some(span) = type_contains_ptr_enum(decl) {
                         return Err(TypeError::new(
                             "raw pointer types require `package unsafe`".to_string(),
+                            span,
+                        ));
+                    }
+                    if let Some(span) = type_contains_slice_enum(decl) {
+                        return Err(TypeError::new(
+                            "Slice types cannot appear in enums in safe modules".to_string(),
                             span,
                         ));
                     }
@@ -317,6 +341,61 @@ fn type_contains_ptr_enum(decl: &EnumDecl) -> Option<Span> {
     for variant in &decl.variants {
         if let Some(payload) = &variant.payload {
             if let Some(span) = type_contains_ptr(payload) {
+                return Some(span);
+            }
+        }
+    }
+    None
+}
+
+fn is_slice_type_path(path: &Path) -> bool {
+    let Some(last) = path.segments.last() else {
+        return false;
+    };
+    if last.item != "Slice" && last.item != "MutSlice" {
+        return false;
+    }
+    if path.segments.len() == 1 {
+        return true;
+    }
+    if path.segments.len() == 3 {
+        return path.segments[0].item == "sys"
+            && path.segments[1].item == "buffer"
+            && (last.item == "Slice" || last.item == "MutSlice");
+    }
+    false
+}
+
+fn type_contains_slice(ty: &Type) -> Option<Span> {
+    match ty {
+        Type::Path { path, args, span } => {
+            if is_slice_type_path(path) {
+                return Some(*span);
+            }
+            for arg in args {
+                if let Some(span) = type_contains_slice(arg) {
+                    return Some(span);
+                }
+            }
+            None
+        }
+        Type::Ptr { target, .. } | Type::Ref { target, .. } => type_contains_slice(target),
+    }
+}
+
+fn type_contains_slice_struct(decl: &StructDecl) -> Option<Span> {
+    for field in &decl.fields {
+        if let Some(span) = type_contains_slice(&field.ty) {
+            return Some(span);
+        }
+    }
+    None
+}
+
+fn type_contains_slice_enum(decl: &EnumDecl) -> Option<Span> {
+    for variant in &decl.variants {
+        if let Some(payload) = &variant.payload {
+            if let Some(span) = type_contains_slice(payload) {
                 return Some(span);
             }
         }

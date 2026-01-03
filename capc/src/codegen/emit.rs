@@ -4053,6 +4053,100 @@ fn emit_unsafe_ptr_call(
             )?;
             return Ok(Some(ValueRepr::Unit));
         }
+        "memcpy" | "memmove" => {
+            if call.args.len() != 3 {
+                return Err(CodegenError::Unsupported(format!(
+                    "{base_name} expects (dst, src, count)"
+                )));
+            }
+            let dst_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects a pointer dst"
+                    )))
+                }
+            };
+            let src_ptr = match emit_hir_expr(
+                builder,
+                &call.args[1],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects a pointer src"
+                    )))
+                }
+            };
+            let count_val = match emit_hir_expr(
+                builder,
+                &call.args[2],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(val) => val,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects an i32 count"
+                    )))
+                }
+            };
+
+            let zero_i32 = builder.ins().iconst(ir::types::I32, 0);
+            let should_copy = builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThan, count_val, zero_i32);
+            let copy_block = builder.create_block();
+            let done_block = builder.create_block();
+            builder.ins().brif(should_copy, copy_block, &[], done_block, &[]);
+
+            builder.switch_to_block(copy_block);
+            builder.seal_block(copy_block);
+            let count_ptr = if ptr_ty != ir::types::I32 {
+                builder.ins().sextend(ptr_ty, count_val)
+            } else {
+                count_val
+            };
+            let stride = builder.ins().iconst(ptr_ty, layout.size as i64);
+            let byte_count = if layout.size == 1 {
+                count_ptr
+            } else {
+                builder.ins().imul(count_ptr, stride)
+            };
+            let config = module.isa().frontend_config();
+            if base_name == "memcpy" {
+                builder.call_memcpy(config, dst_ptr, src_ptr, byte_count);
+            } else {
+                builder.call_memmove(config, dst_ptr, src_ptr, byte_count);
+            }
+            builder.ins().jump(done_block, &[]);
+
+            builder.switch_to_block(done_block);
+            builder.seal_block(done_block);
+            return Ok(Some(ValueRepr::Unit));
+        }
         _ => {}
     }
     Ok(None)

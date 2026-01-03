@@ -25,3 +25,10 @@ pub extern fn ptr_cast_u8<T>(ptr: *T) -> *u8
 
 /// Return true if the pointer is null.
 pub extern fn ptr_is_null<T>(ptr: *T) -> bool
+
+/// Copy `count` elements from `src` to `dst` (no overlap).
+/// Use memmove when regions might overlap.
+pub extern fn memcpy<T>(dst: *T, src: *T, count: i32) -> unit
+
+/// Copy `count` elements from `src` to `dst` (overlap-safe).
+pub extern fn memmove<T>(dst: *T, src: *T, count: i32) -> unit

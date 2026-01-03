@@ -15,14 +15,15 @@ TODO-MEMORY
    - Done: runtime Vec tables removed; Vec/Slice operations are pure Cap.
 
 4) Owned string and slice memory model
-   - string is still a runtime slice handle. We need a clean userland story
-     for owned text + substring/slice lifetimes to avoid runtime intrinsics.
-   - Text/Vec alloc paths should be consistent once Alloc is real.
+   - string is a view over Slice<u8>; Text is owned Vec<u8>.
+   - Safe non-stdlib modules may not return or store Slice/MutSlice to reduce
+     use-after-free hazards until a real lifetime model exists.
 
 5) Unsafe pointer API completeness
-   - Add basic memcpy/memmove (or equivalent) for safe-ish stdlib usage.
+   - Done: memcpy/memmove added to sys::unsafe_ptr and lowered in codegen.
    - Document expectations around ptr_is_null and ownership.
 
 6) ABI + lowering docs update
    - Document: opaque structs lowered to handles, field access is special-cased
-     in codegen, sret + ResultOut behavior, and alloc-passing convention.
+     in codegen, sret + ResultOut behavior, alloc-passing convention, and
+     Slice/string layout.
