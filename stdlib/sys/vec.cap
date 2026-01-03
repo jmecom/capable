@@ -478,6 +478,17 @@ impl Vec<u8> {
     return Ok(header.alloc.slice_from_ptr(ptr, len))
   }
 
+  /// Create a slice view of a range using start/end bounds (end exclusive).
+  pub fn slice_range(self, start: i32, end: i32) -> Result<Slice<u8>, VecErr> {
+    if (start < 0 || end < 0) {
+      return Err(VecErr::OutOfRange)
+    }
+    if (start > end) {
+      return Err(VecErr::OutOfRange)
+    }
+    return self.slice(start, end - start)
+  }
+
   /// Borrow as a slice.
   pub fn as_slice(self) -> Slice<u8> {
     let header = read_header<u8>(self)

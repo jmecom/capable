@@ -17,6 +17,7 @@ pub fn main(rc: RootCap) -> i32 {
   let trimmed_ascii = " \tHi\n".trim_ascii(alloc)
   let lower = "AbC".to_lower_ascii(alloc)
   let upper = "AbC".to_upper_ascii(alloc)
+  let sliced = "hello".slice_range(1, 4)
   let lines = "a\nb\n".split_lines(alloc)
   alloc.vec_string_free(words)
   alloc.vec_string_free(lines)
@@ -37,6 +38,10 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(!"abc".contains_byte('x'))
   c.assert("abc".contains("b"))
   c.assert(!"abc".contains("x"))
+  match (sliced) {
+    Ok(sub) => { c.assert(sub.eq("ell")) }
+    Err(_) => { c.assert(false) }
+  }
   match ("abc".index_of_byte('c')) {
     Ok(i) => { c.assert(i == 2) }
     Err(_) => { c.assert(false) }
@@ -77,6 +82,10 @@ pub fn main(rc: RootCap) -> i32 {
       c.assert(parts.left.eq("a"))
       c.assert(parts.right.eq("b,c"))
     }
+    Err(_) => { c.assert(false) }
+  }
+  match ("ab".concat(alloc, "cd")) {
+    Ok(joined) => { c.assert(joined.eq("abcd")) }
     Err(_) => { c.assert(false) }
   }
   let pieces = "a,b,c".split(alloc, ',')

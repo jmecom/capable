@@ -6,7 +6,16 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let v = alloc.vec_u8_new()
+  let with_cap = alloc.vec_with_capacity<u8>(8)
   let extra = alloc.vec_u8_new()
+  match (with_cap) {
+    Ok(vc) => {
+      c.assert(vc.capacity() >= 8)
+      vc.clear()
+      alloc.vec_u8_free(vc)
+    }
+    Err(_) => { c.println("vec bad"); return 1 }
+  }
   match v.push('A') {
     Ok(x) => {}
     Err(e) => { c.println("vec bad"); return 1 }
@@ -22,6 +31,10 @@ pub fn main(rc: RootCap) -> i32 {
   match v.extend(extra) {
     Ok(x) => {}
     Err(e) => { c.println("vec bad"); return 1 }
+  }
+  match v.reserve(4) {
+    Ok(_) => { c.assert(v.capacity() >= 3) }
+    Err(_) => { c.println("vec bad"); return 1 }
   }
   let len = v.len()
   let b = v.get(1)

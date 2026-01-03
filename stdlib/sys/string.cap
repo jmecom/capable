@@ -172,6 +172,11 @@ impl Text {
     return self.extend_slice(s.as_slice())
   }
 
+  /// Append a string view (alias of push_str).
+  pub fn append(self, s: string) -> Result<unit, buffer::AllocErr> {
+    return self.push_str(s)
+  }
+
   /// Borrow as a byte slice view (no copy).
   pub fn as_slice(self) -> Slice<u8> {
     return self.bytes.as_slice()
@@ -217,9 +222,23 @@ impl string {
     return Ok(string { bytes: sub })
   }
 
+  /// Create a subslice view of this string using start/end bounds (end exclusive).
+  pub fn slice_range(self, start: i32, end: i32) -> Result<string, buffer::SliceErr> {
+    let sub = self.as_slice().slice_range(start, end)?
+    return Ok(string { bytes: sub })
+  }
+
   /// Copy this string view into a new owned Text with the provided allocator.
   pub fn to_text(self, alloc: buffer::Alloc) -> Result<Text, buffer::AllocErr> {
     return text_from(alloc, self)
+  }
+
+  /// Concatenate another string into a new owned string view.
+  pub fn concat(self, alloc: buffer::Alloc, other: string) -> Result<string, buffer::AllocErr> {
+    let out = text_new(alloc)
+    out.push_str(self)?
+    out.push_str(other)?
+    return out.to_string()
   }
 
   /// Index into the string by byte.

@@ -125,6 +125,22 @@ impl Alloc {
     v.free()
     return ()
   }
+
+  /// Create a Vec<T> with this Alloc (heap-backed).
+  pub fn vec_new<T>(self) -> vec::Vec<T> {
+    return vec::new_with<T>(self)
+  }
+
+  /// Create a Vec<T> with capacity using this Alloc.
+  pub fn vec_with_capacity<T>(self, capacity: i32) -> Result<vec::Vec<T>, AllocErr> {
+    return vec::with_capacity<T>(self, capacity)
+  }
+
+  /// Free a Vec<T> created with this Alloc.
+  pub fn vec_free<T>(self, v: vec::Vec<T>) -> unit {
+    v.free()
+    return ()
+  }
 }
 
 impl Slice<u8> {
@@ -156,6 +172,17 @@ impl Slice<u8> {
     let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, start)
     return Ok(Slice<u8> { ptr: ptr, len: len })
   }
+
+  /// Create a subslice view using start/end bounds (end is exclusive).
+  pub fn slice_range(self, start: i32, end: i32) -> Result<Slice<u8>, SliceErr> {
+    if (start < 0 || end < 0) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start > end) {
+      return Err(SliceErr::OutOfRange)
+    }
+    return self.slice(start, end - start)
+  }
 }
 
 impl MutSlice<u8> {
@@ -181,5 +208,16 @@ impl MutSlice<u8> {
     }
     let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, start)
     return Ok(MutSlice<u8> { ptr: ptr, len: len })
+  }
+
+  /// Create a mutable subslice view using start/end bounds (end is exclusive).
+  pub fn slice_range(self, start: i32, end: i32) -> Result<MutSlice<u8>, SliceErr> {
+    if (start < 0 || end < 0) {
+      return Err(SliceErr::OutOfRange)
+    }
+    if (start > end) {
+      return Err(SliceErr::OutOfRange)
+    }
+    return self.slice(start, end - start)
   }
 }
