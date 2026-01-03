@@ -53,3 +53,6 @@ http-server:
 
 lsp:
   cargo run -p caplsp
+
+website:
+  python3 website/gen_website.py
