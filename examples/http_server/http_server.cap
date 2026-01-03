@@ -99,7 +99,10 @@ fn parse_request_line(line: string, alloc: Alloc) -> Result<string, ParseErr> {
   let rest = slice_or_err(trimmed, space0 + 1, trimmed.len())?
   let space1 = index_or_space(rest)?
   let path = slice_or_err(rest, 0, space1)?
-  return sanitize_path(strip_query(path, alloc), alloc)
+  match (sanitize_path(strip_query(path, alloc), alloc)) {
+    Ok(p) => { return Ok(p) }
+    Err(_) => { return Err(ParseErr::BadSlice) }
+  }
 }
 
 fn parse_request_path(req: string, alloc: Alloc) -> Result<string, ParseErr> {
@@ -138,15 +141,29 @@ fn handle_request(conn: &TcpConn, readfs: ReadFS, alloc: Alloc, req: string) -> 
   }
 }
 
-fn serve_forever(c: Console, net: Net, rc: RootCap, alloc: Alloc, root: string) -> Result<unit, NetErr> {
-  let listener = net.listen("127.0.0.1", 8080)?
+fn serve_forever(c: Console, net: Net, rc: RootCap, alloc: Alloc, root: string, port: i32) -> Result<unit, NetErr> {
+  let listener = net.listen("127.0.0.1", port)?
+  c.println("listening on 127.0.0.1")
+  c.print("port: ")
+  c.println_i32(port)
   defer listener.close()
   while (true) {
-    let conn = listener.accept()?
-    defer conn.close()
-    let req = conn.read_to_string(alloc)?
-    let readfs = rc.mint_readfs(root)
-    handle_request(conn, readfs, alloc, req)?
+    if let Ok(conn) = listener.accept() {
+      let req_result = conn.read(alloc, 4096)
+      if (req_result.is_err()) {
+        conn.close()
+      } else {
+        let req = req_result.ok()
+        let readfs = rc.mint_readfs(root)
+        let handled = handle_request(conn, readfs, alloc, req)
+        conn.close()
+        if (handled.is_err()) {
+          // Ignore per-request write errors; keep the server alive.
+        }
+      }
+    } else {
+      continue
+    }
     defer c.println("request complete")
   }
   return Ok(())
@@ -157,11 +174,11 @@ pub fn main(rc: RootCap) -> i32 {
   let net = rc.mint_net()
   let args = rc.mint_args()
   let alloc = rc.mint_alloc_default()
-  let root = arg_or_default(args, 1, ".")
-  c.println("listening on 127.0.0.1:8080")
-  let result = serve_forever(c, net, rc, alloc, root)
+  let root = arg_or_default(args, 1, "examples/http_server")
+  let port = 8090
+  let result = serve_forever(c, net, rc, alloc, root, port)
   if (result.is_err()) {
-    c.println("server error")
+    c.println("server error (is the port in use?)")
   }
   return 0
 }

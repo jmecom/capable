@@ -945,17 +945,22 @@ pub extern "C" fn capable_rt_net_accept(
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
-    let listener = take_handle(&TCP_LISTENERS, listener, "tcp listener table");
-    let Some(listener) = listener else {
-        return write_handle_result_code(out_ok, out_err, Err(NetErr::IoError as i32));
-    };
-    match listener.accept() {
-        Ok((stream, _addr)) => {
+    let result = with_table(&TCP_LISTENERS, "tcp listener table", |table| {
+        let Some(listener) = table.get_mut(&listener) else {
+            return Err(NetErr::IoError);
+        };
+        match listener.accept() {
+            Ok((stream, _addr)) => Ok(stream),
+            Err(err) => Err(map_net_err(err)),
+        }
+    });
+    match result {
+        Ok(stream) => {
             let handle = new_handle();
             insert_handle(&TCP_CONNS, handle, stream, "tcp conn table");
             write_handle_result_code(out_ok, out_err, Ok(handle))
         }
-        Err(err) => write_handle_result_code(out_ok, out_err, Err(map_net_err(err) as i32)),
+        Err(err) => write_handle_result_code(out_ok, out_err, Err(err as i32)),
     }
 }
 
