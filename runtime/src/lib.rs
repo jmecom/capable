@@ -69,6 +69,15 @@ pub struct CapString {
     bytes: Handle,
 }
 
+#[repr(C)]
+struct VecHeader {
+    raw: *mut u8,
+    len: i32,
+    cap: i32,
+    elem_size: i32,
+    alloc: Handle,
+}
+
 #[derive(Copy, Clone, Debug)]
 struct SliceState {
     ptr: usize,
@@ -149,6 +158,68 @@ fn to_slice_handle_bytes(bytes: Vec<u8>) -> Handle {
 
 fn to_slice_handle(value: String) -> Handle {
     to_slice_handle_bytes(value.into_bytes())
+}
+
+fn make_vec_header(
+    raw: *mut u8,
+    len: i32,
+    cap: i32,
+    elem_size: i32,
+    alloc: Handle,
+) -> Option<Handle> {
+    let header = unsafe { libc::malloc(std::mem::size_of::<VecHeader>()) as *mut VecHeader };
+    if header.is_null() {
+        return None;
+    }
+    unsafe {
+        *header = VecHeader {
+            raw,
+            len,
+            cap,
+            elem_size,
+            alloc,
+        };
+    }
+    Some(header as Handle)
+}
+
+fn vec_from_bytes(alloc: Handle, bytes: Vec<u8>) -> Option<Handle> {
+    let len = bytes.len().min(i32::MAX as usize) as i32;
+    let raw = if len == 0 {
+        std::ptr::null_mut()
+    } else {
+        let ptr = unsafe { libc::malloc(len as usize) as *mut u8 };
+        if ptr.is_null() {
+            return None;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, len as usize);
+        }
+        ptr
+    };
+    make_vec_header(raw, len, len, 1, alloc)
+}
+
+fn vec_from_strings(alloc: Handle, items: Vec<String>) -> Option<Handle> {
+    let len = items.len().min(i32::MAX as usize) as i32;
+    let elem_size = std::mem::size_of::<CapString>() as i32;
+    let raw = if len == 0 {
+        std::ptr::null_mut()
+    } else {
+        let total = (len as usize).saturating_mul(elem_size as usize);
+        let ptr = unsafe { libc::malloc(total) as *mut CapString };
+        if ptr.is_null() {
+            return None;
+        }
+        for (i, item) in items.into_iter().take(len as usize).enumerate() {
+            let handle = to_slice_handle(item);
+            unsafe {
+                std::ptr::write(ptr.add(i), CapString { bytes: handle });
+            }
+        }
+        ptr as *mut u8
+    };
+    make_vec_header(raw, len, len, elem_size, alloc)
 }
 
 fn write_handle_result(
@@ -416,6 +487,7 @@ pub extern "C" fn capable_rt_fs_exists(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_read_bytes(
     fs: Handle,
+    _alloc: Handle,
     path: *const CapString,
     out_ok: *mut Handle,
     out_err: *mut i32,
@@ -433,13 +505,10 @@ pub extern "C" fn capable_rt_fs_read_bytes(
         Err(err) => return write_handle_result(out_ok, out_err, Err(err)),
     };
     match std::fs::read(&full) {
-        Ok(bytes) => {
-            let handle = new_handle();
-            with_table(&VECS_U8, "vec u8 table", |table| {
-                table.insert(handle, bytes);
-            });
-            write_handle_result(out_ok, out_err, Ok(handle))
-        }
+        Ok(bytes) => match vec_from_bytes(_alloc, bytes) {
+            Some(handle) => write_handle_result(out_ok, out_err, Ok(handle)),
+            None => write_handle_result(out_ok, out_err, Err(FsErr::IoError)),
+        },
         Err(err) => write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
     }
 }
@@ -447,6 +516,7 @@ pub extern "C" fn capable_rt_fs_read_bytes(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_list_dir(
     fs: Handle,
+    _alloc: Handle,
     path: *const CapString,
     out_ok: *mut Handle,
     out_err: *mut i32,
@@ -475,11 +545,10 @@ pub extern "C" fn capable_rt_fs_list_dir(
         };
         names.push(entry.file_name().to_string_lossy().to_string());
     }
-    let handle = new_handle();
-    with_table(&VECS_STRING, "vec string table", |table| {
-        table.insert(handle, names);
-    });
-    write_handle_result(out_ok, out_err, Ok(handle))
+    match vec_from_strings(_alloc, names) {
+        Some(handle) => write_handle_result(out_ok, out_err, Ok(handle)),
+        None => write_handle_result(out_ok, out_err, Err(FsErr::IoError)),
+    }
 }
 
 #[no_mangle]
@@ -505,6 +574,7 @@ pub extern "C" fn capable_rt_fs_dir_exists(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_dir_read_bytes(
     dir: Handle,
+    _alloc: Handle,
     name: *const CapString,
     out_ok: *mut Handle,
     out_err: *mut i32,
@@ -523,13 +593,10 @@ pub extern "C" fn capable_rt_fs_dir_read_bytes(
         Err(err) => return write_handle_result(out_ok, out_err, Err(err)),
     };
     match std::fs::read(&full) {
-        Ok(bytes) => {
-            let handle = new_handle();
-            with_table(&VECS_U8, "vec u8 table", |table| {
-                table.insert(handle, bytes);
-            });
-            write_handle_result(out_ok, out_err, Ok(handle))
-        }
+        Ok(bytes) => match vec_from_bytes(_alloc, bytes) {
+            Some(handle) => write_handle_result(out_ok, out_err, Ok(handle)),
+            None => write_handle_result(out_ok, out_err, Err(FsErr::IoError)),
+        },
         Err(err) => write_handle_result(out_ok, out_err, Err(map_fs_err(err))),
     }
 }
@@ -537,6 +604,7 @@ pub extern "C" fn capable_rt_fs_dir_read_bytes(
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_dir_list_dir(
     dir: Handle,
+    _alloc: Handle,
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
@@ -560,11 +628,10 @@ pub extern "C" fn capable_rt_fs_dir_list_dir(
         };
         names.push(entry.file_name().to_string_lossy().to_string());
     }
-    let handle = new_handle();
-    with_table(&VECS_STRING, "vec string table", |table| {
-        table.insert(handle, names);
-    });
-    write_handle_result(out_ok, out_err, Ok(handle))
+    match vec_from_strings(_alloc, names) {
+        Some(handle) => write_handle_result(out_ok, out_err, Ok(handle)),
+        None => write_handle_result(out_ok, out_err, Err(FsErr::IoError)),
+    }
 }
 
 #[no_mangle]
@@ -693,6 +760,7 @@ pub extern "C" fn capable_rt_math_mul_wrap_u8(a: u8, b: u8) -> u8 {
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_read_to_string(
     fs: Handle,
+    _alloc: Handle,
     path: *const CapString,
     out_ok: *mut CapString,
     out_err: *mut i32,
@@ -733,6 +801,7 @@ pub extern "C" fn capable_rt_fs_readfs_close(fs: Handle) {
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_file_read_to_string(
     file: Handle,
+    _alloc: Handle,
     out_ok: *mut CapString,
     out_err: *mut i32,
 ) -> u8 {
@@ -1053,26 +1122,61 @@ pub extern "C" fn capable_rt_mut_slice_at(slice: Handle, index: i32) -> u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_slice_copy(
+pub extern "C" fn capable_rt_slice_sub(
     slice: Handle,
+    start: i32,
+    len: i32,
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
+    let start = match usize::try_from(start) {
+        Ok(start) => start,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+    };
+    let len = match usize::try_from(len) {
+        Ok(len) => len,
+        Err(_) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+    };
     let slice_state = with_table(&SLICES, "slice table", |table| table.get(&slice).copied());
     let Some(slice_state) = slice_state else {
         unsafe {
-            if !out_ok.is_null() {
-                *out_ok = 0;
-            }
             if !out_err.is_null() {
                 *out_err = 0;
             }
         }
         return 1;
     };
-    let bytes =
-        unsafe { std::slice::from_raw_parts(slice_state.ptr as *const u8, slice_state.len) };
-    let handle = to_slice_handle_bytes(bytes.to_vec());
+    if start > slice_state.len || start.saturating_add(len) > slice_state.len {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let ptr = if len == 0 {
+        0
+    } else {
+        unsafe { (slice_state.ptr as *const u8).add(start) as usize }
+    };
+    let handle = new_handle();
+    with_table(&SLICES, "slice table", |table| {
+        table.insert(handle, SliceState { ptr, len });
+    });
     unsafe {
         if !out_ok.is_null() {
             *out_ok = handle;
@@ -1082,6 +1186,17 @@ pub extern "C" fn capable_rt_slice_copy(
         }
     }
     0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_mut_slice_sub(
+    slice: Handle,
+    start: i32,
+    len: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    capable_rt_slice_sub(slice, start, len, out_ok, out_err)
 }
 
 #[no_mangle]
@@ -1099,11 +1214,69 @@ pub extern "C" fn capable_rt_vec_u8_new_default() -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_with_capacity(
+    _alloc: Handle,
+    capacity: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    if capacity < 0 {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let mut data = Vec::new();
+    if data.try_reserve(capacity as usize).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let handle = new_handle();
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        table.insert(handle, data);
+    });
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = handle;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_with_capacity_default(
+    capacity: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    capable_rt_vec_u8_with_capacity(0, capacity, out_ok, out_err)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_u8_len(vec: Handle) -> i32 {
     with_table(&VECS_U8, "vec u8 table", |table| {
         table
             .get(&vec)
             .map(|data| data.len().min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_capacity(vec: Handle) -> i32 {
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.capacity().min(i32::MAX as usize) as i32)
             .unwrap_or(0)
     })
 }
@@ -1221,6 +1394,41 @@ pub extern "C" fn capable_rt_vec_u8_push(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_reserve(
+    vec: Handle,
+    additional: i32,
+    out_err: *mut i32,
+) -> u8 {
+    if additional < 0 {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        if data.try_reserve(additional as usize).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+        0
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_u8_extend(
     vec: Handle,
     other: Handle,
@@ -1254,6 +1462,15 @@ pub extern "C" fn capable_rt_vec_u8_extend(
         data.extend_from_slice(&other_data);
         0
     })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_u8_shrink_to_fit(vec: Handle) {
+    with_table(&VECS_U8, "vec u8 table", |table| {
+        if let Some(data) = table.get_mut(&vec) {
+            data.shrink_to_fit();
+        }
+    });
 }
 
 #[no_mangle]
@@ -1417,6 +1634,55 @@ pub extern "C" fn capable_rt_vec_i32_new(_alloc: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_with_capacity(
+    _alloc: Handle,
+    capacity: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    if capacity < 0 {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let mut data = Vec::new();
+    if data.try_reserve(capacity as usize).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let handle = new_handle();
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        table.insert(handle, data);
+    });
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = handle;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_capacity(vec: Handle) -> i32 {
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.capacity().min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_i32_len(vec: Handle) -> i32 {
     with_table(&VECS_I32, "vec i32 table", |table| {
         table
@@ -1539,6 +1805,41 @@ pub extern "C" fn capable_rt_vec_i32_push(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_reserve(
+    vec: Handle,
+    additional: i32,
+    out_err: *mut i32,
+) -> u8 {
+    if additional < 0 {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        if data.try_reserve(additional as usize).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+        0
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_i32_extend(
     vec: Handle,
     other: Handle,
@@ -1572,6 +1873,15 @@ pub extern "C" fn capable_rt_vec_i32_extend(
         data.extend_from_slice(&other_data);
         0
     })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_i32_shrink_to_fit(vec: Handle) {
+    with_table(&VECS_I32, "vec i32 table", |table| {
+        if let Some(data) = table.get_mut(&vec) {
+            data.shrink_to_fit();
+        }
+    });
 }
 
 #[no_mangle]
@@ -1662,11 +1972,69 @@ pub extern "C" fn capable_rt_vec_string_new_default() -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_string_with_capacity(
+    _alloc: Handle,
+    capacity: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    if capacity < 0 {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let mut data = Vec::new();
+    if data.try_reserve(capacity as usize).is_err() {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    let handle = new_handle();
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table.insert(handle, data);
+    });
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = handle;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_with_capacity_default(
+    capacity: i32,
+    out_ok: *mut Handle,
+    out_err: *mut i32,
+) -> u8 {
+    capable_rt_vec_string_with_capacity(0, capacity, out_ok, out_err)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_string_len(vec: Handle) -> i32 {
     with_table(&VECS_STRING, "vec string table", |table| {
         table
             .get(&vec)
             .map(|data| data.len().min(i32::MAX as usize) as i32)
+            .unwrap_or(0)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_capacity(vec: Handle) -> i32 {
+    with_table(&VECS_STRING, "vec string table", |table| {
+        table
+            .get(&vec)
+            .map(|data| data.capacity().min(i32::MAX as usize) as i32)
             .unwrap_or(0)
     })
 }
@@ -1733,6 +2101,41 @@ pub extern "C" fn capable_rt_vec_string_push(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_vec_string_reserve(
+    vec: Handle,
+    additional: i32,
+    out_err: *mut i32,
+) -> u8 {
+    if additional < 0 {
+        unsafe {
+            if !out_err.is_null() {
+                *out_err = 0;
+            }
+        }
+        return 1;
+    }
+    with_table(&VECS_STRING, "vec string table", |table| {
+        let Some(data) = table.get_mut(&vec) else {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        };
+        if data.try_reserve(additional as usize).is_err() {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            return 1;
+        }
+        0
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_vec_string_extend(
     vec: Handle,
     other: Handle,
@@ -1766,6 +2169,15 @@ pub extern "C" fn capable_rt_vec_string_extend(
         data.extend(other_data);
         0
     })
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_vec_string_shrink_to_fit(vec: Handle) {
+    with_table(&VECS_STRING, "vec string table", |table| {
+        if let Some(data) = table.get_mut(&vec) {
+            data.shrink_to_fit();
+        }
+    });
 }
 
 #[no_mangle]

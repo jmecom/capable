@@ -22,7 +22,7 @@ fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, VecErr> {
     return Ok(())
   }
 
-  let parts = line.split('=')
+  let parts = line.split(alloc, '=')
   if (parts.len() == 2) {
     let key = parts[0]?
     let val = parts[1]?
@@ -33,7 +33,7 @@ fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, VecErr> {
 }
 
 fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, VecErr> {
-  let lines = contents.lines()
+  let lines = contents.lines(alloc)
   let n = lines.len()
   for i in 0..n {
     let line = lines[i]?
@@ -44,7 +44,7 @@ fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, VecE
 }
 
 fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result<unit, FsErr> {
-  let contents = fs.read_to_string("app.conf")?
+  let contents = fs.read_to_string(alloc, "app.conf")?
   let result = parse_config(c, alloc, contents)
   if (result.is_err()) {
     return Err(fs::FsErr::IoError)

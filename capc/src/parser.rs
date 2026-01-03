@@ -377,10 +377,10 @@ impl Parser {
                 }
             }
             let end = self.expect(TokenKind::RBrace)?.span.end;
-            if (is_opaque || is_capability) && !fields.is_empty() {
+            if is_capability && !fields.is_empty() {
                 return Err(self.error_at(
                     Span::new(start, end),
-                    "opaque/capability struct cannot declare fields".to_string(),
+                    "capability struct cannot declare fields".to_string(),
                 ));
             }
             end

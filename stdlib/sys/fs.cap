@@ -2,6 +2,7 @@
 package unsafe
 module sys::fs
 
+use sys::buffer
 use sys::vec
 
 /// Read-only filesystem capability.
@@ -18,17 +19,17 @@ pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }
 
 impl ReadFS {
   /// Read an entire file into a string.
-  pub fn read_to_string(self, path: string) -> Result<string, FsErr> {
+  pub fn read_to_string(self, alloc: buffer::Alloc, path: string) -> Result<string, FsErr> {
     return ()
   }
 
   /// Read an entire file into a byte vec.
-  pub fn read_bytes(self, path: string) -> Result<vec::Vec<u8>, FsErr> {
+  pub fn read_bytes(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// List directory contents as strings.
-  pub fn list_dir(self, path: string) -> Result<vec::Vec<string>, FsErr> {
+  pub fn list_dir(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
@@ -67,12 +68,12 @@ impl Dir {
   }
 
   /// Read a file into a byte vec.
-  pub fn read_bytes(self, name: string) -> Result<vec::Vec<u8>, FsErr> {
+  pub fn read_bytes(self, alloc: buffer::Alloc, name: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// List directory contents.
-  pub fn list_dir(self) -> Result<vec::Vec<string>, FsErr> {
+  pub fn list_dir(self, alloc: buffer::Alloc) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
@@ -82,9 +83,9 @@ impl Dir {
   }
 
   /// Read a file into a string.
-  pub fn read_to_string(self, name: string) -> Result<string, FsErr> {
+  pub fn read_to_string(self, alloc: buffer::Alloc, name: string) -> Result<string, FsErr> {
     let file = self.open_read(name)
-    return file.read_to_string()
+    return file.read_to_string(alloc)
   }
 
   /// Close the capability.
@@ -95,7 +96,7 @@ impl Dir {
 
 impl FileRead {
   /// Read the file into a string.
-  pub fn read_to_string(self) -> Result<string, FsErr> {
+  pub fn read_to_string(self, alloc: buffer::Alloc) -> Result<string, FsErr> {
     return ()
   }
 

@@ -4,6 +4,7 @@ package safe
 module sys::buffer
 use sys::vec
 use sys::string
+use sys::unsafe_ptr
 
 /// Alloc capability for heap operations (heap-backed allocations).
 pub copy opaque struct Alloc
@@ -18,22 +19,26 @@ pub enum AllocErr {
   Oom
 }
 
-/// Copy a slice into a new owned slice.
-/// Intrinsic; implemented by the runtime.
-pub fn copy_slice(data: Slice<u8>) -> Result<Slice<u8>, AllocErr> {
-  return Err(AllocErr::Oom)
+/// Slice errors.
+pub enum SliceErr {
+  /// Index is out of range.
+  OutOfRange
 }
 
-/// Create a new Vec<u8> without an Alloc handle.
-/// Intrinsic; implemented by the runtime.
-pub fn vec_u8_new() -> vec::Vec<u8> {
-  return ()
-}
-
-/// Create a new Vec<string> without an Alloc handle.
-/// Intrinsic; implemented by the runtime.
-pub fn vec_string_new() -> vec::Vec<string> {
-  return ()
+/// Copy a slice into a new owned slice using the provided allocator.
+pub fn copy_slice(alloc: Alloc, data: Slice<u8>) -> Result<Slice<u8>, AllocErr> {
+  let len = data.len()
+  let raw = alloc.malloc(len)
+  if (len > 0 && unsafe_ptr::ptr_is_null<u8>(raw)) {
+    return Err(AllocErr::Oom)
+  }
+  let i = 0
+  while (i < len) {
+    let value = data.at(i)
+    unsafe_ptr::ptr_write<u8>(unsafe_ptr::ptr_add<u8>(raw, i), value)
+    i = i + 1
+  }
+  return Ok(alloc.slice_from_ptr(raw, len))
 }
 
 impl Alloc {
@@ -69,31 +74,49 @@ impl Alloc {
 
   /// Create a Vec<u8> with this Alloc (heap-backed).
   pub fn vec_u8_new(self) -> vec::Vec<u8> {
-    return ()
+    return vec::new_with<u8>(self)
+  }
+
+  /// Create a Vec<u8> with capacity using this Alloc.
+  pub fn vec_u8_with_capacity(self, capacity: i32) -> Result<vec::Vec<u8>, AllocErr> {
+    return vec::with_capacity<u8>(self, capacity)
   }
 
   /// Free a Vec<u8> created with this Alloc.
   pub fn vec_u8_free(self, v: vec::Vec<u8>) -> unit {
+    v.free()
     return ()
   }
 
   /// Create a Vec<i32> with this Alloc (heap-backed).
   pub fn vec_i32_new(self) -> vec::Vec<i32> {
-    return ()
+    return vec::new_with<i32>(self)
+  }
+
+  /// Create a Vec<i32> with capacity using this Alloc.
+  pub fn vec_i32_with_capacity(self, capacity: i32) -> Result<vec::Vec<i32>, AllocErr> {
+    return vec::with_capacity<i32>(self, capacity)
   }
 
   /// Free a Vec<i32> created with this Alloc.
   pub fn vec_i32_free(self, v: vec::Vec<i32>) -> unit {
+    v.free()
     return ()
   }
 
   /// Create a Vec<string> with this Alloc (heap-backed).
   pub fn vec_string_new(self) -> vec::Vec<string> {
-    return ()
+    return vec::new_with<string>(self)
+  }
+
+  /// Create a Vec<string> with capacity using this Alloc.
+  pub fn vec_string_with_capacity(self, capacity: i32) -> Result<vec::Vec<string>, AllocErr> {
+    return vec::with_capacity<string>(self, capacity)
   }
 
   /// Free a Vec<string> created with this Alloc.
   pub fn vec_string_free(self, v: vec::Vec<string>) -> unit {
+    v.free()
     return ()
   }
 }
@@ -108,11 +131,21 @@ impl Slice<u8> {
   pub fn at(self, i: i32) -> u8 {
     return 0
   }
+
+  /// Create a subslice view.
+  pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
 }
 
 impl MutSlice<u8> {
   /// Index into the mutable slice.
   pub fn at(self, i: i32) -> u8 {
     return 0
+  }
+
+  /// Create a mutable subslice view.
+  pub fn slice(self, start: i32, len: i32) -> Result<MutSlice<u8>, SliceErr> {
+    return Err(SliceErr::OutOfRange)
   }
 }

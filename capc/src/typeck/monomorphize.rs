@@ -717,7 +717,7 @@ impl MonoCtx {
             base_name: func.name().to_string(),
             type_args: ordered_args.clone(),
         });
-        Ok((new_name, symbol, Vec::new()))
+        Ok((new_name, symbol, ordered_args))
     }
 
     fn mono_hir_type(

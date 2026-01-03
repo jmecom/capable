@@ -6,7 +6,7 @@ use sys::string
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
-  let text = string::text_new_with(alloc)
+  let text = string::text_new(alloc)
   match text.push_byte('\x00') {
     Ok(u) => { u }
     Err(e) => {

@@ -316,6 +316,20 @@ fn run_slice_unsafe() {
 }
 
 #[test]
+fn run_unsafe_ptr_unsafe() {
+    let out_dir = make_out_dir("unsafe_ptr_unsafe");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/unsafe_ptr_unsafe.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("unsafe ptr ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_text_unsafe() {
     let out_dir = make_out_dir("text_unsafe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

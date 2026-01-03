@@ -4,9 +4,10 @@ use sys::fs
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   let rfs = rc.mint_readfs("./config")
 
-  match rfs.read_to_string("../secrets.txt") {
+  match rfs.read_to_string(alloc, "../secrets.txt") {
     Ok(s) => {
       c.assert(false)
       c.println("BUG: escaped")

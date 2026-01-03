@@ -9,9 +9,9 @@ pub fn main(rc: RootCap) -> i32 {
     Ok(s) => {
       let buf = s.bytes()
       let bytes = buf.len()
-      let words_vec = s.split_whitespace()
-      let words = words_vec.len()
       let alloc = rc.mint_alloc_default()
+      let words_vec = s.split_whitespace(alloc)
+      let words = words_vec.len()
       alloc.vec_string_free(words_vec)
       let i: i32 = 0
       let lines: i32 = 0

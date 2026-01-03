@@ -1,0 +1,21 @@
+package unsafe
+module unsafe_ptr_unsafe
+use sys::buffer
+use sys::unsafe_ptr
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let size = unsafe_ptr::sizeof<u8>()
+  let align = unsafe_ptr::alignof<u8>()
+  c.assert(size == 1)
+  c.assert(align == 1)
+  let raw = alloc.malloc(4)
+  unsafe_ptr::ptr_write<u8>(raw, 42u8)
+  let v = unsafe_ptr::ptr_read<u8>(raw)
+  c.assert(v == 42u8)
+  alloc.free(raw)
+  c.println("unsafe ptr ok")
+  return 0
+}

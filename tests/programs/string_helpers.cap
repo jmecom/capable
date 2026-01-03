@@ -4,20 +4,20 @@ use sys::system
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   let s = "abc"
   let buf = s.bytes()
   let n = buf.len()
   let b = buf.at(0)
-  let words = "a b  c".split_whitespace()
+  let words = "a b  c".split_whitespace(alloc)
   let count = words.len()
-  let trimmed = "  hi \n".trim()
-  let trimmed_start = "  hi ".trim_start()
-  let trimmed_end = "  hi ".trim_end()
-  let trimmed_ascii = " \tHi\n".trim_ascii()
-  let lower = "AbC".to_lower_ascii()
-  let upper = "AbC".to_upper_ascii()
-  let lines = "a\nb\n".split_lines()
-  let alloc = rc.mint_alloc_default()
+  let trimmed = "  hi \n".trim(alloc)
+  let trimmed_start = "  hi ".trim_start(alloc)
+  let trimmed_end = "  hi ".trim_end(alloc)
+  let trimmed_ascii = " \tHi\n".trim_ascii(alloc)
+  let lower = "AbC".to_lower_ascii(alloc)
+  let upper = "AbC".to_upper_ascii(alloc)
+  let lines = "a\nb\n".split_lines(alloc)
   alloc.vec_string_free(words)
   alloc.vec_string_free(lines)
   c.assert(n == 3 && b == 'a' && count == 3)
@@ -72,14 +72,14 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert("abca".count_byte('a') == 2)
   c.assert("abc".is_ascii())
   c.assert("abc".byte_at_checked(10).is_err())
-  match ("a,b,c".split_once(',')) {
+  match ("a,b,c".split_once(alloc, ',')) {
     Ok(parts) => {
       c.assert(parts.left.eq("a"))
       c.assert(parts.right.eq("b,c"))
     }
     Err(_) => { c.assert(false) }
   }
-  let pieces = "a,b,c".split(',')
+  let pieces = "a,b,c".split(alloc, ',')
   c.assert(pieces.len() == 3)
   match (pieces.join(",")) {
     Ok(joined) => { c.assert(joined.eq("a,b,c")) }

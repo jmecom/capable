@@ -3,8 +3,9 @@ use sys::system
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
   let rfs = rc.mint_readfs("tests/fixtures/config")
-  match rfs.read_to_string("link.txt") {
+  match rfs.read_to_string(alloc, "link.txt") {
     Ok(_) => {
       c.println("BUG: symlink escape")
       return 2

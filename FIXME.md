@@ -37,3 +37,7 @@ Fixes applied from review:
 - Support sret lowering in runtime wrapper emission to avoid ABI mismatches.
 - Use return lowering in `try` error path to avoid returning wrong signature.
 - Initialize zero values for non-opaque structs to avoid null deref when building Result payloads.
+
+Current known issues/workarounds:
+
+- Result<*T> in stdlib generics triggers a typechecker mismatch (expected Ptr(Path("T", [])) vs Ptr(Param("T"))), so Vec internals avoid Result<*T> and use null checks instead.

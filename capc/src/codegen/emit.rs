@@ -1335,6 +1335,22 @@ fn emit_hir_expr_inner(
                 }
             };
 
+            if module_path == "sys.unsafe_ptr" {
+                if let Some(value) = emit_unsafe_ptr_call(
+                    builder,
+                    module,
+                    call,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    data_counter,
+                )? {
+                    return Ok(value);
+                }
+            }
+
             // Lookup in fn_map by module.function key
             let key = format!("{}.{}", module_path, func_name);
             let info = fn_map
@@ -2166,6 +2182,26 @@ fn emit_hir_struct_literal(
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
+    if matches!(literal.struct_ty.abi, AbiType::Handle) {
+        if literal.fields.len() != 1 {
+            return Err(CodegenError::Unsupported(format!(
+                "opaque struct literal expects 1 field, got {}",
+                literal.fields.len()
+            )));
+        }
+        let value = emit_hir_expr(
+            builder,
+            &literal.fields[0].expr,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            return_lowering,
+            module,
+            data_counter,
+        )?;
+        return Ok(value);
+    }
     let layout = resolve_struct_layout(&literal.struct_ty.ty, "", &struct_layouts.layouts)
         .ok_or_else(|| {
             CodegenError::Unsupported(format!(
@@ -2228,6 +2264,25 @@ fn emit_hir_field_access(
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
     let object_ty = field_access.object.ty();
+    if matches!(object_ty.abi, AbiType::Handle) {
+        let object_value = emit_hir_expr(
+            builder,
+            &field_access.object,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            return_lowering,
+            module,
+            data_counter,
+        )?;
+        if matches!(field_access.field_ty.abi, AbiType::Ptr | AbiType::Handle) {
+            return Ok(object_value);
+        }
+        return Err(CodegenError::Unsupported(
+            "field access on opaque non-pointer field".to_string(),
+        ));
+    }
     let layout =
         resolve_struct_layout(&object_ty.ty, "", &struct_layouts.layouts).ok_or_else(|| {
             CodegenError::Unsupported(format!(
@@ -3770,6 +3825,291 @@ pub(super) fn emit_runtime_wrapper_call(
 
     let mut idx = 0;
     value_from_results(builder, &info.sig.ret, &results, &mut idx)
+}
+
+fn emit_unsafe_ptr_call(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    call: &crate::hir::HirCall,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
+    data_counter: &mut u32,
+) -> Result<Option<ValueRepr>, CodegenError> {
+    let (module_path, func_name) = match &call.callee {
+        crate::hir::ResolvedCallee::Function { module, name, .. } => (module, name),
+        _ => return Ok(None),
+    };
+    if module_path != "sys.unsafe_ptr" {
+        return Ok(None);
+    }
+    let base_name = func_name.split("__").next().unwrap_or(func_name);
+    if call.type_args.len() != 1 {
+        return Err(CodegenError::Unsupported(format!(
+            "{base_name} expects one type argument"
+        )));
+    }
+    let elem_ty = &call.type_args[0];
+    let ptr_ty = module.isa().pointer_type();
+    let elem_hir = hir_type_from_ty(elem_ty, enum_index, struct_layouts, ptr_ty)?;
+    let layout = type_layout_from_index(&elem_hir, struct_layouts, ptr_ty)?;
+    match base_name {
+        "sizeof" => {
+            let size = builder
+                .ins()
+                .iconst(ir::types::I32, layout.size as i64);
+            return Ok(Some(ValueRepr::Single(size)));
+        }
+        "alignof" => {
+            let align = builder
+                .ins()
+                .iconst(ir::types::I32, layout.align as i64);
+            return Ok(Some(ValueRepr::Single(align)));
+        }
+        "ptr_cast" | "ptr_cast_u8" => {
+            if call.args.len() != 1 {
+                return Err(CodegenError::Unsupported(format!(
+                    "{base_name} expects (ptr)"
+                )));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects a pointer value"
+                    )))
+                }
+            };
+            return Ok(Some(ValueRepr::Single(base_ptr)));
+        }
+        "ptr_is_null" => {
+            if call.args.len() != 1 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_is_null expects (ptr)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_is_null expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let is_null = builder.ins().icmp_imm(
+                ir::condcodes::IntCC::Equal,
+                base_ptr,
+                0,
+            );
+            return Ok(Some(ValueRepr::Single(is_null)));
+        }
+        "ptr_add" => {
+            if call.args.len() != 2 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_add expects (ptr, offset)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_add expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let offset_val = match emit_hir_expr(
+                builder,
+                &call.args[1],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(val) => val,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_add expects an i32 offset".to_string(),
+                    ))
+                }
+            };
+            let offset = if ptr_ty != ir::types::I32 {
+                builder.ins().sextend(ptr_ty, offset_val)
+            } else {
+                offset_val
+            };
+            let stride = builder.ins().iconst(ptr_ty, layout.size as i64);
+            let byte_offset = if layout.size == 1 {
+                offset
+            } else {
+                builder.ins().imul(offset, stride)
+            };
+            let addr = builder.ins().iadd(base_ptr, byte_offset);
+            return Ok(Some(ValueRepr::Single(addr)));
+        }
+        "ptr_read" => {
+            if call.args.len() != 1 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_read expects (ptr)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_read expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let value = load_value_by_ty(
+                builder,
+                base_ptr,
+                0,
+                &elem_hir,
+                enum_index,
+                struct_layouts,
+                module,
+            )?;
+            return Ok(Some(value));
+        }
+        "ptr_write" => {
+            if call.args.len() != 2 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_write expects (ptr, value)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_write expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let value = emit_hir_expr(
+                builder,
+                &call.args[1],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            store_value_by_ty(
+                builder,
+                base_ptr,
+                0,
+                &elem_hir,
+                value,
+                enum_index,
+                struct_layouts,
+                module,
+            )?;
+            return Ok(Some(ValueRepr::Unit));
+        }
+        _ => {}
+    }
+    Ok(None)
+}
+
+fn hir_type_from_ty(
+    ty: &crate::typeck::Ty,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    ptr_ty: Type,
+) -> Result<crate::hir::HirType, CodegenError> {
+    use crate::typeck::{BuiltinType, Ty};
+    let abi = match ty {
+        Ty::Builtin(b) => match b {
+            BuiltinType::I32 => AbiType::I32,
+            BuiltinType::I64 => {
+                return Err(CodegenError::Unsupported(
+                    "i64 is not supported by the current codegen backend".to_string(),
+                ))
+            }
+            BuiltinType::U32 => AbiType::U32,
+            BuiltinType::U8 => AbiType::U8,
+            BuiltinType::Bool => AbiType::Bool,
+            BuiltinType::Unit | BuiltinType::Never => AbiType::Unit,
+        },
+        Ty::Ptr(_) => AbiType::Ptr,
+        Ty::Ref(inner) => {
+            return hir_type_from_ty(inner, enum_index, struct_layouts, ptr_ty);
+        }
+        Ty::Param(_) => {
+            return Err(CodegenError::Unsupported(
+                "generic type parameters must be monomorphized before codegen".to_string(),
+            ))
+        }
+        Ty::Path(name, _args) => {
+            if resolve_struct_layout(ty, "", &struct_layouts.layouts).is_some() {
+                AbiType::Ptr
+            } else if enum_index.layouts.contains_key(name) {
+                AbiType::Ptr
+            } else if enum_index.variants.contains_key(name) {
+                AbiType::I32
+            } else {
+                AbiType::Handle
+            }
+        }
+    };
+    Ok(crate::hir::HirType { ty: ty.clone(), abi })
 }
 
 fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {

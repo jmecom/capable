@@ -140,9 +140,18 @@ fn enforce_vec_method_constraints(
     let is_u8 = matches!(elem, Ty::Builtin(BuiltinType::U8));
     let is_i32 = matches!(elem, Ty::Builtin(BuiltinType::I32));
     let is_string = is_string_ty(elem);
+    let is_param = matches!(elem, Ty::Param(_));
     match method {
         "as_slice" | "slice" | "extend_slice" | "to_string" => {
             if !is_u8 {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        "capacity" | "reserve" | "shrink_to_fit" => {
+            if !is_u8 && !is_i32 && !is_string && !is_param {
                 return Err(TypeError::new(
                     format!("Vec<{elem:?}> does not support `{method}`"),
                     span,
@@ -171,7 +180,10 @@ fn enforce_vec_method_constraints(
 }
 
 /// Safe packages cannot mention externs or raw pointer types anywhere.
-pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
+pub(super) fn validate_package_safety(
+    module: &Module,
+    is_stdlib: bool,
+) -> Result<(), TypeError> {
     if module.package != PackageSafety::Safe {
         return Ok(());
     }
@@ -184,14 +196,19 @@ pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> 
                 ));
             }
             Item::Function(func) => {
-                if let Some(span) = type_contains_ptr_fn(func) {
-                    return Err(TypeError::new(
-                        "raw pointer types require `package unsafe`".to_string(),
-                        span,
-                    ));
+                if !is_stdlib {
+                    if let Some(span) = type_contains_ptr_fn(func) {
+                        return Err(TypeError::new(
+                            "raw pointer types require `package unsafe`".to_string(),
+                            span,
+                        ));
+                    }
                 }
             }
             Item::Impl(impl_block) => {
+                if is_stdlib {
+                    continue;
+                }
                 for method in &impl_block.methods {
                     if let Some(span) = type_contains_ptr_fn(method) {
                         return Err(TypeError::new(
@@ -202,6 +219,9 @@ pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> 
                 }
             }
             Item::Struct(decl) => {
+                if is_stdlib {
+                    continue;
+                }
                 if let Some(span) = type_contains_ptr_struct(decl) {
                     return Err(TypeError::new(
                         "raw pointer types require `package unsafe`".to_string(),
@@ -210,12 +230,45 @@ pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> 
                 }
             }
             Item::Enum(decl) => {
-                if let Some(span) = type_contains_ptr_enum(decl) {
-                    return Err(TypeError::new(
-                        "raw pointer types require `package unsafe`".to_string(),
-                        span,
-                    ));
+                if !is_stdlib {
+                    if let Some(span) = type_contains_ptr_enum(decl) {
+                        return Err(TypeError::new(
+                            "raw pointer types require `package unsafe`".to_string(),
+                            span,
+                        ));
+                    }
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_import_safety(
+    module: &Module,
+    package_map: &HashMap<String, PackageSafety>,
+    stdlib_names: &HashSet<String>,
+) -> Result<(), TypeError> {
+    if module.package != PackageSafety::Safe {
+        return Ok(());
+    }
+    for use_decl in &module.uses {
+        let mut name = String::new();
+        for (i, seg) in use_decl.path.segments.iter().enumerate() {
+            if i > 0 {
+                name.push('.');
+            }
+            name.push_str(&seg.item);
+        }
+        if let Some(pkg) = package_map.get(&name) {
+            if *pkg == PackageSafety::Unsafe {
+                if stdlib_names.contains(&name) {
+                    continue;
+                }
+                return Err(TypeError::new(
+                    format!("safe module cannot import unsafe module `{name}`"),
+                    use_decl.span,
+                ));
             }
         }
     }
@@ -1902,6 +1955,11 @@ pub(super) fn check_expr(
                         || left == Ty::Builtin(BuiltinType::I64))
                     {
                         Ok(left)
+                    } else if left == right
+                        && matches!(left, Ty::Param(_))
+                        && module_name == "sys.vec"
+                    {
+                        Ok(left)
                     } else if matches!(left, Ty::Builtin(BuiltinType::Never))
                         || matches!(right, Ty::Builtin(BuiltinType::Never))
                     {
@@ -2616,9 +2674,20 @@ fn check_struct_literal(
     } else {
         type_name.clone()
     };
-    let info = struct_map.get(&key).ok_or_else(|| {
-        TypeError::new(format!("unknown struct `{}`", key), lit.span)
-    })?;
+    let (key, info) = match struct_map.get(&key) {
+        Some(info) => (key, info),
+        None => {
+            let qualified = if lit.path.segments.len() == 1 {
+                format!("{}.{}", module_name, key)
+            } else {
+                key.clone()
+            };
+            let info = struct_map.get(&qualified).ok_or_else(|| {
+                TypeError::new(format!("unknown struct `{}`", key), lit.span)
+            })?;
+            (qualified, info)
+        }
+    };
     if info.type_params.is_empty() {
         if !type_args.is_empty() {
             return Err(TypeError::new(

@@ -366,6 +366,17 @@ fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
     path.segments.iter().map(|seg| seg.item.clone()).collect()
 }
 
+fn path_to_string(path: &Path) -> String {
+    let mut out = String::new();
+    for (i, seg) in path.segments.iter().enumerate() {
+        if i > 0 {
+            out.push('.');
+        }
+        out.push_str(&seg.item);
+    }
+    out
+}
+
 /// Resolve a method receiver type to (module, type name, type args).
 /// Builtins with methods (string/u8) are mapped to their stdlib modules.
 fn resolve_method_target(
@@ -1022,6 +1033,18 @@ pub fn type_check_program(
     user_modules: &[Module],
 ) -> Result<crate::hir::HirProgram, TypeError> {
     let use_map = UseMap::new(module);
+    let stdlib_names: HashSet<String> = stdlib
+        .iter()
+        .map(|m| path_to_string(&m.name))
+        .collect();
+    let mut package_map: HashMap<String, PackageSafety> = HashMap::new();
+    for m in stdlib {
+        package_map.insert(path_to_string(&m.name), m.package);
+    }
+    for m in user_modules {
+        package_map.insert(path_to_string(&m.name), m.package);
+    }
+    package_map.insert(path_to_string(&module.name), module.package);
     let stdlib_index = collect::build_stdlib_index(stdlib)?;
     let modules = stdlib
         .iter()
@@ -1029,11 +1052,31 @@ pub fn type_check_program(
         .chain(std::iter::once(module))
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();
-    check::validate_package_safety(module)
+    check::validate_package_safety(module, false)
+        .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
+    check::validate_import_safety(module, &package_map, &stdlib_names)
         .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
     for user_module in user_modules {
-        check::validate_package_safety(user_module)
+        check::validate_package_safety(user_module, false)
             .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
+        check::validate_import_safety(
+            user_module,
+            &package_map,
+            &stdlib_names,
+        )
+        .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
+    }
+    for stdlib_module in stdlib {
+        check::validate_package_safety(stdlib_module, true)
+            .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
+        if stdlib_module.package == PackageSafety::Safe {
+            check::validate_import_safety(
+                stdlib_module,
+                &package_map,
+                &stdlib_names,
+            )
+            .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
+        }
     }
     let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)
         .map_err(|err| err.with_context("while collecting structs"))?;

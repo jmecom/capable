@@ -605,7 +605,7 @@ fn type_of_ast_expr(
     }
     let mut scopes = super::Scopes::from_flat_map(ctx.local_types.clone());
     let mut recorder = super::check::TypeRecorder::new(None);
-    let type_params = HashSet::new();
+    let type_params = ctx.type_params.clone();
     check::check_expr(
         expr,
         ctx.functions,
@@ -990,9 +990,20 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 type_name.clone()
             };
 
-            let info = ctx.structs.get(&key).ok_or_else(|| {
-                TypeError::new(format!("unknown struct `{}`", key), lit.span)
-            })?;
+            let (key, info) = match ctx.structs.get(&key) {
+                Some(info) => (key, info),
+                None => {
+                    let qualified = if lit.path.segments.len() == 1 {
+                        format!("{}.{}", ctx.module_name, key)
+                    } else {
+                        key.clone()
+                    };
+                    let info = ctx.structs.get(&qualified).ok_or_else(|| {
+                        TypeError::new(format!("unknown struct `{}`", key), lit.span)
+                    })?;
+                    (qualified, info)
+                }
+            };
 
             if info.is_opaque && info.module != ctx.module_name {
                 return Err(TypeError::new(
