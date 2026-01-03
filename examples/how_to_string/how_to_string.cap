@@ -10,7 +10,7 @@ fn demo_string_view(c: Console, alloc: Alloc) -> unit {
   c.println("-- string view --")
   c.println(s)
   c.println("len:")
-  c.println(s.len())
+  c.println_i32(s.len())
 
   match (s.index_of_byte(',')) {
     Ok(i) => {
@@ -24,7 +24,7 @@ fn demo_string_view(c: Console, alloc: Alloc) -> unit {
 
   let words = s.split(alloc, ',')
   c.println("split count:")
-  c.println(words.len())
+  c.println_i32(words.len())
   match (words[0]) {
     Ok(w0) => { c.println(w0) }
     Err(_) => { c.println("word0 missing") }
