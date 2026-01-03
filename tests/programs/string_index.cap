@@ -8,7 +8,7 @@ pub fn main(rc: RootCap) -> i32 {
   // Test basic string indexing
   let s = "hello"
   let first = s[0]
-  if (first != 104u8) {  // 'h' is 104
+  if (first != 'h') {  // expect 'h'
     c.println("FAIL: first")
     return 1
   }
@@ -16,7 +16,7 @@ pub fn main(rc: RootCap) -> i32 {
 
   // Test middle character
   let middle = s[2]
-  if (middle != 108u8) {  // 'l' is 108
+  if (middle != 'l') {  // expect 'l'
     c.println("FAIL: middle")
     return 1
   }
@@ -24,7 +24,7 @@ pub fn main(rc: RootCap) -> i32 {
 
   // Test last character
   let last = s[4]
-  if (last != 111u8) {  // 'o' is 111
+  if (last != 'o') {  // expect 'o'
     c.println("FAIL: last")
     return 1
   }
@@ -33,7 +33,7 @@ pub fn main(rc: RootCap) -> i32 {
   // Test indexing with variable
   let i = 1
   let at_i = s[i]
-  if (at_i != 101u8) {  // 'e' is 101
+  if (at_i != 'e') {  // expect 'e'
     c.println("FAIL: var index")
     return 1
   }

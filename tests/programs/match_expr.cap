@@ -9,9 +9,9 @@ pub fn main(rc: RootCap) -> i32 {
   }
   c.assert(
     v.len() == 3 &&
-    v.byte_at(0) == 121u8 &&
-    v.byte_at(1) == 101u8 &&
-    v.byte_at(2) == 115u8
+    v.byte_at(0) == 'y' &&
+    v.byte_at(1) == 'e' &&
+    v.byte_at(2) == 's'
   )
   c.println(v)
   return 0

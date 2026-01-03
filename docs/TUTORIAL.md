@@ -1,12 +1,18 @@
-# Capable in 15 Minutes
+# Capable Tutorial
 
-Capable is a small capability-secure systems language. The main idea: authority is a value. If you didn't receive a capability, you can't do the thing.
+Capable is a small, capability-secure systems language. Authority is a value: if
+you did not receive a capability, you cannot perform that action. The language
+leans Go-like in surface syntax while keeping a tighter, explicit memory and
+capability model.
 
-This tutorial is a quick tour of the current language slice and the capability model.
+This tutorial is a cohesive walk-through of the language as it exists today.
+It focuses on how to write real programs, how the capability model works, and
+how memory is managed.
 
 ## 1) Hello, console
 
 ```cap
+package safe
 module hello
 use sys::system
 
@@ -17,18 +23,20 @@ pub fn main(rc: RootCap) -> i32 {
 }
 ```
 
-`RootCap` is the root authority passed to `main`. It can mint narrower capabilities (console, filesystem, etc.).
+`RootCap` is the root authority passed to `main`. It can mint narrower
+capabilities (console, filesystem, network, allocators).
 
-## 2) Basic syntax
+## 2) Language basics
 
 ```cap
+package safe
 module basics
 
 pub fn add(a: i32, b: i32) -> i32 {
   return a + b
 }
 
-pub fn main() -> i32 {
+pub fn main(rc: RootCap) -> i32 {
   let x = 1
   let y: i32 = 2
   if (x < y) {
@@ -39,109 +47,31 @@ pub fn main() -> i32 {
 }
 ```
 
-- Statements: `let`, assignment, `if`, `while`, `for`, `return`, `match`, `defer`.
+Key syntax:
+- Statements: `let`, assignment, `if`, `while`, `for`, `match`, `return`, `defer`.
 - Expressions: literals, calls, binary ops, unary ops, method calls.
-- Modules + imports: `module ...` and `use ...` (aliases by last path segment).
-- If a function returns `unit`, you can omit the `-> unit` annotation.
-- `for { ... }` is an infinite loop (Go style); `for i in a..b` is range.
+- Modules + imports: `module ...` and `use ...` (alias by last path segment).
+- `for { ... }` is an infinite loop; `for i in a..b` is a range loop.
 - Integer arithmetic traps on overflow.
 - Variable shadowing is not allowed.
 
-## 3) Structs and enums
+## 3) Control flow and pattern matching
 
 ```cap
-module types
+package safe
+module match_demo
 
-struct Pair { left: i32, right: i32 }
-
-enum Color { Red, Green, Blue }
-```
-
-Structs and enums are nominal types. Enums are currently unit variants only.
-
-## 4) Defer
-
-`defer` schedules a function or method call to run when the current scope
-exits (LIFO order). Arguments are evaluated at the defer site.
-
-```cap
 pub fn main(rc: RootCap) -> i32 {
-  let c = rc.mint_console()
-  c.println("start")
-  defer c.println("cleanup")
-  c.println("end")
-  return 0
-}
-```
-
-Current restriction: the deferred expression must be a call.
-
-## 5) Methods
-
-Methods are defined in `impl` blocks and lower to `Type__method` at compile time.
-
-```cap
-module methods
-
-struct Pair { left: i32, right: i32 }
-
-impl Pair {
-  pub fn sum(self) -> i32 { return self.left + self.right }
-  pub fn add(self, x: i32) -> i32 { return self.sum() + x }
-  pub fn peek(self: &Pair) -> i32 { return self.left }
-}
-```
-
-Method receivers can be `self` (move) or `self: &T` (borrow‑lite, read‑only).
-
-## 6) Results, match, and `?`
-
-```cap
-module results
-
-pub fn main() -> i32 {
-  let ok: Result[i32, i32] = Ok(10)
-  match ok {
-    Ok(x) => { return x }
-    Err(e) => { return 0 }
+  let flag = true
+  match flag {
+    true => { return 1 }
+    false => { return 0 }
   }
 }
 ```
 
-`Result[T, E]` is the only generic type today and is special-cased by the compiler.
-
-Inside a function that returns `Result`, you can use `?` to unwrap or return early:
-
-```cap
-module results_try
-
-fn read_value() -> Result[i32, i32] {
-  return Ok(7)
-}
-
-fn use_value() -> Result[i32, i32] {
-  let v = read_value()?
-  return Ok(v + 1)
-}
-```
-
-You can also unwrap with defaults:
-
-```cap
-let v = make().unwrap_or(0)
-let e = make().unwrap_err_or(0)
-```
-
-Matches must be exhaustive; use `_` to cover the rest:
-
-```cap
-match flag {
-  true => { }
-  false => { }
-}
-```
-
-You can also use `if let` as a single-arm `match`:
+Matches must be exhaustive; use `_` to cover the rest. `if let` is a
+single-arm match:
 
 ```cap
 if let Ok(x) = make() {
@@ -151,59 +81,79 @@ if let Ok(x) = make() {
 }
 ```
 
-## 7) Capabilities and attenuation
-
-Capabilities live in `sys.*` and are declared with the `capability` keyword (capability types are opaque). You can only get them from `RootCap`.
+## 4) Structs, enums, methods
 
 ```cap
+package safe
+module types
+
+struct Pair { left: i32, right: i32 }
+
+enum Color { Red, Green, Blue }
+
+impl Pair {
+  pub fn sum(self) -> i32 { return self.left + self.right }
+  pub fn peek(self: &Pair) -> i32 { return self.left }
+}
+```
+
+- Structs and enums are nominal types.
+- Methods are defined in `impl` blocks and lower to `Type__method` in codegen.
+- Method receivers can be `self` (move) or `self: &T` (borrow-lite, read-only).
+
+## 5) Results and error flow
+
+Capable uses `Result[T, E]` for recoverable errors.
+
+```cap
+package safe
+module results
+
+fn parse() -> Result<i32, i32> {
+  return Ok(7)
+}
+
+fn use_value() -> Result<i32, i32> {
+  let v = parse()?
+  return Ok(v + 1)
+}
+```
+
+Other helpers:
+
+```cap
+let v = make().unwrap_or(0)
+let e = make().unwrap_err_or(0)
+```
+
+## 6) Capabilities and attenuation
+
+Capabilities live in `sys.*` and are declared with `capability` (opaque, no
+public fields, no user construction). You only get them from `RootCap`.
+
+```cap
+package safe
 module read_config
 use sys::system
 use sys::fs
 
 pub fn main(rc: RootCap) -> i32 {
-  let fs = rc.mint_filesystem("./config")
-  let dir = fs.root_dir()
-  let file = dir.open_read("app.txt")
-
-  match file.read_to_string() {
+  let fs = rc.mint_readfs("./config")
+  let alloc = rc.mint_alloc_default()
+  match fs.read_to_string(alloc, "app.txt") {
     Ok(s) => { rc.mint_console().println(s); return 0 }
-    Err(e) => { return 1 }
+    Err(_) => { return 1 }
   }
 }
 ```
 
-This is attenuation: each step narrows authority. There is no safe API to widen back.
+Attenuation is one-way: methods that return capabilities must take `self` by
+value, so you give up the more powerful capability when you derive a narrower
+one. This is enforced by the compiler.
 
-To make attenuation one-way at compile time, any method that returns a capability must take `self` by value. Methods that take `&self` cannot return capabilities.
+## 7) Kinds: copy, affine, linear
 
-Example of what is rejected (and why):
-
-```cap
-capability struct Dir
-capability struct FileRead
-
-impl Dir {
-  pub fn open(self: &Dir, name: string) -> FileRead {
-    let file = self.open_read(name)
-    return file
-  }
-}
-```
-
-Why this is rejected:
-
-- `Dir` can read many files (more power).
-- `FileRead` can read one file (less power).
-- The bad example lets you keep the more powerful `Dir` and also get a `FileRead`.
-- We want “one-way” attenuation: when you make something less powerful, you give up the more powerful one.
-
-So methods that return capabilities must take `self` by value, which consumes the old capability.
-
-## 8) Capability, opaque, copy, affine, linear
-
-`capability struct` is the explicit “this is an authority token” marker. Capability types are always opaque (no public fields, no user construction) and default to affine unless marked `copy` or `linear`. This exists so the capability surface is obvious in code and the compiler can enforce one‑way attenuation (methods returning capabilities must take `self` by value).
-
-Structs can declare their kind:
+Types can declare how they move:
 
 ```cap
 capability struct Token           // affine by default (move-only)
@@ -212,62 +162,15 @@ linear capability struct FileRead // must be consumed
 ```
 
 Kinds:
-
-- **Unrestricted** (copy): can be reused freely.
-- **Affine** (default for capability/opaque): move-only, dropping is OK.
+- **Copy**: reusable.
+- **Affine**: move-only, dropping is allowed.
 - **Linear**: move-only and must be consumed on all paths.
 
-Use `capability struct` for authority-bearing tokens. Use `opaque struct` for unforgeable data types that aren’t capabilities.
+## 8) Borrow-lite references: `&T`
 
-In the current stdlib:
-
-- `copy capability`: `RootCap`, `Console`, `Args`
-- `copy opaque`: `Alloc`, `Buffer`, `Slice`, `MutSlice`, `VecU8`, `VecI32`, `VecString`
-- `capability` (affine): `ReadFS`, `Filesystem`, `Dir`, `Stdin`
-- `linear capability`: `FileRead`
-
-## 9) Moves and use-after-move
+Capable has a minimal borrow system for read-only access:
 
 ```cap
-module moves
-
-capability struct Token
-
-pub fn main() -> i32 {
-  let t = Token{}
-  let u = t
-  let v = t  // error: use of moved value
-  return 0
-}
-```
-
-Affine and linear values cannot be used after move. If you move in one branch, it's moved after the join.
-
-## 10) Linear must be consumed
-
-```cap
-module linear
-
-linear capability struct Ticket
-
-pub fn main() -> i32 {
-  let t = Ticket{}
-  drop(t)   // consumes t
-  return 0
-}
-```
-
-Linear values must be consumed along every path. You can consume them with a terminal method (like `FileRead.close()` or `read_to_string()`), or with `drop(x)` as a last resort.
-
-## 11) Borrow-lite: &T parameters
-
-There is a small borrow feature for read-only access in function parameters and locals.
-
-```cap
-module borrow
-
-capability struct Cap
-
 impl Cap {
   pub fn ping(self: &Cap) -> i32 { return 1 }
 }
@@ -280,29 +183,100 @@ pub fn twice(c: &Cap) -> i32 {
 ```
 
 Rules:
-
 - `&T` is allowed on parameters and locals.
-- Reference locals must be initialized from another local value.
-- References cannot be stored in structs, enums, or returned.
-- References are read-only: they can only satisfy `&T` parameters.
-- Passing a value to `&T` implicitly borrows it.
+- References cannot be stored in structs/enums or returned.
+- References are read-only.
 
-This avoids a full borrow checker while making non-consuming observers ergonomic.
+This keeps the language simple without a full borrow checker.
 
-## 12) Safety boundary
+## 9) Memory model (explicit ownership)
 
-`package safe` is default. Raw pointers and extern calls require `package unsafe`.
+Capable has explicit memory management. Owned heap types must be freed.
+Non-owning views must not outlive their backing storage.
+
+Owned types:
+- `Vec<T>` (heap-backed)
+- `Text` (owned UTF-8 bytes, backed by `Vec<u8>`)
+
+Views:
+- `string` (non-owning view of bytes)
+- `Slice<T>`, `MutSlice<T>` (non-owning views)
+
+Safe code cannot return or store slices in structs/enums, which keeps slice
+lifetimes local until a full lifetime model exists.
+
+### Allocators
+
+Allocation is explicit. Functions that allocate accept an `Alloc` handle:
 
 ```cap
-package unsafe
-module ffi
-
-extern fn some_ffi(x: i32) -> i32
+let alloc = rc.mint_alloc_default()
+let v = alloc.vec_u8_new()
+...
+alloc.vec_u8_free(v)
 ```
 
-## 13) Raw pointers and unsafe
+Use `defer` to simplify cleanup.
 
-Raw pointers are available as `*T`, but **only** in `package unsafe`.
+## 10) Strings: `string` vs `Text`
+
+`string` is a view. `Text` is owned.
+
+```cap
+fn build_greeting(alloc: Alloc) -> Result<string, buffer::AllocErr> {
+  let s = "hello"
+  let _bytes = s.as_slice()
+  let _sub = s.slice_range(0, 5)?
+
+  let t = alloc.text_new()
+  defer t.free(alloc)
+  t.push_str("hello")?
+  t.push_byte(' ')?
+  t.append("text")?
+  let out = t.to_string()?
+  return Ok(out)
+}
+```
+
+Helpers:
+- `string.split`, `split_once`, `trim_*`, `contains`, `index_of_*`.
+- `string.concat(alloc, other)` creates a new owned string view.
+- `Text.slice_range` returns a `string` view into its buffer.
+
+## 11) Slices and indexing
+
+Slices are bounds-checked in safe code. Indexing out of bounds traps.
+If you need a checked version, use `slice_range` or `byte_at_checked`.
+
+```cap
+fn use_tail(s: string) -> Result<unit, buffer::SliceErr> {
+  let buf = s.as_slice()
+  let b0 = buf.at(0) // traps if out of bounds
+  let tail = buf.slice_range(1, 3)?
+  let _b1 = tail.at(0)
+  return Ok(())
+}
+```
+
+## 12) Defer (scope-based cleanup)
+
+`defer` schedules a call to run when the current scope exits (LIFO order):
+
+```cap
+let c = rc.mint_console()
+let alloc = rc.mint_alloc_default()
+let v = alloc.vec_u8_new()
+
+// ensure we free on all paths
+ defer alloc.vec_u8_free(v)
+```
+
+Deferred expressions must be calls; arguments are evaluated at the defer site.
+
+## 13) Safe vs unsafe
+
+`package safe` is default. Raw pointers and extern calls require
+`package unsafe`.
 
 ```cap
 package unsafe
@@ -310,21 +284,53 @@ module pointers
 
 pub fn main(rc: RootCap) -> i32 {
   let alloc = rc.mint_alloc_default()
-  let ptr: *u8 = alloc.malloc(16)
-  alloc.free(ptr)
+  let p = alloc.malloc(16)
+  alloc.free(p)
   return 0
 }
 ```
 
-There is no borrow checker for pointers. Use them only inside `package unsafe`.
+Unsafe is auditable: `--safe-only` rejects unsafe dependencies, and `audit`
+reports unsafe packages.
 
-## 14) What exists today (quick list)
+## 14) Putting it together: a small parser
 
-- Methods, modules, enums, match, while, if
-- Opaque capability handles in `sys.*`
-- Linear/affine checking with control-flow joins
-- Borrow-lite `&T` parameters
+```cap
+fn parse_key_value(line: string, alloc: Alloc) -> Result<string, unit> {
+  match (line.index_of_byte('=')) {
+    Ok(i) => {
+      let key = match (line.slice_range(0, i)) {
+        Ok(v) => { v }
+        Err(_) => { return Err(()) }
+      }
+      let val = match (line.slice_range(i + 1, line.len())) {
+        Ok(v) => { v }
+        Err(_) => { return Err(()) }
+      }
+      let mid = match (key.concat(alloc, "=")) {
+        Ok(v) => { v }
+        Err(_) => { return Err(()) }
+      }
+      match (mid.concat(alloc, val)) {
+        Ok(out) => { return Ok(out) }
+        Err(_) => { return Err(()) }
+      }
+    }
+    Err(_) => { return Err(()) }
+  }
+}
+```
+
+This pattern (find delimiter, slice views, optionally allocate) is the common
+way to parse without raw pointers.
 
 ---
 
-That should be enough to read and write small Capable programs, and understand how attenuation and linearity fit together.
+## Where to go next
+
+- Read `docs/memory.md` and `docs/ABI.md` for deeper internals.
+- Explore `examples/` for real programs.
+- Use `defer` aggressively to keep ownership clear.
+
+Capable is intentionally small. The goal is to make capability-based security
+and explicit memory ownership the default, not an advanced feature.

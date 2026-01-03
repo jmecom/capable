@@ -37,8 +37,208 @@ fn record_expr_type(
     Ok(ty)
 }
 
+fn infer_enum_args(template: &Ty, actual: &Ty, inferred: &mut HashMap<String, Ty>) -> bool {
+    match template {
+        Ty::Param(name) => match inferred.get(name) {
+            Some(existing) => {
+                existing == actual
+                    || matches!(actual, Ty::Path(actual_name, args) if actual_name == name && args.is_empty())
+            }
+            None => {
+                inferred.insert(name.clone(), actual.clone());
+                true
+            }
+        },
+        Ty::Builtin(b) => matches!(actual, Ty::Builtin(other) if other == b),
+        Ty::Ptr(inner) => matches!(actual, Ty::Ptr(other) if infer_enum_args(inner, other, inferred)),
+        Ty::Ref(inner) => matches!(actual, Ty::Ref(other) if infer_enum_args(inner, other, inferred)),
+        Ty::Path(name, args) => match actual {
+            Ty::Path(other_name, other_args) if other_name == name && args.len() == other_args.len() => {
+                args.iter()
+                    .zip(other_args.iter())
+                    .all(|(a, b)| infer_enum_args(a, b, inferred))
+            }
+            _ => false,
+        },
+    }
+}
+
+fn resolve_enum_type_args(
+    enum_name: &str,
+    type_params: &[String],
+    inferred: &HashMap<String, Ty>,
+    ret_ty: &Ty,
+) -> Vec<Ty> {
+    if type_params.is_empty() {
+        return Vec::new();
+    }
+    let ret_args = match ret_ty {
+        Ty::Path(ret_name, args) if ret_name == enum_name && args.len() == type_params.len() => {
+            Some(args)
+        }
+        _ => None,
+    };
+    type_params
+        .iter()
+        .enumerate()
+        .map(|(idx, param)| {
+            if let Some(ty) = inferred.get(param) {
+                return ty.clone();
+            }
+            if let Some(args) = ret_args {
+                return args[idx].clone();
+            }
+            Ty::Builtin(BuiltinType::Unit)
+        })
+        .collect()
+}
+
+fn apply_enum_type_args(ty: &Ty, type_params: &[String], type_args: &[Ty]) -> Ty {
+    match ty {
+        Ty::Param(name) => {
+            if let Some(idx) = type_params.iter().position(|p| p == name) {
+                return type_args.get(idx).cloned().unwrap_or_else(|| ty.clone());
+            }
+            ty.clone()
+        }
+        Ty::Builtin(_) => ty.clone(),
+        Ty::Ptr(inner) => Ty::Ptr(Box::new(apply_enum_type_args(inner, type_params, type_args))),
+        Ty::Ref(inner) => Ty::Ref(Box::new(apply_enum_type_args(inner, type_params, type_args))),
+        Ty::Path(name, args) => Ty::Path(
+            name.clone(),
+            args.iter()
+                .map(|arg| apply_enum_type_args(arg, type_params, type_args))
+                .collect(),
+        ),
+    }
+}
+
+fn enum_payload_matches(payload: &Ty, arg_ty: &Ty, type_params: &[String], type_args: &[Ty]) -> bool {
+    let expected = apply_enum_type_args(payload, type_params, type_args);
+    ty_equivalent_for_params(&expected, arg_ty, type_params)
+}
+
+fn ty_equivalent_for_params(left: &Ty, right: &Ty, type_params: &[String]) -> bool {
+    match (left, right) {
+        (Ty::Param(name), Ty::Path(other, args))
+            if args.is_empty() && name == other && type_params.contains(name) =>
+        {
+            true
+        }
+        (Ty::Path(name, args), Ty::Param(other))
+            if args.is_empty() && name == other && type_params.contains(other) =>
+        {
+            true
+        }
+        (Ty::Ptr(l), Ty::Ptr(r)) | (Ty::Ref(l), Ty::Ref(r)) => {
+            ty_equivalent_for_params(l, r, type_params)
+        }
+        (Ty::Path(name, args), Ty::Path(other, other_args))
+            if name == other && args.len() == other_args.len() =>
+        {
+            args.iter()
+                .zip(other_args.iter())
+                .all(|(a, b)| ty_equivalent_for_params(a, b, type_params))
+        }
+        _ => left == right,
+    }
+}
+
+fn ty_equivalent_for_set(left: &Ty, right: &Ty, type_params: &HashSet<String>) -> bool {
+    match (left, right) {
+        (Ty::Param(name), Ty::Path(other, args))
+            if args.is_empty() && name == other && type_params.contains(name) =>
+        {
+            true
+        }
+        (Ty::Path(name, args), Ty::Param(other))
+            if args.is_empty() && name == other && type_params.contains(other) =>
+        {
+            true
+        }
+        (Ty::Ptr(l), Ty::Ptr(r)) | (Ty::Ref(l), Ty::Ref(r)) => {
+            ty_equivalent_for_set(l, r, type_params)
+        }
+        (Ty::Path(name, args), Ty::Path(other, other_args))
+            if name == other && args.len() == other_args.len() =>
+        {
+            args.iter()
+                .zip(other_args.iter())
+                .all(|(a, b)| ty_equivalent_for_set(a, b, type_params))
+        }
+        _ => left == right,
+    }
+}
+
+fn enforce_vec_method_constraints(
+    receiver_ty: &Ty,
+    method: &str,
+    span: Span,
+) -> Result<(), TypeError> {
+    let base = match receiver_ty {
+        Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+        _ => receiver_ty,
+    };
+    let Ty::Path(name, args) = base else {
+        return Ok(());
+    };
+    if name != "Vec" && name != "sys.vec.Vec" {
+        return Ok(());
+    }
+    if args.len() != 1 {
+        return Err(TypeError::new(
+            "Vec expects exactly one type argument".to_string(),
+            span,
+        ));
+    }
+    let elem = &args[0];
+    let is_u8 = matches!(elem, Ty::Builtin(BuiltinType::U8));
+    let is_i32 = matches!(elem, Ty::Builtin(BuiltinType::I32));
+    let is_string = is_string_ty(elem);
+    let is_param = matches!(elem, Ty::Param(_));
+    match method {
+        "as_slice" | "slice" | "extend_slice" | "to_string" => {
+            if !is_u8 {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        "capacity" | "reserve" | "shrink_to_fit" => {
+            if !is_u8 && !is_i32 && !is_string && !is_param {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        "filter" | "map_add" | "set" => {
+            if !is_u8 && !is_i32 {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        "join" => {
+            if !is_string {
+                return Err(TypeError::new(
+                    format!("Vec<{elem:?}> does not support `{method}`"),
+                    span,
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Safe packages cannot mention externs or raw pointer types anywhere.
-pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> {
+pub(super) fn validate_package_safety(
+    module: &Module,
+    is_stdlib: bool,
+) -> Result<(), TypeError> {
     if module.package != PackageSafety::Safe {
         return Ok(());
     }
@@ -51,14 +251,25 @@ pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> 
                 ));
             }
             Item::Function(func) => {
-                if let Some(span) = type_contains_ptr_fn(func) {
-                    return Err(TypeError::new(
-                        "raw pointer types require `package unsafe`".to_string(),
-                        span,
-                    ));
+                if !is_stdlib {
+                    if let Some(span) = type_contains_ptr_fn(func) {
+                        return Err(TypeError::new(
+                            "raw pointer types require `package unsafe`".to_string(),
+                            span,
+                        ));
+                    }
+                    if let Some(span) = type_contains_slice(&func.ret) {
+                        return Err(TypeError::new(
+                            "Slice types cannot be returned from safe modules".to_string(),
+                            span,
+                        ));
+                    }
                 }
             }
             Item::Impl(impl_block) => {
+                if is_stdlib {
+                    continue;
+                }
                 for method in &impl_block.methods {
                     if let Some(span) = type_contains_ptr_fn(method) {
                         return Err(TypeError::new(
@@ -66,23 +277,77 @@ pub(super) fn validate_package_safety(module: &Module) -> Result<(), TypeError> 
                             span,
                         ));
                     }
+                    if let Some(span) = type_contains_slice(&method.ret) {
+                        return Err(TypeError::new(
+                            "Slice types cannot be returned from safe modules".to_string(),
+                            span,
+                        ));
+                    }
                 }
             }
             Item::Struct(decl) => {
+                if is_stdlib {
+                    continue;
+                }
                 if let Some(span) = type_contains_ptr_struct(decl) {
                     return Err(TypeError::new(
                         "raw pointer types require `package unsafe`".to_string(),
                         span,
                     ));
                 }
-            }
-            Item::Enum(decl) => {
-                if let Some(span) = type_contains_ptr_enum(decl) {
+                if let Some(span) = type_contains_slice_struct(decl) {
                     return Err(TypeError::new(
-                        "raw pointer types require `package unsafe`".to_string(),
+                        "Slice types cannot appear in structs in safe modules".to_string(),
                         span,
                     ));
                 }
+            }
+            Item::Enum(decl) => {
+                if !is_stdlib {
+                    if let Some(span) = type_contains_ptr_enum(decl) {
+                        return Err(TypeError::new(
+                            "raw pointer types require `package unsafe`".to_string(),
+                            span,
+                        ));
+                    }
+                    if let Some(span) = type_contains_slice_enum(decl) {
+                        return Err(TypeError::new(
+                            "Slice types cannot appear in enums in safe modules".to_string(),
+                            span,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_import_safety(
+    module: &Module,
+    package_map: &HashMap<String, PackageSafety>,
+    stdlib_names: &HashSet<String>,
+) -> Result<(), TypeError> {
+    if module.package != PackageSafety::Safe {
+        return Ok(());
+    }
+    for use_decl in &module.uses {
+        let mut name = String::new();
+        for (i, seg) in use_decl.path.segments.iter().enumerate() {
+            if i > 0 {
+                name.push('.');
+            }
+            name.push_str(&seg.item);
+        }
+        if let Some(pkg) = package_map.get(&name) {
+            if *pkg == PackageSafety::Unsafe {
+                if stdlib_names.contains(&name) {
+                    continue;
+                }
+                return Err(TypeError::new(
+                    format!("safe module cannot import unsafe module `{name}`"),
+                    use_decl.span,
+                ));
             }
         }
     }
@@ -131,6 +396,61 @@ fn type_contains_ptr_enum(decl: &EnumDecl) -> Option<Span> {
     for variant in &decl.variants {
         if let Some(payload) = &variant.payload {
             if let Some(span) = type_contains_ptr(payload) {
+                return Some(span);
+            }
+        }
+    }
+    None
+}
+
+fn is_slice_type_path(path: &Path) -> bool {
+    let Some(last) = path.segments.last() else {
+        return false;
+    };
+    if last.item != "Slice" && last.item != "MutSlice" {
+        return false;
+    }
+    if path.segments.len() == 1 {
+        return true;
+    }
+    if path.segments.len() == 3 {
+        return path.segments[0].item == "sys"
+            && path.segments[1].item == "buffer"
+            && (last.item == "Slice" || last.item == "MutSlice");
+    }
+    false
+}
+
+fn type_contains_slice(ty: &Type) -> Option<Span> {
+    match ty {
+        Type::Path { path, args, span } => {
+            if is_slice_type_path(path) {
+                return Some(*span);
+            }
+            for arg in args {
+                if let Some(span) = type_contains_slice(arg) {
+                    return Some(span);
+                }
+            }
+            None
+        }
+        Type::Ptr { target, .. } | Type::Ref { target, .. } => type_contains_slice(target),
+    }
+}
+
+fn type_contains_slice_struct(decl: &StructDecl) -> Option<Span> {
+    for field in &decl.fields {
+        if let Some(span) = type_contains_slice(&field.ty) {
+            return Some(span);
+        }
+    }
+    None
+}
+
+fn type_contains_slice_enum(decl: &EnumDecl) -> Option<Span> {
+    for variant in &decl.variants {
+        if let Some(payload) = &variant.payload {
+            if let Some(span) = type_contains_slice(payload) {
                 return Some(span);
             }
         }
@@ -1062,8 +1382,29 @@ pub(super) fn check_expr(
                     return record_expr_type(recorder, expr, ty);
                 }
             }
-            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
-                return record_expr_type(recorder, expr, ty);
+            if let Some(Ty::Path(enum_name, _)) =
+                resolve_enum_variant(path, use_map, enum_map, module_name)
+            {
+                if let Some(info) = enum_map.get(&enum_name) {
+                    let ty = if info.type_params.is_empty() {
+                        Ty::Path(enum_name, Vec::new())
+                    } else if let Ty::Path(ret_name, ret_args) = ret_ty {
+                        if ret_name == &enum_name && ret_args.len() == info.type_params.len() {
+                            Ty::Path(enum_name, ret_args.clone())
+                        } else {
+                            Ty::Path(
+                                enum_name,
+                                vec![Ty::Builtin(BuiltinType::Unit); info.type_params.len()],
+                            )
+                        }
+                    } else {
+                        Ty::Path(
+                            enum_name,
+                            vec![Ty::Builtin(BuiltinType::Unit); info.type_params.len()],
+                        )
+                    };
+                    return record_expr_type(recorder, expr, ty);
+                }
             }
             Err(TypeError::new(
                 format!("unknown value `{path}`"),
@@ -1137,7 +1478,7 @@ pub(super) fn check_expr(
                     if let Ty::Path(ty_name, args) = ret_ty {
                         if ty_name == "sys.result.Result" && args.len() == 2 {
                             let expected = if name == "Ok" { &args[0] } else { &args[1] };
-                            if &arg_ty != expected {
+                            if !ty_equivalent_for_set(&arg_ty, expected, type_params) {
                                 return Err(TypeError::new(
                                     format!("{name} argument type mismatch: expected {expected:?}, got {arg_ty:?}"),
                                     call.args[0].span(),
@@ -1150,15 +1491,94 @@ pub(super) fn check_expr(
                         recorder,
                         expr,
                         Ty::Path(
-                        "sys.result.Result".to_string(),
-                        if name == "Ok" {
-                            vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
-                        } else {
-                            vec![Ty::Builtin(BuiltinType::Unit), arg_ty]
-                        },
+                            "sys.result.Result".to_string(),
+                            if name == "Ok" {
+                                vec![arg_ty, Ty::Builtin(BuiltinType::Unit)]
+                            } else {
+                                vec![Ty::Builtin(BuiltinType::Unit), arg_ty]
+                            },
                         ),
                     );
                 }
+            }
+
+            if let Some(Ty::Path(enum_name, _)) =
+                resolve_enum_variant(&path, use_map, enum_map, module_name)
+            {
+                let Some(info) = enum_map.get(&enum_name) else {
+                    return Err(TypeError::new(
+                        "unknown enum variant".to_string(),
+                        call.span,
+                    ));
+                };
+                let variant = path
+                    .segments
+                    .last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let payload = info.payloads.get(&variant).cloned().unwrap_or(None);
+
+                if payload.is_none() && !call.args.is_empty() {
+                    return Err(TypeError::new(
+                        format!("{variant} takes no arguments"),
+                        call.span,
+                    ));
+                }
+                if payload.is_some() && call.args.len() != 1 {
+                    return Err(TypeError::new(
+                        format!("{variant} takes exactly one argument"),
+                        call.span,
+                    ));
+                }
+
+                let mut inferred: HashMap<String, Ty> = HashMap::new();
+                let arg_ty = if let Some(payload_ty) = payload.clone() {
+                    let arg_ty = check_expr(
+                        &call.args[0],
+                        functions,
+                        scopes,
+                        UseMode::Move,
+                        recorder,
+                        use_map,
+                        struct_map,
+                        enum_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                        type_params,
+                    )?;
+                    if !infer_enum_args(&payload_ty, &arg_ty, &mut inferred) {
+                        return Err(TypeError::new(
+                            format!(
+                                "variant argument type mismatch: expected {payload_ty:?}, got {arg_ty:?}"
+                            ),
+                            call.args[0].span(),
+                        ));
+                    }
+                    Some(arg_ty)
+                } else {
+                    None
+                };
+
+                let type_args = resolve_enum_type_args(
+                    &enum_name,
+                    &info.type_params,
+                    &inferred,
+                    ret_ty,
+                );
+
+                if let Some(payload_ty) = payload {
+                    if let Some(arg_ty) = arg_ty {
+                        if !enum_payload_matches(&payload_ty, &arg_ty, &info.type_params, &type_args) {
+                            return Err(TypeError::new(
+                                "variant argument type mismatch".to_string(),
+                                call.args[0].span(),
+                            ));
+                        }
+                    }
+                }
+
+                return record_expr_type(recorder, expr, Ty::Path(enum_name, type_args));
             }
 
             let resolved = resolve_path(&path, use_map);
@@ -1377,6 +1797,11 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+            )?;
+            enforce_vec_method_constraints(
+                &receiver_ty,
+                &method_call.method.item,
+                method_call.method.span,
             )?;
             let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
@@ -1662,6 +2087,11 @@ pub(super) fn check_expr(
                 | BinaryOp::Div => {
                     if left == right && (left == Ty::Builtin(BuiltinType::I32)
                         || left == Ty::Builtin(BuiltinType::I64))
+                    {
+                        Ok(left)
+                    } else if left == right
+                        && matches!(left, Ty::Param(_))
+                        && module_name == "sys.vec"
                     {
                         Ok(left)
                     } else if matches!(left, Ty::Builtin(BuiltinType::Never))
@@ -1984,29 +2414,17 @@ pub(super) fn check_expr(
                     Ok(Ty::Builtin(BuiltinType::U8))
                 }
                 // Vec types return Result<T, VecErr>
-                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString" => {
+                Ty::Path(name, args) if name == "Vec" || name == "sys.vec.Vec" => {
+                    if args.len() != 1 {
+                        return Err(TypeError::new(
+                            "Vec expects exactly one type argument".to_string(),
+                            index_expr.span,
+                        ));
+                    }
                     Ok(Ty::Path(
                         "sys.result.Result".to_string(),
                         vec![
-                            stdlib_string_ty(stdlib),
-                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
-                        ],
-                    ))
-                }
-                Ty::Path(name, _) if name == "VecI32" || name == "sys.vec.VecI32" => {
-                    Ok(Ty::Path(
-                        "sys.result.Result".to_string(),
-                        vec![
-                            Ty::Builtin(BuiltinType::I32),
-                            Ty::Path("sys.vec.VecErr".to_string(), vec![]),
-                        ],
-                    ))
-                }
-                Ty::Path(name, _) if name == "VecU8" || name == "sys.vec.VecU8" => {
-                    Ok(Ty::Path(
-                        "sys.result.Result".to_string(),
-                        vec![
-                            Ty::Builtin(BuiltinType::U8),
+                            args[0].clone(),
                             Ty::Path("sys.vec.VecErr".to_string(), vec![]),
                         ],
                     ))
@@ -2316,7 +2734,12 @@ fn check_match_exhaustive(
             };
             let mut seen = HashSet::new();
             for arm in arms {
-                if let Pattern::Path(path) = &arm.pattern {
+                let path = match &arm.pattern {
+                    Pattern::Path(path) => Some(path),
+                    Pattern::Call { path, .. } => Some(path),
+                    _ => None,
+                };
+                if let Some(path) = path {
                     if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
                         if same_type_constructor(&ty, match_ty) {
                             if let Some(seg) = path.segments.last() {
@@ -2385,9 +2808,20 @@ fn check_struct_literal(
     } else {
         type_name.clone()
     };
-    let info = struct_map.get(&key).ok_or_else(|| {
-        TypeError::new(format!("unknown struct `{}`", key), lit.span)
-    })?;
+    let (key, info) = match struct_map.get(&key) {
+        Some(info) => (key, info),
+        None => {
+            let qualified = if lit.path.segments.len() == 1 {
+                format!("{}.{}", module_name, key)
+            } else {
+                key.clone()
+            };
+            let info = struct_map.get(&qualified).ok_or_else(|| {
+                TypeError::new(format!("unknown struct `{}`", key), lit.span)
+            })?;
+            (qualified, info)
+        }
+    };
     if info.type_params.is_empty() {
         if !type_args.is_empty() {
             return Err(TypeError::new(
@@ -2629,9 +3063,6 @@ fn bind_pattern(
 ) -> Result<(), TypeError> {
     match pattern {
         Pattern::Call { path, binding, .. } => {
-            let Some(binding) = binding else {
-                return Ok(());
-            };
             let name = path
                 .segments
                 .iter()
@@ -2640,19 +3071,64 @@ fn bind_pattern(
                 .join(".");
             if let Ty::Path(ty_name, args) = match_ty {
                 if ty_name == "sys.result.Result" && args.len() == 2 {
-                    let ty = if name == "Ok" {
-                        args[0].clone()
-                    } else if name == "Err" {
-                        args[1].clone()
-                    } else {
-                        return Ok(());
-                    };
-                    scopes.insert_local(binding.item.clone(), ty);
+                    if let Some(binding) = binding {
+                        let ty = if name == "Ok" {
+                            args[0].clone()
+                        } else if name == "Err" {
+                            args[1].clone()
+                        } else {
+                            return Ok(());
+                        };
+                        scopes.insert_local(binding.item.clone(), ty);
+                    }
                     return Ok(());
                 }
             }
+            if let Some(Ty::Path(enum_name, _)) =
+                resolve_enum_variant(path, use_map, enum_map, module_name)
+            {
+                let Ty::Path(match_name, match_args) = match_ty else {
+                    return Err(TypeError::new(
+                        format!("pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"),
+                        path.span,
+                    ));
+                };
+                if match_name != &enum_name {
+                    return Err(TypeError::new(
+                        format!("pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"),
+                        path.span,
+                    ));
+                }
+                if let Some(binding) = binding {
+                    let Some(info) = enum_map.get(&enum_name) else {
+                        return Err(TypeError::new("unknown enum variant".to_string(), path.span));
+                    };
+                    let variant = path
+                        .segments
+                        .last()
+                        .map(|s| s.item.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let payload = info.payloads.get(&variant).cloned().unwrap_or(None);
+                    let Some(payload_ty) = payload else {
+                        return Err(TypeError::new(
+                            format!("variant `{name}` has no payload"),
+                            path.span,
+                        ));
+                    };
+                    if info.type_params.len() != match_args.len() {
+                        return Err(TypeError::new(
+                            "pattern type mismatch".to_string(),
+                            path.span,
+                        ));
+                    }
+                    let payload_ty =
+                        apply_enum_type_args(&payload_ty, &info.type_params, match_args);
+                    scopes.insert_local(binding.item.clone(), payload_ty);
+                }
+                return Ok(());
+            }
             Err(TypeError::new(
-                "pattern binding requires a Result match".to_string(),
+                "pattern binding requires an enum match".to_string(),
                 path.span,
             ))
         }

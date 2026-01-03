@@ -1,0 +1,19 @@
+package safe
+module should_fail_slice_struct_field
+use sys::system
+use sys::buffer
+
+struct Holder {
+  data: Slice<u8>
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let alloc = rc.mint_alloc_default()
+  let v = alloc.vec_u8_new()
+  let s = v.as_slice()
+  let h = Holder { data: s }
+  if (h.data.len() == 0) {
+    return 0
+  }
+  return 1
+}

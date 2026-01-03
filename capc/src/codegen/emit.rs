@@ -16,10 +16,10 @@ use crate::ast::{BinaryOp, Literal, UnaryOp};
 
 use super::{
     CodegenError, EnumIndex, Flow, FnInfo, LocalValue, ResultKind, ResultShape,
-    StructLayoutIndex, TypeLayout, ValueRepr,
+    StructLayout, StructLayoutIndex, TypeLayout, ValueRepr,
 };
 use super::abi_quirks;
-use super::layout::{align_to, resolve_struct_layout, type_layout_for_abi};
+use super::layout::{align_to, resolve_struct_layout, type_layout_from_index};
 use super::sig_to_clif;
 
 /// Target blocks for break/continue inside a loop.
@@ -275,11 +275,42 @@ fn emit_hir_stmt_inner(
                 module,
                 data_counter,
             )?;
+            if let crate::typeck::Ty::Path(name, _) = &let_stmt.ty.ty {
+                if let Some(layout) = enum_index.layouts.get(name) {
+                    let align = layout.align.max(1);
+                    let slot_size = aligned_slot_size(layout.size, align);
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        slot_size,
+                    ));
+                    let base_ptr = aligned_stack_addr(
+                        builder,
+                        slot,
+                        align,
+                        module.isa().pointer_type(),
+                    );
+                    store_value_by_ty(
+                        builder,
+                        base_ptr,
+                        0,
+                        &let_stmt.ty,
+                        value,
+                        enum_index,
+                        struct_layouts,
+                        module,
+                    )?;
+                    locals.insert(
+                        let_stmt.local_id,
+                        LocalValue::StructSlot(slot, let_stmt.ty.clone(), align),
+                    );
+                    return Ok(Flow::Continues);
+                }
+            }
             if let Some(layout) =
                 resolve_struct_layout(&let_stmt.ty.ty, "", &struct_layouts.layouts)
             {
                 let align = layout.align.max(1);
-                let slot_size = layout.size.max(1).saturating_add(align - 1);
+                let slot_size = aligned_slot_size(layout.size, align);
                 let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
                     slot_size,
@@ -296,6 +327,7 @@ fn emit_hir_stmt_inner(
                     0,
                     &let_stmt.ty,
                     value,
+                    enum_index,
                     struct_layouts,
                     module,
                 )?;
@@ -346,6 +378,7 @@ fn emit_hir_stmt_inner(
                         0,
                         ty,
                         value,
+                        enum_index,
                         struct_layouts,
                         module,
                     )?;
@@ -398,6 +431,7 @@ fn emit_hir_stmt_inner(
                             *out_ptr,
                             ret_ty,
                             value,
+                            enum_index,
                             struct_layouts,
                             module,
                         )?;
@@ -430,6 +464,7 @@ fn emit_hir_stmt_inner(
                                 *out_ok,
                                 ok_ty,
                                 *ok,
+                                enum_index,
                                 struct_layouts,
                                 module,
                             )?;
@@ -440,6 +475,7 @@ fn emit_hir_stmt_inner(
                                 *out_err,
                                 err_ty,
                                 *err,
+                                enum_index,
                                 struct_layouts,
                                 module,
                             )?;
@@ -996,6 +1032,7 @@ fn emit_hir_expr_inner(
                                     builder,
                                     &ok_ty,
                                     ptr_ty,
+                                    enum_index,
                                     Some(struct_layouts),
                                     module,
                                 )?
@@ -1004,6 +1041,7 @@ fn emit_hir_expr_inner(
                                 builder,
                                 &err_ty,
                                 ptr_ty,
+                                enum_index,
                                 Some(struct_layouts),
                                 module,
                             )?;
@@ -1014,6 +1052,7 @@ fn emit_hir_expr_inner(
                                 builder,
                                 &ok_ty,
                                 ptr_ty,
+                                enum_index,
                                 Some(struct_layouts),
                                 module,
                             )?;
@@ -1034,6 +1073,7 @@ fn emit_hir_expr_inner(
                                     builder,
                                     &err_ty,
                                     ptr_ty,
+                                    enum_index,
                                     Some(struct_layouts),
                                     module,
                                 )?
@@ -1053,6 +1093,76 @@ fn emit_hir_expr_inner(
                         ok: Box::new(ok),
                         err: Box::new(err),
                     });
+                }
+            }
+
+            if let crate::typeck::Ty::Path(ty_name, _) = &variant.enum_ty.ty {
+                if let Some(layout) = enum_index.layouts.get(ty_name) {
+                    let variants = enum_index
+                        .variants
+                        .get(ty_name)
+                        .ok_or_else(|| {
+                            CodegenError::Codegen(format!(
+                                "unknown enum variant: {}.{}",
+                                ty_name, variant.variant_name
+                            ))
+                        })?;
+                    let discr = variants.get(&variant.variant_name).ok_or_else(|| {
+                        CodegenError::Codegen(format!(
+                            "unknown enum variant: {}.{}",
+                            ty_name, variant.variant_name
+                        ))
+                    })?;
+                    let tag_val = builder.ins().iconst(ir::types::I32, i64::from(*discr));
+                    let ptr_ty = module.isa().pointer_type();
+                    let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
+                        ir::StackSlotKind::ExplicitSlot,
+                        aligned_slot_size(layout.size, layout.align),
+                    ));
+                    let base_ptr = aligned_stack_addr(builder, slot, layout.align, ptr_ty);
+                    builder.ins().store(MemFlags::new(), tag_val, base_ptr, 0);
+                    if layout.payload_size > 0 {
+                        if let Some(payloads) = enum_index.payloads.get(ty_name) {
+                            let payload_ty = payloads.get(&variant.variant_name).cloned().flatten();
+                            if let Some(payload_ty) = payload_ty {
+                                let payload = if let Some(payload_expr) = &variant.payload {
+                                    emit_hir_expr(
+                                        builder,
+                                        payload_expr,
+                                        locals,
+                                        fn_map,
+                                        enum_index,
+                                        struct_layouts,
+                                        return_lowering,
+                                        module,
+                                        data_counter,
+                                    )?
+                                } else {
+                                    zero_value_for_ty(
+                                        builder,
+                                        &payload_ty,
+                                        ptr_ty,
+                                        enum_index,
+                                        Some(struct_layouts),
+                                        module,
+                                    )?
+                                };
+                                store_value_by_ty(
+                                    builder,
+                                    base_ptr,
+                                    layout.payload_offset,
+                                    &payload_ty,
+                                    payload,
+                                    enum_index,
+                                    struct_layouts,
+                                    module,
+                                )?;
+                            } else {
+                                zero_bytes(builder, base_ptr, layout.payload_offset, layout.payload_size);
+                            }
+                        }
+                    }
+                    return Ok(ValueRepr::Single(base_ptr));
                 }
             }
 
@@ -1117,6 +1227,7 @@ fn emit_hir_expr_inner(
                         builder,
                         &ok_ty,
                         ptr_ty,
+                        enum_index,
                         Some(struct_layouts),
                         module,
                     )?;
@@ -1144,6 +1255,7 @@ fn emit_hir_expr_inner(
                         *out_ptr,
                         ret_ty,
                         ret_value,
+                        enum_index,
                         struct_layouts,
                         module,
                     )?;
@@ -1166,6 +1278,7 @@ fn emit_hir_expr_inner(
                             *out_ok,
                             ok_ty,
                             *ok,
+                            enum_index,
                             struct_layouts,
                             module,
                         )?;
@@ -1176,6 +1289,7 @@ fn emit_hir_expr_inner(
                             *out_err,
                             err_ty,
                             *err,
+                            enum_index,
                             struct_layouts,
                             module,
                         )?;
@@ -1221,6 +1335,22 @@ fn emit_hir_expr_inner(
                 }
             };
 
+            if module_path == "sys.unsafe_ptr" {
+                if let Some(value) = emit_unsafe_ptr_call(
+                    builder,
+                    module,
+                    call,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    data_counter,
+                )? {
+                    return Ok(value);
+                }
+            }
+
             // Lookup in fn_map by module.function key
             let key = format!("{}.{}", module_path, func_name);
             let info = fn_map
@@ -1235,15 +1365,26 @@ fn emit_hir_expr_inner(
             let mut sret_ptr = None;
             if info.sig.ret == AbiType::Ptr
                 && abi_sig.ret == AbiType::Unit
-                && is_non_opaque_struct_type(&call.ret_ty, struct_layouts)
+                && (is_non_opaque_struct_type(&call.ret_ty, struct_layouts)
+                    || matches!(&call.ret_ty.ty, crate::typeck::Ty::Path(name, _) if enum_index.layouts.contains_key(name)))
             {
-                let layout =
-                    resolve_struct_layout(&call.ret_ty.ty, "", &struct_layouts.layouts).ok_or_else(
-                        || CodegenError::Unsupported("struct layout missing".to_string()),
-                    )?;
                 let ptr_ty = module.isa().pointer_type();
-                let align = layout.align.max(1);
-                let slot_size = layout.size.max(1).saturating_add(align - 1);
+                let (size, align) = if let Some(layout) =
+                    resolve_struct_layout(&call.ret_ty.ty, "", &struct_layouts.layouts)
+                {
+                    (layout.size, layout.align)
+                } else if let crate::typeck::Ty::Path(name, _) = &call.ret_ty.ty {
+                    let layout = enum_index.layouts.get(name).ok_or_else(|| {
+                        CodegenError::Unsupported("enum layout missing".to_string())
+                    })?;
+                    (layout.size, layout.align)
+                } else {
+                    return Err(CodegenError::Unsupported(
+                        "sret return layout missing".to_string(),
+                    ));
+                };
+                let align = align.max(1);
+                let slot_size = aligned_slot_size(size, align);
                 let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
                     ir::StackSlotKind::ExplicitSlot,
                     slot_size,
@@ -1877,39 +2018,46 @@ fn emit_hir_index(
             let field = layout.fields.get("bytes").ok_or_else(|| {
                 CodegenError::Unsupported("string.bytes field missing".to_string())
             })?;
+            let slice_layout =
+                resolve_struct_layout(&field.ty.ty, "", &struct_layouts.layouts).ok_or_else(
+                    || CodegenError::Unsupported("Slice layout missing".to_string()),
+                )?;
             let addr = ptr_add(builder, base_ptr, field.offset);
-            let handle = builder
-                .ins()
-                .load(ir::types::I64, MemFlags::new(), addr, 0);
-            let result = emit_slice_at(builder, module, handle, index_val)?;
+            let result = emit_slice_index(builder, module, addr, slice_layout, index_val)?;
             Ok(ValueRepr::Single(result))
         }
         crate::typeck::Ty::Path(name, _) if name == "Slice" || name == "sys.buffer.Slice" => {
-            // For Slice[u8], call capable_rt_slice_at(handle, index) -> u8
-            let handle = match object {
-                ValueRepr::Single(h) => h,
+            // For Slice[u8], index into the raw slice.
+            let base_ptr = match object {
+                ValueRepr::Single(ptr) => ptr,
                 _ => {
                     return Err(CodegenError::Codegen(
-                        "expected Slice to be a handle".to_string(),
+                        "expected Slice to be a struct pointer".to_string(),
                     ))
                 }
             };
-
-            let result = emit_slice_at(builder, module, handle, index_val)?;
+            let layout =
+                resolve_struct_layout(object_ty, "", &struct_layouts.layouts).ok_or_else(|| {
+                    CodegenError::Unsupported("Slice layout missing".to_string())
+                })?;
+            let result = emit_slice_index(builder, module, base_ptr, layout, index_val)?;
             Ok(ValueRepr::Single(result))
         }
         crate::typeck::Ty::Path(name, _) if name == "MutSlice" || name == "sys.buffer.MutSlice" => {
-            // For MutSlice[u8], call capable_rt_mut_slice_at(handle, index) -> u8
-            let handle = match object {
-                ValueRepr::Single(h) => h,
+            // For MutSlice[u8], index into the raw slice.
+            let base_ptr = match object {
+                ValueRepr::Single(ptr) => ptr,
                 _ => {
                     return Err(CodegenError::Codegen(
-                        "expected MutSlice to be a handle".to_string(),
+                        "expected MutSlice to be a struct pointer".to_string(),
                     ))
                 }
             };
-
-            let result = emit_mut_slice_at(builder, module, handle, index_val)?;
+            let layout =
+                resolve_struct_layout(object_ty, "", &struct_layouts.layouts).ok_or_else(|| {
+                    CodegenError::Unsupported("MutSlice layout missing".to_string())
+                })?;
+            let result = emit_slice_index(builder, module, base_ptr, layout, index_val)?;
             Ok(ValueRepr::Single(result))
         }
         _ => Err(CodegenError::Codegen(format!(
@@ -1919,92 +2067,63 @@ fn emit_hir_index(
     }
 }
 
-/// Emit a call to the runtime slice at function.
-/// Returns a u8 value at the given index.
-fn emit_slice_at(
+/// Emit a bounds-checked slice index.
+fn emit_slice_index(
     builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    handle: Value,
+    module: &ObjectModule,
+    slice_base: Value,
+    slice_layout: &StructLayout,
     index: Value,
 ) -> Result<Value, CodegenError> {
-    use cranelift_codegen::ir::{AbiParam, Signature};
-
     let ptr_ty = module.isa().pointer_type();
+    let ptr_field = slice_layout
+        .fields
+        .get("ptr")
+        .ok_or_else(|| CodegenError::Unsupported("Slice.ptr field missing".to_string()))?;
+    let len_field = slice_layout
+        .fields
+        .get("len")
+        .ok_or_else(|| CodegenError::Unsupported("Slice.len field missing".to_string()))?;
+    let ptr_addr = ptr_add(builder, slice_base, ptr_field.offset);
+    let len_addr = ptr_add(builder, slice_base, len_field.offset);
+    let raw_ptr = builder.ins().load(ptr_ty, MemFlags::new(), ptr_addr, 0);
+    let len_val = builder
+        .ins()
+        .load(ir::types::I32, MemFlags::new(), len_addr, 0);
+    let zero_i32 = builder.ins().iconst(ir::types::I32, 0);
+    let idx_nonneg = builder
+        .ins()
+        .icmp(IntCC::SignedGreaterThanOrEqual, index, zero_i32);
+    let idx_lt = builder
+        .ins()
+        .icmp(IntCC::SignedLessThan, index, len_val);
+    let ptr_nonnull = builder.ins().icmp_imm(IntCC::NotEqual, raw_ptr, 0);
+    let in_bounds = builder.ins().band(idx_nonneg, idx_lt);
+    let in_bounds = builder.ins().band(in_bounds, ptr_nonnull);
 
-    // Build signature: (handle, i32) -> u8
-    let mut sig = Signature::new(module.isa().default_call_conv());
-    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
-    sig.params.push(AbiParam::new(ir::types::I32));
-    sig.returns.push(AbiParam::new(ir::types::I8));
+    let ok_block = builder.create_block();
+    let err_block = builder.create_block();
+    let done_block = builder.create_block();
+    builder.append_block_param(done_block, ir::types::I8);
+    builder.ins().brif(in_bounds, ok_block, &[], err_block, &[]);
 
-    // Declare and import the runtime function
-    let func_id = module
-        .declare_function("capable_rt_slice_at", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local_func = module.declare_func_in_func(func_id, builder.func);
+    builder.switch_to_block(ok_block);
+    builder.seal_block(ok_block);
+    let idx_ptr = builder.ins().uextend(ptr_ty, index);
+    let addr = builder.ins().iadd(raw_ptr, idx_ptr);
+    let value = builder
+        .ins()
+        .load(ir::types::I8, MemFlags::new(), addr, 0);
+    builder.ins().jump(done_block, &[value]);
 
-    // Call the function
-    let call_inst = builder.ins().call(local_func, &[handle, index]);
-    let results = builder.inst_results(call_inst);
-    Ok(results[0])
-}
+    builder.switch_to_block(err_block);
+    builder.seal_block(err_block);
+    let zero_i8 = builder.ins().iconst(ir::types::I8, 0);
+    builder.ins().jump(done_block, &[zero_i8]);
 
-/// Emit a call to the runtime slice_from_ptr helper.
-fn emit_slice_from_ptr(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    ptr: Value,
-    len: Value,
-) -> Result<Value, CodegenError> {
-    use cranelift_codegen::ir::{AbiParam, Signature};
-
-    let ptr_ty = module.isa().pointer_type();
-
-    // Build signature: (handle, ptr, i32) -> handle
-    let mut sig = Signature::new(module.isa().default_call_conv());
-    sig.params.push(AbiParam::new(ir::types::I64));
-    sig.params.push(AbiParam::new(ptr_ty));
-    sig.params.push(AbiParam::new(ir::types::I32));
-    sig.returns.push(AbiParam::new(ir::types::I64));
-
-    let func_id = module
-        .declare_function("capable_rt_slice_from_ptr", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local_func = module.declare_func_in_func(func_id, builder.func);
-    let default_alloc = builder.ins().iconst(ir::types::I64, 0);
-    let call_inst = builder.ins().call(local_func, &[default_alloc, ptr, len]);
-    let results = builder.inst_results(call_inst);
-    Ok(results[0])
-}
-
-/// Emit a call to the runtime mutable slice at function.
-/// Returns a u8 value at the given index.
-fn emit_mut_slice_at(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    handle: Value,
-    index: Value,
-) -> Result<Value, CodegenError> {
-    use cranelift_codegen::ir::{AbiParam, Signature};
-
-    let ptr_ty = module.isa().pointer_type();
-
-    // Build signature: (handle, i32) -> u8
-    let mut sig = Signature::new(module.isa().default_call_conv());
-    sig.params.push(AbiParam::new(ptr_ty)); // Handle is a usize
-    sig.params.push(AbiParam::new(ir::types::I32));
-    sig.returns.push(AbiParam::new(ir::types::I8));
-
-    // Declare and import the runtime function
-    let func_id = module
-        .declare_function("capable_rt_mut_slice_at", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local_func = module.declare_func_in_func(func_id, builder.func);
-
-    // Call the function
-    let call_inst = builder.ins().call(local_func, &[handle, index]);
-    let results = builder.inst_results(call_inst);
-    Ok(results[0])
+    builder.switch_to_block(done_block);
+    builder.seal_block(done_block);
+    Ok(builder.block_params(done_block)[0])
 }
 
 fn cmp_cc(expr: &crate::hir::HirExpr, signed: IntCC, unsigned: IntCC) -> IntCC {
@@ -2041,6 +2160,26 @@ fn emit_hir_struct_literal(
     module: &mut ObjectModule,
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
+    if matches!(literal.struct_ty.abi, AbiType::Handle) {
+        if literal.fields.len() != 1 {
+            return Err(CodegenError::Unsupported(format!(
+                "opaque struct literal expects 1 field, got {}",
+                literal.fields.len()
+            )));
+        }
+        let value = emit_hir_expr(
+            builder,
+            &literal.fields[0].expr,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            return_lowering,
+            module,
+            data_counter,
+        )?;
+        return Ok(value);
+    }
     let layout = resolve_struct_layout(&literal.struct_ty.ty, "", &struct_layouts.layouts)
         .ok_or_else(|| {
             CodegenError::Unsupported(format!(
@@ -2081,6 +2220,7 @@ fn emit_hir_struct_literal(
             field_layout.offset,
             &field_layout.ty,
             value,
+            enum_index,
             struct_layouts,
             module,
         )?;
@@ -2102,6 +2242,25 @@ fn emit_hir_field_access(
     data_counter: &mut u32,
 ) -> Result<ValueRepr, CodegenError> {
     let object_ty = field_access.object.ty();
+    if matches!(object_ty.abi, AbiType::Handle) {
+        let object_value = emit_hir_expr(
+            builder,
+            &field_access.object,
+            locals,
+            fn_map,
+            enum_index,
+            struct_layouts,
+            return_lowering,
+            module,
+            data_counter,
+        )?;
+        if matches!(field_access.field_ty.abi, AbiType::Ptr | AbiType::Handle) {
+            return Ok(object_value);
+        }
+        return Err(CodegenError::Unsupported(
+            "field access on opaque non-pointer field".to_string(),
+        ));
+    }
     let layout =
         resolve_struct_layout(&object_ty.ty, "", &struct_layouts.layouts).ok_or_else(|| {
             CodegenError::Unsupported(format!(
@@ -2141,6 +2300,7 @@ fn emit_hir_field_access(
         base_ptr,
         field_layout.offset,
         &field_layout.ty,
+        enum_index,
         struct_layouts,
         module,
     )
@@ -2158,16 +2318,22 @@ fn store_out_value(
     out_ptr: ir::Value,
     ty: &crate::hir::HirType,
     value: ValueRepr,
+    enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
 ) -> Result<(), CodegenError> {
-    if is_non_opaque_struct_type(ty, struct_layouts) {
+    let is_enum_payload = match &ty.ty {
+        crate::typeck::Ty::Path(name, _) => enum_index.layouts.contains_key(name),
+        _ => false,
+    };
+    if is_non_opaque_struct_type(ty, struct_layouts) || is_enum_payload {
         return store_value_by_ty(
             builder,
             out_ptr,
             0,
             ty,
             value,
+            enum_index,
             struct_layouts,
             module,
         );
@@ -2198,6 +2364,7 @@ fn store_value_by_ty(
     offset: u32,
     ty: &crate::hir::HirType,
     value: ValueRepr,
+    enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
 ) -> Result<(), CodegenError> {
@@ -2242,6 +2409,7 @@ fn store_value_by_ty(
                 offset,
                 &inner_ty,
                 value,
+                enum_index,
                 struct_layouts,
                 module,
             )
@@ -2277,6 +2445,7 @@ fn store_value_by_ty(
                     offset + ok_off,
                     &ok_ty,
                     *ok,
+                    enum_index,
                     struct_layouts,
                     module,
                 )?;
@@ -2286,9 +2455,19 @@ fn store_value_by_ty(
                     offset + err_off,
                     &err_ty,
                     *err,
+                    enum_index,
                     struct_layouts,
                     module,
                 )?;
+                return Ok(());
+            }
+
+            if let Some(layout) = enum_index.layouts.get(name) {
+                let ValueRepr::Single(src_ptr) = value else {
+                    return Err(CodegenError::Unsupported("store enum".to_string()));
+                };
+                let dst_ptr = ptr_add(builder, base_ptr, offset);
+                copy_bytes(builder, dst_ptr, src_ptr, layout.size);
                 return Ok(());
             }
 
@@ -2305,6 +2484,7 @@ fn store_value_by_ty(
                         src_ptr,
                         field.offset,
                         &field.ty,
+                        enum_index,
                         struct_layouts,
                         module,
                     )?;
@@ -2314,6 +2494,7 @@ fn store_value_by_ty(
                         offset + field.offset,
                         &field.ty,
                         field_value,
+                        enum_index,
                         struct_layouts,
                         module,
                     )?;
@@ -2354,6 +2535,7 @@ fn load_value_by_ty(
     base_ptr: ir::Value,
     offset: u32,
     ty: &crate::hir::HirType,
+    enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
     module: &mut ObjectModule,
 ) -> Result<ValueRepr, CodegenError> {
@@ -2385,6 +2567,7 @@ fn load_value_by_ty(
                 base_ptr,
                 offset,
                 &inner_ty,
+                enum_index,
                 struct_layouts,
                 module,
             )
@@ -2416,6 +2599,7 @@ fn load_value_by_ty(
                     base_ptr,
                     offset + ok_off,
                     &ok_ty,
+                    enum_index,
                     struct_layouts,
                     module,
                 )?;
@@ -2424,6 +2608,7 @@ fn load_value_by_ty(
                     base_ptr,
                     offset + err_off,
                     &err_ty,
+                    enum_index,
                     struct_layouts,
                     module,
                 )?;
@@ -2432,6 +2617,11 @@ fn load_value_by_ty(
                     ok: Box::new(ok),
                     err: Box::new(err),
                 });
+            }
+
+            if enum_index.layouts.contains_key(name) {
+                let ptr = ptr_add(builder, base_ptr, offset);
+                return Ok(ValueRepr::Single(ptr));
             }
 
             if resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts).is_some() {
@@ -2476,6 +2666,33 @@ fn ptr_add(builder: &mut FunctionBuilder, base: ir::Value, offset: u32) -> ir::V
     }
 }
 
+fn copy_bytes(builder: &mut FunctionBuilder, dst_ptr: ir::Value, src_ptr: ir::Value, size: u32) {
+    let mut offset = 0u32;
+    while offset < size {
+        let byte = builder
+            .ins()
+            .load(ir::types::I8, MemFlags::new(), src_ptr, offset as i32);
+        builder
+            .ins()
+            .store(MemFlags::new(), byte, dst_ptr, offset as i32);
+        offset += 1;
+    }
+}
+
+fn zero_bytes(builder: &mut FunctionBuilder, base_ptr: ir::Value, offset: u32, size: u32) {
+    if size == 0 {
+        return;
+    }
+    let zero = builder.ins().iconst(ir::types::I8, 0);
+    let mut i = 0u32;
+    while i < size {
+        builder
+            .ins()
+            .store(MemFlags::new(), zero, base_ptr, (offset + i) as i32);
+        i += 1;
+    }
+}
+
 /// Compute an aligned stack address for a struct slot.
 fn aligned_stack_addr(
     builder: &mut FunctionBuilder,
@@ -2504,21 +2721,6 @@ fn result_offsets(ok: TypeLayout, err: TypeLayout) -> (u32, u32, u32) {
     let ok_offset = align_to(1, ok.align);
     let err_offset = align_to(ok_offset.saturating_add(ok.size), err.align);
     (tag_offset, ok_offset, err_offset)
-}
-
-/// Lookup a layout for a resolved HIR type from the struct layout index.
-fn type_layout_from_index(
-    ty: &crate::hir::HirType,
-    struct_layouts: &StructLayoutIndex,
-    ptr_ty: Type,
-) -> Result<TypeLayout, CodegenError> {
-    if let Some(layout) = resolve_struct_layout(&ty.ty, "", &struct_layouts.layouts) {
-        return Ok(TypeLayout {
-            size: layout.size,
-            align: layout.align,
-        });
-    }
-    type_layout_for_abi(&ty.abi, ptr_ty)
 }
 
 /// Emit short-circuit logic for `&&` and `||`.
@@ -2604,7 +2806,15 @@ fn emit_hir_match_stmt(
     )?;
 
     let (match_val, match_result) = match value.clone() {
-        ValueRepr::Single(v) => (v, None),
+        ValueRepr::Single(v) => {
+            let tag = match &match_expr.expr.ty().ty {
+                crate::typeck::Ty::Path(name, _) if enum_index.layouts.contains_key(name) => {
+                    builder.ins().load(ir::types::I32, MemFlags::new(), v, 0)
+                }
+                _ => v,
+            };
+            (tag, None)
+        }
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
     };
@@ -2656,6 +2866,10 @@ fn emit_hir_match_stmt(
             &arm.pattern,
             &value,
             match_result.as_ref(),
+            match_expr.expr.ty(),
+            enum_index,
+            struct_layouts,
+            module,
             &mut arm_locals,
         )?;
 
@@ -2742,7 +2956,15 @@ fn emit_hir_match_expr(
     )?;
 
     let (match_val, match_result) = match value.clone() {
-        ValueRepr::Single(v) => (v, None),
+        ValueRepr::Single(v) => {
+            let tag = match &match_expr.expr.ty().ty {
+                crate::typeck::Ty::Path(name, _) if enum_index.layouts.contains_key(name) => {
+                    builder.ins().load(ir::types::I32, MemFlags::new(), v, 0)
+                }
+                _ => v,
+            };
+            (tag, None)
+        }
         ValueRepr::Result { tag, ok, err } => (tag, Some((*ok, *err))),
         ValueRepr::Unit => (builder.ins().iconst(ir::types::I32, 0), None),
     };
@@ -2784,6 +3006,10 @@ fn emit_hir_match_expr(
             &arm.pattern,
             &value,
             match_result.as_ref(),
+            match_expr.expr.ty(),
+            enum_index,
+            struct_layouts,
+            module,
             &mut arm_locals,
         )?;
 
@@ -3020,6 +3246,10 @@ fn hir_bind_match_pattern_value(
     pattern: &crate::hir::HirPattern,
     value: &ValueRepr,
     result: Option<&(ValueRepr, ValueRepr)>,
+    match_ty: &crate::hir::HirType,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    module: &mut ObjectModule,
     locals: &mut HashMap<crate::hir::LocalId, LocalValue>,
 ) -> Result<(), CodegenError> {
     use crate::hir::HirPattern;
@@ -3035,16 +3265,54 @@ fn hir_bind_match_pattern_value(
         HirPattern::Variant { variant_name, binding, .. } => {
             if let Some(local_id) = binding {
                 // Bind the inner value based on variant
-                let Some((ok_val, err_val)) = result else {
+                if let Some((ok_val, err_val)) = result {
+                    if variant_name == "Ok" {
+                        locals.insert(*local_id, store_local(builder, ok_val.clone()));
+                    } else if variant_name == "Err" {
+                        locals.insert(*local_id, store_local(builder, err_val.clone()));
+                    }
+                    return Ok(());
+                }
+                let enum_name = match &match_ty.ty {
+                    crate::typeck::Ty::Path(path, _) => path,
+                    _ => {
+                        return Err(CodegenError::Unsupported(
+                            "variant binding on non-enum".to_string(),
+                        ))
+                    }
+                };
+                let Some(layout) = enum_index.layouts.get(enum_name) else {
                     return Err(CodegenError::Unsupported(
-                        "variant binding without result value".to_string(),
+                        "variant binding without payload".to_string(),
                     ));
                 };
-                if variant_name == "Ok" {
-                    locals.insert(*local_id, store_local(builder, ok_val.clone()));
-                } else if variant_name == "Err" {
-                    locals.insert(*local_id, store_local(builder, err_val.clone()));
-                }
+                let Some(payloads) = enum_index.payloads.get(enum_name) else {
+                    return Err(CodegenError::Unsupported(
+                        "missing enum payload info".to_string(),
+                    ));
+                };
+                let payload_ty = payloads
+                    .get(variant_name)
+                    .cloned()
+                    .flatten()
+                    .ok_or_else(|| {
+                        CodegenError::Unsupported("variant binding without payload".to_string())
+                    })?;
+                let ValueRepr::Single(base_ptr) = value else {
+                    return Err(CodegenError::Unsupported(
+                        "variant binding expects enum storage".to_string(),
+                    ));
+                };
+                let payload_val = load_value_by_ty(
+                    builder,
+                    *base_ptr,
+                    layout.payload_offset,
+                    &payload_ty,
+                    enum_index,
+                    struct_layouts,
+                    module,
+                )?;
+                locals.insert(*local_id, store_local(builder, payload_val));
             }
             Ok(())
         }
@@ -3093,7 +3361,6 @@ fn emit_string(
         .ins()
         .global_value(module.isa().pointer_type(), global);
     let len = builder.ins().iconst(ir::types::I32, value.len() as i64);
-    let slice_handle = emit_slice_from_ptr(builder, module, ptr, len)?;
 
     let string_ty = crate::typeck::Ty::Path("sys.string.string".to_string(), Vec::new());
     let layout = resolve_struct_layout(&string_ty, "", &struct_layouts.layouts).ok_or_else(|| {
@@ -3101,6 +3368,16 @@ fn emit_string(
     })?;
     let field = layout.fields.get("bytes").ok_or_else(|| {
         CodegenError::Unsupported("string.bytes field missing".to_string())
+    })?;
+    let slice_layout =
+        resolve_struct_layout(&field.ty.ty, "", &struct_layouts.layouts).ok_or_else(|| {
+            CodegenError::Unsupported("Slice layout missing".to_string())
+        })?;
+    let slice_ptr = slice_layout.fields.get("ptr").ok_or_else(|| {
+        CodegenError::Unsupported("Slice.ptr field missing".to_string())
+    })?;
+    let slice_len = slice_layout.fields.get("len").ok_or_else(|| {
+        CodegenError::Unsupported("Slice.len field missing".to_string())
     })?;
     let ptr_ty = module.isa().pointer_type();
     let align = layout.align.max(1);
@@ -3111,9 +3388,12 @@ fn emit_string(
     ));
     let base_ptr = aligned_stack_addr(builder, slot, align, ptr_ty);
     let addr = ptr_add(builder, base_ptr, field.offset);
+    let ptr_addr = ptr_add(builder, addr, slice_ptr.offset);
+    let len_addr = ptr_add(builder, addr, slice_len.offset);
     builder
         .ins()
-        .store(MemFlags::new(), slice_handle, addr, 0);
+        .store(MemFlags::new(), ptr, ptr_addr, 0);
+    builder.ins().store(MemFlags::new(), len, len_addr, 0);
     Ok(ValueRepr::Single(base_ptr))
 }
 
@@ -3207,6 +3487,7 @@ fn zero_value_for_ty(
     builder: &mut FunctionBuilder,
     ty: &crate::hir::HirType,
     ptr_ty: Type,
+    enum_index: &EnumIndex,
     struct_layouts: Option<&StructLayoutIndex>,
     module: &mut ObjectModule,
 ) -> Result<ValueRepr, CodegenError> {
@@ -3219,7 +3500,7 @@ fn zero_value_for_ty(
                 ty: *inner.clone(),
                 abi: ty.abi.clone(),
             };
-            zero_value_for_ty(builder, &inner_ty, ptr_ty, struct_layouts, module)
+            zero_value_for_ty(builder, &inner_ty, ptr_ty, enum_index, struct_layouts, module)
         }
         Ty::Param(_) => Err(CodegenError::Unsupported(
             "generic type parameters must be monomorphized before codegen".to_string(),
@@ -3240,8 +3521,10 @@ fn zero_value_for_ty(
                     abi: (**err_abi).clone(),
                 };
                 let tag = builder.ins().iconst(ir::types::I8, 0);
-                let ok_val = zero_value_for_ty(builder, &ok_ty, ptr_ty, struct_layouts, module)?;
-                let err_val = zero_value_for_ty(builder, &err_ty, ptr_ty, struct_layouts, module)?;
+                let ok_val =
+                    zero_value_for_ty(builder, &ok_ty, ptr_ty, enum_index, struct_layouts, module)?;
+                let err_val =
+                    zero_value_for_ty(builder, &err_ty, ptr_ty, enum_index, struct_layouts, module)?;
                 return Ok(ValueRepr::Result {
                     tag,
                     ok: Box::new(ok_val),
@@ -3261,14 +3544,21 @@ fn zero_value_for_ty(
                         let Some(field) = layout.fields.get(name) else {
                             continue;
                         };
-                        let field_zero =
-                            zero_value_for_ty(builder, &field.ty, ptr_ty, Some(struct_layouts), module)?;
+                        let field_zero = zero_value_for_ty(
+                            builder,
+                            &field.ty,
+                            ptr_ty,
+                            enum_index,
+                            Some(struct_layouts),
+                            module,
+                        )?;
                         store_value_by_ty(
                             builder,
                             base_ptr,
                             field.offset,
                             &field.ty,
                             field_zero,
+                            enum_index,
                             struct_layouts,
                             module,
                         )?;
@@ -3359,6 +3649,7 @@ pub(super) fn emit_runtime_wrapper_call(
     info: &FnInfo,
     args: Vec<Value>,
     ret_ty: &crate::hir::HirType,
+    enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
 ) -> Result<ValueRepr, CodegenError> {
     ensure_abi_sig_handled(info)?;
@@ -3374,14 +3665,26 @@ pub(super) fn emit_runtime_wrapper_call(
 
     if info.sig.ret == AbiType::Ptr
         && abi_sig.ret == AbiType::Unit
-        && is_non_opaque_struct_type(ret_ty, struct_layouts)
+        && (is_non_opaque_struct_type(ret_ty, struct_layouts)
+            || matches!(&ret_ty.ty, crate::typeck::Ty::Path(name, _) if enum_index.layouts.contains_key(name)))
     {
-        let layout = resolve_struct_layout(&ret_ty.ty, "", &struct_layouts.layouts).ok_or_else(
-            || CodegenError::Unsupported("struct layout missing".to_string()),
-        )?;
         let ptr_ty = module.isa().pointer_type();
-        let align = layout.align.max(1);
-        let slot_size = layout.size.max(1).saturating_add(align - 1);
+        let (size, align) = if let Some(layout) =
+            resolve_struct_layout(&ret_ty.ty, "", &struct_layouts.layouts)
+        {
+            (layout.size, layout.align)
+        } else if let crate::typeck::Ty::Path(name, _) = &ret_ty.ty {
+            let layout = enum_index.layouts.get(name).ok_or_else(|| {
+                CodegenError::Unsupported("enum layout missing".to_string())
+            })?;
+            (layout.size, layout.align)
+        } else {
+            return Err(CodegenError::Unsupported(
+                "sret return layout missing".to_string(),
+            ));
+        };
+        let align = align.max(1);
+        let slot_size = aligned_slot_size(size, align);
         let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
             ir::StackSlotKind::ExplicitSlot,
             slot_size,
@@ -3512,6 +3815,385 @@ pub(super) fn emit_runtime_wrapper_call(
 
     let mut idx = 0;
     value_from_results(builder, &info.sig.ret, &results, &mut idx)
+}
+
+fn emit_unsafe_ptr_call(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    call: &crate::hir::HirCall,
+    locals: &HashMap<crate::hir::LocalId, LocalValue>,
+    fn_map: &HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    return_lowering: &ReturnLowering,
+    data_counter: &mut u32,
+) -> Result<Option<ValueRepr>, CodegenError> {
+    let (module_path, func_name) = match &call.callee {
+        crate::hir::ResolvedCallee::Function { module, name, .. } => (module, name),
+        _ => return Ok(None),
+    };
+    if module_path != "sys.unsafe_ptr" {
+        return Ok(None);
+    }
+    let base_name = func_name.split("__").next().unwrap_or(func_name);
+    if call.type_args.len() != 1 {
+        return Err(CodegenError::Unsupported(format!(
+            "{base_name} expects one type argument"
+        )));
+    }
+    let elem_ty = &call.type_args[0];
+    let ptr_ty = module.isa().pointer_type();
+    let elem_hir = hir_type_from_ty(elem_ty, enum_index, struct_layouts, ptr_ty)?;
+    let layout = type_layout_from_index(&elem_hir, struct_layouts, ptr_ty)?;
+    match base_name {
+        "sizeof" => {
+            let size = builder
+                .ins()
+                .iconst(ir::types::I32, layout.size as i64);
+            return Ok(Some(ValueRepr::Single(size)));
+        }
+        "alignof" => {
+            let align = builder
+                .ins()
+                .iconst(ir::types::I32, layout.align as i64);
+            return Ok(Some(ValueRepr::Single(align)));
+        }
+        "ptr_cast" | "ptr_cast_u8" => {
+            if call.args.len() != 1 {
+                return Err(CodegenError::Unsupported(format!(
+                    "{base_name} expects (ptr)"
+                )));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects a pointer value"
+                    )))
+                }
+            };
+            return Ok(Some(ValueRepr::Single(base_ptr)));
+        }
+        "ptr_is_null" => {
+            if call.args.len() != 1 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_is_null expects (ptr)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_is_null expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let is_null = builder.ins().icmp_imm(
+                ir::condcodes::IntCC::Equal,
+                base_ptr,
+                0,
+            );
+            return Ok(Some(ValueRepr::Single(is_null)));
+        }
+        "ptr_add" => {
+            if call.args.len() != 2 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_add expects (ptr, offset)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_add expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let offset_val = match emit_hir_expr(
+                builder,
+                &call.args[1],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(val) => val,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_add expects an i32 offset".to_string(),
+                    ))
+                }
+            };
+            let offset = if ptr_ty != ir::types::I32 {
+                builder.ins().sextend(ptr_ty, offset_val)
+            } else {
+                offset_val
+            };
+            let stride = builder.ins().iconst(ptr_ty, layout.size as i64);
+            let byte_offset = if layout.size == 1 {
+                offset
+            } else {
+                builder.ins().imul(offset, stride)
+            };
+            let addr = builder.ins().iadd(base_ptr, byte_offset);
+            return Ok(Some(ValueRepr::Single(addr)));
+        }
+        "ptr_read" => {
+            if call.args.len() != 1 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_read expects (ptr)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_read expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let value = load_value_by_ty(
+                builder,
+                base_ptr,
+                0,
+                &elem_hir,
+                enum_index,
+                struct_layouts,
+                module,
+            )?;
+            return Ok(Some(value));
+        }
+        "ptr_write" => {
+            if call.args.len() != 2 {
+                return Err(CodegenError::Unsupported(
+                    "ptr_write expects (ptr, value)".to_string(),
+                ));
+            }
+            let base_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(
+                        "ptr_write expects a pointer value".to_string(),
+                    ))
+                }
+            };
+            let value = emit_hir_expr(
+                builder,
+                &call.args[1],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )?;
+            store_value_by_ty(
+                builder,
+                base_ptr,
+                0,
+                &elem_hir,
+                value,
+                enum_index,
+                struct_layouts,
+                module,
+            )?;
+            return Ok(Some(ValueRepr::Unit));
+        }
+        "memcpy" | "memmove" => {
+            if call.args.len() != 3 {
+                return Err(CodegenError::Unsupported(format!(
+                    "{base_name} expects (dst, src, count)"
+                )));
+            }
+            let dst_ptr = match emit_hir_expr(
+                builder,
+                &call.args[0],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects a pointer dst"
+                    )))
+                }
+            };
+            let src_ptr = match emit_hir_expr(
+                builder,
+                &call.args[1],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(ptr) => ptr,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects a pointer src"
+                    )))
+                }
+            };
+            let count_val = match emit_hir_expr(
+                builder,
+                &call.args[2],
+                locals,
+                fn_map,
+                enum_index,
+                struct_layouts,
+                return_lowering,
+                module,
+                data_counter,
+            )? {
+                ValueRepr::Single(val) => val,
+                _ => {
+                    return Err(CodegenError::Unsupported(format!(
+                        "{base_name} expects an i32 count"
+                    )))
+                }
+            };
+
+            let zero_i32 = builder.ins().iconst(ir::types::I32, 0);
+            let should_copy = builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThan, count_val, zero_i32);
+            let copy_block = builder.create_block();
+            let done_block = builder.create_block();
+            builder.ins().brif(should_copy, copy_block, &[], done_block, &[]);
+
+            builder.switch_to_block(copy_block);
+            builder.seal_block(copy_block);
+            let count_ptr = if ptr_ty != ir::types::I32 {
+                builder.ins().sextend(ptr_ty, count_val)
+            } else {
+                count_val
+            };
+            let stride = builder.ins().iconst(ptr_ty, layout.size as i64);
+            let byte_count = if layout.size == 1 {
+                count_ptr
+            } else {
+                builder.ins().imul(count_ptr, stride)
+            };
+            let config = module.isa().frontend_config();
+            if base_name == "memcpy" {
+                builder.call_memcpy(config, dst_ptr, src_ptr, byte_count);
+            } else {
+                builder.call_memmove(config, dst_ptr, src_ptr, byte_count);
+            }
+            builder.ins().jump(done_block, &[]);
+
+            builder.switch_to_block(done_block);
+            builder.seal_block(done_block);
+            return Ok(Some(ValueRepr::Unit));
+        }
+        _ => {}
+    }
+    Ok(None)
+}
+
+fn hir_type_from_ty(
+    ty: &crate::typeck::Ty,
+    enum_index: &EnumIndex,
+    struct_layouts: &StructLayoutIndex,
+    ptr_ty: Type,
+) -> Result<crate::hir::HirType, CodegenError> {
+    use crate::typeck::{BuiltinType, Ty};
+    let abi = match ty {
+        Ty::Builtin(b) => match b {
+            BuiltinType::I32 => AbiType::I32,
+            BuiltinType::I64 => {
+                return Err(CodegenError::Unsupported(
+                    "i64 is not supported by the current codegen backend".to_string(),
+                ))
+            }
+            BuiltinType::U32 => AbiType::U32,
+            BuiltinType::U8 => AbiType::U8,
+            BuiltinType::Bool => AbiType::Bool,
+            BuiltinType::Unit | BuiltinType::Never => AbiType::Unit,
+        },
+        Ty::Ptr(_) => AbiType::Ptr,
+        Ty::Ref(inner) => {
+            return hir_type_from_ty(inner, enum_index, struct_layouts, ptr_ty);
+        }
+        Ty::Param(_) => {
+            return Err(CodegenError::Unsupported(
+                "generic type parameters must be monomorphized before codegen".to_string(),
+            ))
+        }
+        Ty::Path(name, _args) => {
+            if resolve_struct_layout(ty, "", &struct_layouts.layouts).is_some() {
+                AbiType::Ptr
+            } else if enum_index.layouts.contains_key(name) {
+                AbiType::Ptr
+            } else if enum_index.variants.contains_key(name) {
+                AbiType::I32
+            } else {
+                AbiType::Handle
+            }
+        }
+    };
+    Ok(crate::hir::HirType { ty: ty.clone(), abi })
 }
 
 fn ensure_abi_sig_handled(info: &FnInfo) -> Result<(), CodegenError> {

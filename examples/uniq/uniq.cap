@@ -17,8 +17,8 @@ fn should_print(lines: Vec<string>, i: i32) -> bool {
 }
 
 fn run(c: Console, alloc: Alloc, input: Stdin) -> Result<unit, io::IoErr> {
-  let contents = input.read_to_string()?
-  let lines = contents.lines()
+  let contents = input.read_to_string(alloc)?
+  let lines = contents.lines(alloc)
   let n = lines.len()
   for i in 0..n {
     if (should_print(lines, i)) {

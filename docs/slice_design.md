@@ -1,6 +1,6 @@
-# Safe Raw Buffers Without Raw Pointers
+# Safe Bytes Without Raw Pointers
 
-This document explains how Capable safe code can work with “raw buffers” (bytes, packets, file contents) **without** exposing raw pointers or requiring a borrow checker.
+This document explains how Capable safe code can work with raw bytes (packets, file contents) **without** exposing raw pointers or requiring a borrow checker.
 
 Goal: keep **capability security** meaningful by ensuring **safe code is memory-safe**, while still supporting systems-style byte manipulation.
 
@@ -11,7 +11,7 @@ Goal: keep **capability security** meaningful by ensuring **safe code is memory-
 Safe code never performs pointer arithmetic or raw pointer dereference.
 
 Instead, safe code manipulates raw data using:
-- **Owning buffer types** (heap-backed, move-only)
+- **Owning vectors** (heap-backed, move-only)
 - **Slice views** (read-only and mutable, bounds-checked)
 - `sys.*` APIs that accept slices and perform OS/FFI pointer work internally
 
@@ -21,16 +21,20 @@ Unsafe code exists for FFI/asm/special cases, but is quarantined (`package unsaf
 
 ## 2. Types
 
-### 2.1 `Buffer` (owned, heap-backed)
+### 2.1 `Vec<u8>` (owned, heap-backed)
 An owning contiguous byte buffer. Conceptually similar to Rust `Vec<u8>` or Go `[]byte` when used as an owned value.
 
 Properties:
 - owns its allocation
 - **move-only** (non-copyable) to prevent double-free patterns
-- provides safe operations (push/resize/etc.)
+- provides safe operations (push/extend/etc.)
 - can be converted to slices for reading/writing
 
-### 2.2 `Slice[T]` and `MutSlice[T]` (non-owning views)
+### 2.2 `Text` (owned UTF-8, heap-backed)
+An owning, growable UTF-8 string builder backed by `Vec<u8>`.
+Conceptually similar to Rust `String` and Go `strings.Builder`.
+
+### 2.3 `Slice[T]` and `MutSlice[T]` (non-owning views)
 Non-owning views into contiguous memory.
 
 Properties:
@@ -41,7 +45,7 @@ Properties:
 - safe code cannot access the underlying pointer or do arithmetic
 
 Implementation detail:
-- internally may be `{ ptr, len }`, but pointer is not exposed to safe code.
+- implemented as `{ ptr, len }` in the stdlib, but pointer types remain unsafe for user code.
 
 ---
 
@@ -52,26 +56,30 @@ Allocation is explicit (Zig-like). Functions that allocate accept an allocator v
 
 ```cap
 opaque struct Alloc
-opaque struct Buffer    // move-only owner
+opaque struct Vec[T]     // move-only owner
 
-fn buffer_new(a: Alloc, initial_len: usize) -> Result[Buffer, AllocErr]
-fn buffer_len(b: &Buffer) -> usize
-fn buffer_push(b: &mut Buffer, x: u8) -> Result[unit, AllocErr]
-fn buffer_free(a: Alloc, b: Buffer) -> unit         // consumes b
+impl Alloc {
+  fn vec_u8_new(self) -> Vec<u8>
+  fn vec_u8_with_capacity(self, cap: i32) -> Result<Vec<u8>, AllocErr>
+  fn vec_u8_free(self, v: Vec<u8>) -> unit
+}
 ````
 
 ### 3.2 Views
 
 ```cap
-opaque struct Slice[T]
-opaque struct MutSlice[T]
+struct Slice[T] { ptr: *T, len: i32 }
+struct MutSlice[T] { ptr: *T, len: i32 }
 
-fn buffer_as_slice(b: &Buffer) -> Slice[u8]
-fn buffer_as_mut_slice(b: &mut Buffer) -> MutSlice[u8]
+impl Vec<u8> {
+  fn as_slice(self) -> Slice<u8>
+}
 
-fn slice_len[T](s: Slice[T]) -> usize
-fn slice_at[T](s: Slice[T], i: usize) -> &T                 // bounds-checked
-fn slice_sub[T](s: Slice[T], start: usize, n: usize) -> Slice[T] // bounds-checked
+impl Slice<u8> {
+  fn len(self) -> i32
+  fn at(self, i: i32) -> u8                 // bounds-checked
+  fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, SliceErr>
+}
 ```
 
 Note: For `T` that are Copy, `slice_get` may return `Option[T]`.
@@ -85,25 +93,25 @@ Note: For `T` that are Copy, `slice_get` may return `Option[T]`.
 Safe indexing gives “systems parsing” without unsafe pointer math:
 
 ```cap
-fn parse_u16_be(buf: Slice[u8], off: usize) -> Result[u16, Err] {
+fn parse_u16_be(buf: Slice<u8>, off: i32) -> Result<u16, Err> {
   let b0 = buf.at(off)        // bounds checked
   let b1 = buf.at(off + 1)
   Ok(((b0 as u16) << 8) | (b1 as u16))
 }
 ```
 
-### 4.2 Reading a file into a buffer
+### 4.2 Reading a file into bytes
 
-`sys.fs` provides methods that return a `Buffer` (owned) and/or `string`:
+`sys.fs` provides methods that return owned bytes (`Vec<u8>`) and/or `string`:
 
 ```cap
-fn ReadFS.read_all(self, path: string) -> Result[Buffer, FsErr]
+fn ReadFS.read_bytes(self, alloc: Alloc, path: string) -> Result<Vec<u8>, FsErr>
 ```
 
 Usage:
 
-* safe code receives `Buffer`
-* parses it via `Slice[u8]`
+* safe code receives `Vec<u8>`
+* parses it via `Slice<u8>`
 * frees it (explicitly or with `defer`)
 
 ---
@@ -114,14 +122,14 @@ OS APIs typically want `(ptr, len)`.
 
 In Capable:
 
-* safe code supplies `Slice[u8]` / `MutSlice[u8]`
+* safe code supplies `Slice<u8>` / `MutSlice<u8>`
 * `sys.*` converts internally and calls the OS
 
 Example shapes:
 
 ```cap
-Socket.send(data: Slice[u8]) -> Result[usize, Err]
-File.write(data: Slice[u8]) -> Result[usize, Err]
+Socket.send(data: Slice<u8>) -> Result<usize, Err>
+File.write(data: Slice<u8>) -> Result<usize, Err>
 ```
 
 Safe code never manipulates the raw pointers.
@@ -134,15 +142,20 @@ Capable does **not** implement a full borrow checker. Instead we keep safe opera
 
 * safe code cannot do pointer arithmetic or unchecked deref
 * slice indexing/subslicing is bounds-checked
-* freeing consumes the owner (`Buffer` is move-only), reducing double-free risk
+* freeing consumes the owner (`Vec<u8>` is move-only), reducing double-free risk
 
-Remaining hazard without lifetimes: use-after-free by keeping a slice after freeing its `Buffer`.
+Remaining hazard without lifetimes: use-after-free by keeping a slice after freeing its `Vec<u8>`.
 
 Mitigations (recommended):
 
-1. **Debug validation:** `Buffer` carries a generation cookie; slices carry `(id,cookie)`; deref checks cookie in debug builds.
-2. **Simple restriction (v0.2):** slices derived from a `Buffer` may not escape the current function scope (easy rule).
+1. **Debug validation:** `Vec<u8>` carries a generation cookie; slices carry `(id,cookie)`; deref checks cookie in debug builds.
+2. **Simple restriction (v0.2):** slices derived from a `Vec<u8>` may not escape the current function scope (easy rule).
 3. Prefer **arenas** for complex lifetimes: allocate many objects, free once.
+
+Current rule (implemented):
+- Safe non-stdlib modules may not return `Slice<T>` / `MutSlice<T>` values or
+  embed them in structs/enums. This keeps view lifetimes local until a richer
+  lifetime system exists.
 
 ---
 
@@ -154,7 +167,7 @@ If safe code could corrupt memory, it could forge or tamper with capability toke
 Therefore:
 
 * raw pointers and FFI are **unsafe-only**
-* safe buffer work is done via `Buffer` + `Slice` APIs
+* safe byte work is done via `Vec<u8>` + `Slice` APIs
 * `sys.*` performs pointer work internally
 
 This preserves the guarantee:

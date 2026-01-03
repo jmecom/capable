@@ -5,19 +5,19 @@ use sys::system
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let stdin = rc.mint_stdin()
-  let code = match stdin.read_to_string() {
+  let alloc = rc.mint_alloc_default()
+  let code = match stdin.read_to_string(alloc) {
     Ok(s) => {
       let buf = s.bytes()
       let bytes = buf.len()
-      let words_vec = s.split_whitespace()
+      let words_vec = s.split_whitespace(alloc)
       let words = words_vec.len()
-      let alloc = rc.mint_alloc_default()
       alloc.vec_string_free(words_vec)
       let i: i32 = 0
       let lines: i32 = 0
       while (i < bytes) {
         let b = buf.at(i)
-        if (b == 10u8) {
+        if (b == '\n') {
           lines = lines + 1
         }
         i = i + 1

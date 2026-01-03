@@ -1,0 +1,36 @@
+module enum_payload_basic
+use sys::system
+
+enum Maybe<T> {
+  Some(T),
+  None
+}
+
+fn mk(flag: bool) -> Maybe<i32> {
+  if (flag) {
+    return Maybe::Some(7)
+  }
+  return Maybe::None
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  match mk(true) {
+    Maybe::Some(v) => {
+      c.assert(v == 7)
+      c.println("some")
+    }
+    Maybe::None => {
+      c.assert(false)
+    }
+  }
+  match mk(false) {
+    Maybe::Some(_) => {
+      c.assert(false)
+    }
+    Maybe::None => {
+      c.println("none")
+    }
+  }
+  return 0
+}

@@ -1,0 +1,36 @@
+module enum_payload_struct
+use sys::system
+
+struct Pair {
+  a: i32,
+  b: i32
+}
+
+enum Wrap {
+  One(i32),
+  Two(Pair)
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let w = Wrap::Two(Pair { a: 1, b: 2 })
+  match w {
+    Wrap::Two(p) => {
+      c.assert(p.a + p.b == 3)
+      c.println("pair")
+    }
+    Wrap::One(_) => {
+      c.assert(false)
+    }
+  }
+  let w2 = Wrap::One(9)
+  match w2 {
+    Wrap::One(v) => {
+      c.assert(v == 9)
+    }
+    Wrap::Two(_) => {
+      c.assert(false)
+    }
+  }
+  return 0
+}

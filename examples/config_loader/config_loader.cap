@@ -7,14 +7,34 @@ use sys::string
 use sys::vec
 use sys::buffer
 
-fn print_kv(c: Console, key: string, val: string) -> unit {
-  c.print("key: ")
-  c.println(key)
-  c.print("value: ")
-  c.println(val)
+fn print_kv(c: Console, alloc: Alloc, key: string, val: string) -> unit {
+  let out = alloc.text_new()
+  match (out.push_str("key: ")) {
+    Ok(_) => { }
+    Err(_) => { out.free(alloc); return () }
+  }
+  match (out.push_str(key)) {
+    Ok(_) => { }
+    Err(_) => { out.free(alloc); return () }
+  }
+  match (out.push_str("\nvalue: ")) {
+    Ok(_) => { }
+    Err(_) => { out.free(alloc); return () }
+  }
+  match (out.push_str(val)) {
+    Ok(_) => { }
+    Err(_) => { out.free(alloc); return () }
+  }
+  match (out.push_byte('\n')) {
+    Ok(_) => { }
+    Err(_) => { out.free(alloc); return () }
+  }
+  c.print(out.as_string())
+  out.free(alloc)
+  return ()
 }
 
-fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, VecErr> {
+fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, vec::VecErr> {
   if (line.len() == 0) {
     return Ok(())
   }
@@ -22,18 +42,27 @@ fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, VecErr> {
     return Ok(())
   }
 
-  let parts = line.split(61u8)
-  if (parts.len() == 2) {
-    let key = parts[0]?
-    let val = parts[1]?
-    print_kv(c, key, val)
+  match (line.index_of_byte('=')) {
+    Ok(eq) => {
+      let key_result = line.slice_range(0, eq)
+      match (key_result) {
+        Ok(key) => {
+          let val_result = line.slice_range(eq + 1, line.len())
+          match (val_result) {
+            Ok(val) => { print_kv(c, alloc, key, val) }
+            Err(_) => { return Err(vec::VecErr::OutOfRange) }
+          }
+        }
+        Err(_) => { return Err(vec::VecErr::OutOfRange) }
+      }
+    }
+    Err(_) => { }
   }
-  alloc.vec_string_free(parts)
   return Ok(())
 }
 
-fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, VecErr> {
-  let lines = contents.lines()
+fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, vec::VecErr> {
+  let lines = contents.lines(alloc)
   let n = lines.len()
   for i in 0..n {
     let line = lines[i]?
@@ -44,7 +73,7 @@ fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, VecE
 }
 
 fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result<unit, FsErr> {
-  let contents = fs.read_to_string("app.conf")?
+  let contents = fs.read_to_string(alloc, "app.conf")?
   let result = parse_config(c, alloc, contents)
   if (result.is_err()) {
     return Err(fs::FsErr::IoError)

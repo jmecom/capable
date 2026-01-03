@@ -1,43 +1,460 @@
+/// Vec helpers for built-in element types.
+/// Vec<T> is an owned, heap-backed growable container (not a view).
+/// Use Slice/MutSlice for non-owning views into byte data.
 package safe
 module sys::vec
 
 use sys::buffer
+use sys::string
+use sys::unsafe_ptr
 
-pub copy opaque struct Vec<T>
-pub copy opaque struct VecU8
-pub copy opaque struct VecI32
-pub copy opaque struct VecString
+/// Internal Vec header stored on the heap.
+copy struct VecHeader {
+  raw: *u8,
+  len: i32,
+  cap: i32,
+  elem_size: i32,
+  alloc: buffer::Alloc
+}
 
+/// Generic Vec marker type (owned, heap-backed container).
+pub copy opaque struct Vec<T> {
+  header: *u8
+}
+
+/// Vec errors.
 pub enum VecErr {
+  /// Index is out of range.
   OutOfRange,
+  /// Vec is empty.
   Empty
 }
 
-impl VecU8 {
+/// Allocate a new Vec header.
+fn alloc_header<T>(alloc: buffer::Alloc) -> *u8 {
+  let bytes = unsafe_ptr::sizeof<sys::vec::VecHeader>()
+  let header = alloc.malloc(bytes)
+  let header_ptr: *sys::vec::VecHeader = unsafe_ptr::ptr_cast<sys::vec::VecHeader>(header)
+  if (unsafe_ptr::ptr_is_null<sys::vec::VecHeader>(header_ptr)) {
+    panic()
+  }
+  return header
+}
+
+/// Allocate element storage for the given capacity.
+fn alloc_elems<T>(alloc: buffer::Alloc, cap: i32) -> *u8 {
+  if (cap <= 0) {
+    return alloc.malloc(0)
+  }
+  let size = unsafe_ptr::sizeof<T>()
+  let bytes = size * cap
+  return alloc.malloc(bytes)
+}
+
+/// Free element storage.
+fn free_elems(alloc: buffer::Alloc, raw: *u8) -> unit {
+  alloc.free(raw)
+  return ()
+}
+
+/// Read the header value.
+fn read_header<T>(v: Vec<T>) -> sys::vec::VecHeader {
+  let header_ptr: *sys::vec::VecHeader = unsafe_ptr::ptr_cast<sys::vec::VecHeader>(v.header)
+  return unsafe_ptr::ptr_read<sys::vec::VecHeader>(header_ptr)
+}
+
+/// Write the header value.
+fn write_header<T>(v: Vec<T>, header: sys::vec::VecHeader) -> unit {
+  let header_ptr: *sys::vec::VecHeader = unsafe_ptr::ptr_cast<sys::vec::VecHeader>(v.header)
+  unsafe_ptr::ptr_write<sys::vec::VecHeader>(header_ptr, header)
+  return ()
+}
+
+/// Cast a raw pointer to a typed pointer at the given element index.
+fn elem_ptr<T>(raw: *u8, elem_size: i32, index: i32) -> *T {
+  let offset = elem_size * index
+  let ptr = unsafe_ptr::ptr_add<u8>(raw, offset)
+  return unsafe_ptr::ptr_cast<T>(ptr)
+}
+
+/// Copy elements from src to dst.
+fn copy_elems<T>(dst_raw: *u8, src_raw: *u8, elem_size: i32, count: i32) -> unit {
+  let i = 0
+  while (i < count) {
+    let value = unsafe_ptr::ptr_read<T>(elem_ptr<T>(src_raw, elem_size, i))
+    unsafe_ptr::ptr_write<T>(elem_ptr<T>(dst_raw, elem_size, i), value)
+    i = i + 1
+  }
+  return ()
+}
+
+/// Grow to a new capacity.
+fn grow_to<T>(v: Vec<T>, header: sys::vec::VecHeader, new_cap: i32) -> Result<unit, buffer::AllocErr> {
+  let new_raw = alloc_elems<T>(header.alloc, new_cap)
+  if (new_cap > 0 && unsafe_ptr::ptr_is_null<u8>(new_raw)) {
+    return Err(buffer::AllocErr::Oom)
+  }
+  copy_elems<T>(new_raw, header.raw, header.elem_size, header.len)
+  free_elems(header.alloc, header.raw)
+  let new_header = sys::vec::VecHeader {
+    raw: new_raw,
+    len: header.len,
+    cap: new_cap,
+    elem_size: header.elem_size,
+    alloc: header.alloc
+  }
+  write_header<T>(v, new_header)
+  return Ok(())
+}
+
+/// Ensure capacity for a target length.
+fn ensure_capacity<T>(v: Vec<T>, header: sys::vec::VecHeader, needed: i32) -> Result<unit, buffer::AllocErr> {
+  if (needed <= header.cap) {
+    return Ok(())
+  }
+  let new_cap = header.cap
+  if (new_cap < 4) {
+    new_cap = 4
+  } else {
+    new_cap = new_cap * 2
+  }
+  while (new_cap < needed) {
+    new_cap = new_cap * 2
+  }
+  return grow_to<T>(v, header, new_cap)
+}
+
+/// Create a new Vec with the provided allocator.
+pub fn new_with<T>(alloc: buffer::Alloc) -> Vec<T> {
+  let header_ptr = alloc_header<T>(alloc)
+  let raw = alloc.malloc(0)
+  let header = sys::vec::VecHeader {
+    raw: raw,
+    len: 0,
+    cap: 0,
+    elem_size: unsafe_ptr::sizeof<T>(),
+    alloc: alloc
+  }
+  write_header<T>(Vec<T> { header: header_ptr }, header)
+  return Vec<T> { header: header_ptr }
+}
+
+/// Create a new Vec with capacity using the provided allocator.
+pub fn with_capacity<T>(alloc: buffer::Alloc, capacity: i32) -> Result<Vec<T>, buffer::AllocErr> {
+  let cap = capacity
+  if (cap < 0) {
+    cap = 0
+  }
+  let header_ptr = alloc_header<T>(alloc)
+  let raw = alloc_elems<T>(alloc, cap)
+  if (cap > 0 && unsafe_ptr::ptr_is_null<u8>(raw)) {
+    free_elems(alloc, header_ptr)
+    return Err(buffer::AllocErr::Oom)
+  }
+  let header = sys::vec::VecHeader {
+    raw: raw,
+    len: 0,
+    cap: cap,
+    elem_size: unsafe_ptr::sizeof<T>(),
+    alloc: alloc
+  }
+  write_header<T>(Vec<T> { header: header_ptr }, header)
+  return Ok(Vec<T> { header: header_ptr })
+}
+
+impl<T> Vec<T> {
+  /// Length in elements.
   pub fn len(self) -> i32 {
-    return 0
+    let header = read_header<T>(self)
+    return header.len
   }
 
+  /// Capacity in elements.
+  pub fn capacity(self) -> i32 {
+    let header = read_header<T>(self)
+    return header.cap
+  }
+
+  /// True if empty.
   pub fn is_empty(self) -> bool {
     return self.len() == 0
   }
 
-  pub fn get(self, i: i32) -> Result<u8, VecErr> {
+  /// Get element at index.
+  pub fn get(self, i: i32) -> Result<T, VecErr> {
+    let header = read_header<T>(self)
+    if (i < 0 || i >= header.len) {
+      return Err(VecErr::OutOfRange)
+    }
+    let ptr = elem_ptr<T>(header.raw, header.elem_size, i)
+    return Ok(unsafe_ptr::ptr_read<T>(ptr))
+  }
+
+  /// Get the first element.
+  pub fn first(self) -> Result<T, VecErr> {
+    return self.get(0)
+  }
+
+  /// Get the last element.
+  pub fn last(self) -> Result<T, VecErr> {
+    let len = self.len()
+    if (len == 0) {
+      return Err(VecErr::Empty)
+    }
+    return self.get(len - 1)
+  }
+
+  /// Set element at index.
+  pub fn set(self, i: i32, x: T) -> Result<unit, VecErr> {
+    let header = read_header<T>(self)
+    if (i < 0 || i >= header.len) {
+      return Err(VecErr::OutOfRange)
+    }
+    let ptr = elem_ptr<T>(header.raw, header.elem_size, i)
+    unsafe_ptr::ptr_write<T>(ptr, x)
+    return Ok(())
+  }
+
+  /// Append one element.
+  pub fn push(self, x: T) -> Result<unit, buffer::AllocErr> {
+    self.reserve(1)?
+    let header = read_header<T>(self)
+    let ptr = elem_ptr<T>(header.raw, header.elem_size, header.len)
+    unsafe_ptr::ptr_write<T>(ptr, x)
+    let new_header = sys::vec::VecHeader {
+      raw: header.raw,
+      len: header.len + 1,
+      cap: header.cap,
+      elem_size: header.elem_size,
+      alloc: header.alloc
+    }
+    write_header<T>(self, new_header)
+    return Ok(())
+  }
+
+  /// Append another Vec.
+  pub fn extend(self, other: Vec<T>) -> Result<unit, buffer::AllocErr> {
+    let other_header = read_header<T>(other)
+    self.reserve(other_header.len)?
+    let i = 0
+    while (i < other_header.len) {
+      let value = unsafe_ptr::ptr_read<T>(elem_ptr<T>(other_header.raw, other_header.elem_size, i))
+      self.push(value)?
+      i = i + 1
+    }
+    return Ok(())
+  }
+
+  /// Reserve additional capacity.
+  pub fn reserve(self, additional: i32) -> Result<unit, buffer::AllocErr> {
+    if (additional <= 0) {
+      return Ok(())
+    }
+    let header = read_header<T>(self)
+    let needed = header.len + additional
+    return ensure_capacity<T>(self, header, needed)
+  }
+
+  /// Shrink capacity to fit length.
+  pub fn shrink_to_fit(self) -> unit {
+    let header = read_header<T>(self)
+    if (header.len == header.cap) {
+      return ()
+    }
+    if (header.len == 0) {
+      free_elems(header.alloc, header.raw)
+      let raw = header.alloc.malloc(0)
+      let new_header = sys::vec::VecHeader {
+        raw: raw,
+        len: 0,
+        cap: 0,
+        elem_size: header.elem_size,
+        alloc: header.alloc
+      }
+      write_header<T>(self, new_header)
+      return ()
+    }
+    let new_raw = alloc_elems<T>(header.alloc, header.len)
+    if (header.len > 0 && unsafe_ptr::ptr_is_null<u8>(new_raw)) {
+      return ()
+    }
+    copy_elems<T>(new_raw, header.raw, header.elem_size, header.len)
+    free_elems(header.alloc, header.raw)
+    let new_header = sys::vec::VecHeader {
+      raw: new_raw,
+      len: header.len,
+      cap: header.len,
+      elem_size: header.elem_size,
+      alloc: header.alloc
+    }
+    write_header<T>(self, new_header)
+    return ()
+  }
+
+  /// Append another Vec (alias).
+  pub fn push_all(self, other: Vec<T>) -> Result<unit, buffer::AllocErr> {
+    return self.extend(other)
+  }
+
+  /// Pop last element.
+  pub fn pop(self) -> Result<T, VecErr> {
+    let header = read_header<T>(self)
+    if (header.len == 0) {
+      return Err(VecErr::Empty)
+    }
+    let index = header.len - 1
+    let ptr = elem_ptr<T>(header.raw, header.elem_size, index)
+    let value = unsafe_ptr::ptr_read<T>(ptr)
+    let new_header = sys::vec::VecHeader {
+      raw: header.raw,
+      len: index,
+      cap: header.cap,
+      elem_size: header.elem_size,
+      alloc: header.alloc
+    }
+    write_header<T>(self, new_header)
+    return Ok(value)
+  }
+
+  /// Remove all elements.
+  pub fn clear(self) -> unit {
+    while (true) {
+      match (self.pop()) {
+        Ok(_) => { }
+        Err(_) => { break }
+      }
+    }
+    return ()
+  }
+
+  /// True if the Vec contains value.
+  pub fn contains(self, value: T) -> bool {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            return true
+          }
+        }
+        Err(_) => { return false }
+      }
+      i = i + 1
+    }
+    return false
+  }
+
+  /// Count occurrences of value.
+  pub fn count(self, value: T) -> i32 {
+    let len = self.len()
+    let i = 0
+    let out = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            out = out + 1
+          }
+        }
+        Err(_) => { return out }
+      }
+      i = i + 1
+    }
+    return out
+  }
+
+  /// Find the first index of value.
+  pub fn index_of(self, value: T) -> Result<i32, VecErr> {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            return Ok(i)
+          }
+        }
+        Err(_) => { return Err(VecErr::OutOfRange) }
+      }
+      i = i + 1
+    }
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn set(self, i: i32, x: u8) -> Result<unit, VecErr> {
+  /// Find the last index of value.
+  pub fn last_index_of(self, value: T) -> Result<i32, VecErr> {
+    let len = self.len()
+    let i = len - 1
+    while (i >= 0) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            return Ok(i)
+          }
+        }
+        Err(_) => { return Err(VecErr::OutOfRange) }
+      }
+      i = i - 1
+    }
     return Err(VecErr::OutOfRange)
   }
 
-  pub fn push(self, x: u8) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
+  /// Filter elements equal to value (numeric vecs only).
+  pub fn filter(self, value: T) -> Vec<T> {
+    let header = read_header<T>(self)
+    let out = new_with<T>(header.alloc)
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v == value) {
+            match (out.push(v)) {
+              Ok(_) => { }
+              Err(_) => { panic() }
+            }
+          }
+        }
+        Err(_) => { return out }
+      }
+      i = i + 1
+    }
+    return out
   }
 
-  pub fn extend(self, other: VecU8) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
+  /// Add delta to each element.
+  pub fn map_add(self, delta: T) -> Vec<T> {
+    let header = read_header<T>(self)
+    let out = new_with<T>(header.alloc)
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          match (out.push(v + delta)) {
+            Ok(_) => { }
+            Err(_) => { panic() }
+          }
+        }
+        Err(_) => { return out }
+      }
+      i = i + 1
+    }
+    return out
   }
 
+  /// Free the backing storage and header.
+  pub fn free(self) -> unit {
+    let header = read_header<T>(self)
+    free_elems(header.alloc, header.raw)
+    free_elems(header.alloc, self.header)
+    return ()
+  }
+}
+
+impl Vec<u8> {
+  /// Append a slice of bytes.
   pub fn extend_slice(self, data: Slice<u8>) -> Result<unit, buffer::AllocErr> {
     let len = data.len()
     let i = 0
@@ -48,135 +465,64 @@ impl VecU8 {
     return Ok(())
   }
 
-  pub fn push_all(self, other: VecU8) -> Result<unit, buffer::AllocErr> {
-    return self.extend(other)
-  }
-
-  pub fn filter(self, value: u8) -> VecU8 {
-    return ()
-  }
-
-  pub fn map_add(self, delta: u8) -> VecU8 {
-    return ()
-  }
-
+  /// Create a slice view of a range.
   pub fn slice(self, start: i32, len: i32) -> Result<Slice<u8>, VecErr> {
-    return Err(VecErr::OutOfRange)
+    let header = read_header<u8>(self)
+    if (start < 0 || len < 0) {
+      return Err(VecErr::OutOfRange)
+    }
+    if (start + len > header.len) {
+      return Err(VecErr::OutOfRange)
+    }
+    let ptr = elem_ptr<u8>(header.raw, header.elem_size, start)
+    return Ok(header.alloc.slice_from_ptr(ptr, len))
   }
 
-  pub fn pop(self) -> Result<u8, VecErr> {
-    return Err(VecErr::Empty)
+  /// Create a slice view of a range using start/end bounds (end exclusive).
+  pub fn slice_range(self, start: i32, end: i32) -> Result<Slice<u8>, VecErr> {
+    if (start < 0 || end < 0) {
+      return Err(VecErr::OutOfRange)
+    }
+    if (start > end) {
+      return Err(VecErr::OutOfRange)
+    }
+    return self.slice(start, end - start)
   }
 
+  /// Borrow as a slice.
   pub fn as_slice(self) -> Slice<u8> {
-    return ()
+    let header = read_header<u8>(self)
+    return header.alloc.slice_from_ptr(header.raw, header.len)
   }
 
-  pub fn clear(self) -> unit {
-    while (true) {
-      match (self.pop()) {
-        Ok(_) => { }
-        Err(_) => { break }
-      }
+  /// Copy contents into a new owned slice using the Vec allocator.
+  pub fn copy_slice(self) -> Result<Slice<u8>, buffer::AllocErr> {
+    let header = read_header<u8>(self)
+    if (header.len == 0) {
+      let raw = header.alloc.malloc(0)
+      return Ok(header.alloc.slice_from_ptr(raw, 0))
     }
-    return ()
+    let raw = alloc_elems<u8>(header.alloc, header.len)
+    if (unsafe_ptr::ptr_is_null<u8>(raw)) {
+      return Err(buffer::AllocErr::Oom)
+    }
+    copy_elems<u8>(raw, header.raw, header.elem_size, header.len)
+    return Ok(header.alloc.slice_from_ptr(raw, header.len))
+  }
+
+  /// Copy contents into a new string view.
+  pub fn to_string(self) -> Result<string, buffer::AllocErr> {
+    let owned = self.copy_slice()?
+    return string::from_bytes(owned)
   }
 }
 
-impl VecI32 {
-  pub fn len(self) -> i32 {
-    return 0
-  }
-
-  pub fn is_empty(self) -> bool {
-    return self.len() == 0
-  }
-
-  pub fn get(self, i: i32) -> Result<i32, VecErr> {
-    return Err(VecErr::OutOfRange)
-  }
-
-  pub fn set(self, i: i32, x: i32) -> Result<unit, VecErr> {
-    return Err(VecErr::OutOfRange)
-  }
-
-  pub fn push(self, x: i32) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  pub fn extend(self, other: VecI32) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  pub fn push_all(self, other: VecI32) -> Result<unit, buffer::AllocErr> {
-    return self.extend(other)
-  }
-
-  pub fn filter(self, value: i32) -> VecI32 {
-    return ()
-  }
-
-  pub fn map_add(self, delta: i32) -> VecI32 {
-    return ()
-  }
-
-  pub fn pop(self) -> Result<i32, VecErr> {
-    return Err(VecErr::Empty)
-  }
-
-  pub fn clear(self) -> unit {
-    while (true) {
-      match (self.pop()) {
-        Ok(_) => { }
-        Err(_) => { break }
-      }
-    }
-    return ()
-  }
-}
-
-impl VecString {
-  pub fn len(self) -> i32 {
-    return 0
-  }
-
-  pub fn is_empty(self) -> bool {
-    return self.len() == 0
-  }
-
-  pub fn get(self, i: i32) -> Result<string, VecErr> {
-    return Err(VecErr::OutOfRange)
-  }
-
-  pub fn push(self, x: string) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  pub fn extend(self, other: VecString) -> Result<unit, buffer::AllocErr> {
-    return Err(buffer::AllocErr::Oom)
-  }
-
-  pub fn push_all(self, other: VecString) -> Result<unit, buffer::AllocErr> {
-    return self.extend(other)
-  }
-
-  pub fn pop(self) -> Result<string, VecErr> {
-    return Err(VecErr::Empty)
-  }
-
-  pub fn clear(self) -> unit {
-    while (true) {
-      match (self.pop()) {
-        Ok(_) => { }
-        Err(_) => { break }
-      }
-    }
-    return ()
-  }
-
+impl Vec<string> {
+  /// Join elements with a separator.
   pub fn join(self, sep: string) -> Result<string, buffer::AllocErr> {
     let len = self.len()
-    let buf = buffer::new(0)?
+    let header = read_header<string>(self)
+    let buf = string::text_new(header.alloc)
     let i = 0
     while (i < len) {
       let part = match (self.get(i)) {

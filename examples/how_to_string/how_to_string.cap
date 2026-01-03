@@ -1,0 +1,87 @@
+package safe
+module how_to_string
+use sys::system
+use sys::console
+use sys::string
+use sys::buffer
+
+fn demo_string_view(c: Console, alloc: Alloc) -> unit {
+  let s = "hello,world"
+  c.println("-- string view --")
+  c.println(s)
+  c.println("len:")
+  c.println_i32(s.len())
+
+  match (s.index_of_byte(',')) {
+    Ok(i) => {
+      match (s.slice_range(0, i)) {
+        Ok(left) => { c.println(left) }
+        Err(_) => { c.println("slice failed") }
+      }
+    }
+    Err(_) => { c.println("comma not found") }
+  }
+
+  let words = s.split(alloc, ',')
+  c.println("split count:")
+  c.println_i32(words.len())
+  match (words[0]) {
+    Ok(w0) => { c.println(w0) }
+    Err(_) => { c.println("word0 missing") }
+  }
+  match (words[1]) {
+    Ok(w1) => { c.println(w1) }
+    Err(_) => { c.println("word1 missing") }
+  }
+  alloc.vec_string_free(words)
+}
+
+fn demo_text_builder(c: Console, alloc: Alloc) -> unit {
+  c.println("-- Text builder --")
+  let t = alloc.text_new()
+  match (t.push_str("hello")) {
+    Ok(_) => { }
+    Err(_) => { c.println("push_str failed"); return () }
+  }
+  match (t.push_byte(' ')) {
+    Ok(_) => { }
+    Err(_) => { c.println("push_byte failed"); return () }
+  }
+  match (t.append("text")) {
+    Ok(_) => { }
+    Err(_) => { c.println("append failed"); return () }
+  }
+  match (t.slice_range(0, 5)) {
+    Ok(view) => { c.println(view) }
+    Err(_) => { c.println("slice_range failed") }
+  }
+  match (t.to_string()) {
+    Ok(out) => { c.println(out) }
+    Err(_) => { c.println("to_string failed") }
+  }
+  t.free(alloc)
+
+  match (alloc.text_from("owned")) {
+    Ok(t2) => {
+      match (t2.to_string()) {
+        Ok(out) => { c.println(out) }
+        Err(_) => { c.println("to_string failed") }
+      }
+      t2.free(alloc)
+    }
+    Err(_) => { c.println("text_from failed") }
+  }
+
+  match ("a".concat(alloc, "b")) {
+    Ok(out) => { c.println(out) }
+    Err(_) => { c.println("concat failed") }
+  }
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  demo_string_view(c, alloc)
+  demo_text_builder(c, alloc)
+  return 0
+}

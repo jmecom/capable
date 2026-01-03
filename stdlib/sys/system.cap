@@ -1,3 +1,4 @@
+/// Root capability minting.
 package unsafe
 module sys::system
 use sys::console
@@ -7,33 +8,41 @@ use sys::stdin
 use sys::buffer
 use sys::net
 
+/// Root capability for minting sub-capabilities.
 pub copy capability struct RootCap
 
 impl RootCap {
+  /// Mint console access.
   pub fn mint_console(self) -> console::Console {
     return ()
   }
 
+  /// Mint a read-only filesystem rooted at path.
   pub fn mint_readfs(self, root: string) -> fs::ReadFS {
     return ()
   }
 
+  /// Mint a filesystem rooted at path.
   pub fn mint_filesystem(self, root: string) -> fs::Filesystem {
     return ()
   }
 
+  /// Mint a default Alloc.
   pub fn mint_alloc_default(self) -> buffer::Alloc {
     return ()
   }
 
+  /// Mint argument access.
   pub fn mint_args(self) -> args::Args {
     return ()
   }
 
+  /// Mint stdin access.
   pub fn mint_stdin(self) -> stdin::Stdin {
     return ()
   }
 
+  /// Mint network access.
   pub fn mint_net(self) -> net::Net {
     return ()
   }

@@ -25,7 +25,7 @@ pub fn main(rc: RootCap) -> i32 {
   // Test indexing with []
   let s = "hello"
   let first = s[0]
-  if (first != 104u8) {  // 'h' is 104
+  if (first != 'h') {  // expect 'h'
     c.println("FAIL: index")
     return 1
   }
@@ -44,7 +44,7 @@ pub fn main(rc: RootCap) -> i32 {
   let s2 = "world"
   let idx = identity<i32>(1)
   let ch = s2[idx]
-  if (ch != 111u8) {  // 'o' is 111
+  if (ch != 'o') {  // expect 'o'
     c.println("FAIL: combo")
     return 1
   }

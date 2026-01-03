@@ -1,6 +1,9 @@
+/// IO error enums shared across modules.
 package safe
 module sys::io
 
+/// Basic IO errors.
 pub enum IoErr {
+  /// Generic IO failure.
   IoError
 }

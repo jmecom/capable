@@ -3,6 +3,6 @@ use sys::system
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let ignored = c.buffer_new(1)
+  let ignored = c.vec_u8_new()
   return 0
 }

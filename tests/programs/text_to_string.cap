@@ -1,0 +1,25 @@
+package safe
+module text_to_string
+use sys::system
+use sys::string
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+  let text = string::text_new(alloc)
+  match (text.push_byte('h')) {
+    Ok(_) => { }
+    Err(_) => { panic() }
+  }
+  match (text.push_byte('i')) {
+    Ok(_) => { }
+    Err(_) => { panic() }
+  }
+  let s = match (text.to_string()) {
+    Ok(v) => { v }
+    Err(_) => { panic() }
+  }
+  c.println(s)
+  text.free(alloc)
+  return 0
+}

@@ -1,49 +1,66 @@
+/// Networking capabilities and helpers.
 package unsafe
 module sys::net
+use sys::buffer
 
+/// Network capability.
 pub copy capability struct Net
+/// TCP listener capability.
 pub copy capability struct TcpListener
+/// TCP connection capability (linear to enforce close).
 pub linear capability struct TcpConn
 
+/// Network errors.
 pub enum NetErr {
+  /// Address parse/format error.
   InvalidAddress,
+  /// Generic IO failure.
   IoError,
+  /// Data parse/format error.
   InvalidData
 }
 
 impl Net {
+  /// Bind and listen on host:port.
   pub fn listen(self, host: string, port: i32) -> Result<TcpListener, NetErr> {
     return Err(NetErr::IoError)
   }
 
+  /// Connect to host:port.
   pub fn connect(self, host: string, port: i32) -> Result<TcpConn, NetErr> {
     return Err(NetErr::IoError)
   }
 }
 
 impl TcpListener {
+  /// Accept an incoming connection.
   pub fn accept(self: &TcpListener) -> Result<TcpConn, NetErr> {
     return Err(NetErr::IoError)
   }
 
+  /// Close the listener.
   pub fn close(self) -> unit {
     return ()
   }
 }
 
 impl TcpConn {
-  pub fn read_to_string(self: &TcpConn) -> Result<string, NetErr> {
+  /// Read all available data into a string.
+  pub fn read_to_string(self: &TcpConn, alloc: buffer::Alloc) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 
-  pub fn read(self: &TcpConn, max_size: i32) -> Result<string, NetErr> {
+  /// Read up to max_size bytes into a string.
+  pub fn read(self: &TcpConn, alloc: buffer::Alloc, max_size: i32) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 
+  /// Write a string to the connection.
   pub fn write(self: &TcpConn, data: string) -> Result<unit, NetErr> {
     return Err(NetErr::IoError)
   }
 
+  /// Close the connection.
   pub fn close(self) -> unit {
     return ()
   }

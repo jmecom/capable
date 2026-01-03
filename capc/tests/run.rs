@@ -316,43 +316,160 @@ fn run_slice_unsafe() {
 }
 
 #[test]
-fn run_buffer_unsafe() {
-    let out_dir = make_out_dir("buffer_unsafe");
+fn run_unsafe_ptr_unsafe() {
+    let out_dir = make_out_dir("unsafe_ptr_unsafe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_unsafe.cap",
+        "tests/programs/unsafe_ptr_unsafe.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("buffer ok"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("unsafe ptr ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_text_unsafe() {
+    let out_dir = make_out_dir("text_unsafe");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/text_unsafe.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("text ok"), "stdout was: {stdout:?}");
     assert!(stdout.contains("slice ok"), "stdout was: {stdout:?}");
 }
 
 #[test]
-fn run_buffer_safe() {
-    let out_dir = make_out_dir("buffer_safe");
+fn run_text_safe() {
+    let out_dir = make_out_dir("text_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_safe.cap",
+        "tests/programs/text_safe.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("buffer ok"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("text ok"), "stdout was: {stdout:?}");
 }
 
 #[test]
-fn run_buffer_push_safe() {
-    let out_dir = make_out_dir("buffer_push_safe");
+fn run_text_to_string() {
+    let out_dir = make_out_dir("text_to_string");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/buffer_push_safe.cap",
+        "tests/programs/text_to_string.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("hi"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_text_helpers_more() {
+    let out_dir = make_out_dir("text_helpers_more");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/text_helpers_more.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("text helpers ok"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
+fn run_text_basic() {
+    let out_dir = make_out_dir("text_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/text_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("text basic ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_option_basic() {
+    let out_dir = make_out_dir("option_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/option_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("ok"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("default"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_enum_payload_basic() {
+    let out_dir = make_out_dir("enum_payload_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/enum_payload_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("some"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("none"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_enum_payload_struct() {
+    let out_dir = make_out_dir("enum_payload_struct");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/enum_payload_struct.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("pair"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_enum_payload_string() {
+    let out_dir = make_out_dir("enum_payload_string");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/enum_payload_string.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("left"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_text_push_safe() {
+    let out_dir = make_out_dir("text_push_safe");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/text_push_safe.cap",
     ]);
     assert_eq!(code, 0);
     assert!(stdout.contains("push ok"), "stdout was: {stdout:?}");
@@ -471,6 +588,48 @@ fn run_vec_helpers() {
     ]);
     assert_eq!(code, 0);
     assert!(stdout.contains("vec ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_vec_i32_helpers() {
+    let out_dir = make_out_dir("vec_i32_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/vec_i32_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("vec i32 ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_vec_string_helpers() {
+    let out_dir = make_out_dir("vec_string_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/vec_string_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("vec string ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_vec_search_helpers() {
+    let out_dir = make_out_dir("vec_search_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/vec_search_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("vec search ok"), "stdout was: {stdout:?}");
 }
 
 #[test]

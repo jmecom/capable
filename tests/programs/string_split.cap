@@ -4,9 +4,9 @@ use sys::system
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let parts = "a,b,c".split(44u8)
-  let count = parts.len()
   let alloc = rc.mint_alloc_default()
+  let parts = "a,b,c".split(alloc, ',')
+  let count = parts.len()
   alloc.vec_string_free(parts)
   c.assert(count == 3)
   c.println("split ok")

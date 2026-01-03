@@ -123,6 +123,17 @@ struct FnInfo {
 #[derive(Clone, Debug)]
 struct EnumIndex {
     variants: HashMap<String, HashMap<String, i32>>,
+    payloads: HashMap<String, HashMap<String, Option<crate::hir::HirType>>>,
+    layouts: HashMap<String, EnumLayout>,
+}
+
+/// Layout metadata for enums with payloads (tag + payload).
+#[derive(Clone, Debug)]
+struct EnumLayout {
+    payload_offset: u32,
+    payload_size: u32,
+    size: u32,
+    align: u32,
 }
 
 /// Struct layout index used for field offsets and sizes.
@@ -208,11 +219,17 @@ pub fn build_object(
             .map_err(|err| CodegenError::Codegen(err.to_string()))?,
     );
 
-    let enum_index = build_enum_index(&program.entry, &program.user_modules, &program.stdlib);
     let struct_layouts = build_struct_layout_index(
         &program.entry,
         &program.user_modules,
         &program.stdlib,
+        module.isa().pointer_type(),
+    )?;
+    let enum_index = build_enum_index(
+        &program.entry,
+        &program.user_modules,
+        &program.stdlib,
+        &struct_layouts,
         module.isa().pointer_type(),
     )?;
 
@@ -261,7 +278,7 @@ pub fn build_object(
         .collect::<Vec<_>>();
 
     for module_ref in &all_modules {
-        register_extern_functions_from_hir(module_ref, &mut fn_map, &struct_layouts)?;
+        register_extern_functions_from_hir(module_ref, &mut fn_map, &enum_index, &struct_layouts)?;
     }
 
     let mut data_counter = 0u32;
@@ -318,6 +335,7 @@ pub fn build_object(
                     &info,
                     args,
                     &func.ret_ty,
+                    &enum_index,
                     &struct_layouts,
                 )?;
                 match value {
@@ -345,9 +363,14 @@ pub fn build_object(
             let mut param_index = 0;
             let mut return_lowering = ReturnLowering::Direct;
 
+            let is_enum_payload = match &func.ret_ty.ty {
+                crate::typeck::Ty::Path(name, _) => enum_index.layouts.contains_key(name),
+                _ => false,
+            };
             if info.sig.ret == AbiType::Ptr
                 && abi_sig.ret == AbiType::Unit
-                && resolve_struct_layout(&func.ret_ty.ty, "", &struct_layouts.layouts).is_some()
+                && (resolve_struct_layout(&func.ret_ty.ty, "", &struct_layouts.layouts).is_some()
+                    || is_enum_payload)
             {
                 let out_ptr = params
                     .get(0)
@@ -548,15 +571,25 @@ fn is_non_opaque_struct_type(
     resolve_struct_layout(ty, "", &struct_layouts.layouts).is_some()
 }
 
+fn is_payload_enum_type(ty: &crate::typeck::Ty, enum_index: &EnumIndex) -> bool {
+    match ty {
+        crate::typeck::Ty::Path(name, _) => enum_index.layouts.contains_key(name),
+        _ => false,
+    }
+}
+
 fn lowered_abi_sig_for_return(
     sig: &FnSig,
     ret_ty: &crate::hir::HirType,
+    enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
 ) -> Option<FnSig> {
     if let crate::typeck::Ty::Path(name, args) = &ret_ty.ty {
         if name == "sys.result.Result" && args.len() == 2 {
-            let ok_is_struct = is_non_opaque_struct_type(&args[0], struct_layouts);
-            let err_is_struct = is_non_opaque_struct_type(&args[1], struct_layouts);
+            let ok_is_struct = is_non_opaque_struct_type(&args[0], struct_layouts)
+                || is_payload_enum_type(&args[0], enum_index);
+            let err_is_struct = is_non_opaque_struct_type(&args[1], struct_layouts)
+                || is_payload_enum_type(&args[1], enum_index);
             if ok_is_struct || err_is_struct {
                 let AbiType::Result(ok_abi, err_abi) = &ret_ty.abi else {
                     return None;
@@ -571,7 +604,9 @@ fn lowered_abi_sig_for_return(
         }
     }
 
-    if is_non_opaque_struct_type(&ret_ty.ty, struct_layouts) {
+    if is_non_opaque_struct_type(&ret_ty.ty, struct_layouts)
+        || is_payload_enum_type(&ret_ty.ty, enum_index)
+    {
         let mut params = Vec::with_capacity(sig.params.len() + 1);
         params.push(AbiType::Ptr);
         params.extend(sig.params.iter().cloned());
@@ -588,7 +623,7 @@ fn lowered_abi_sig_for_return(
 fn register_user_functions(
     module: &crate::hir::HirModule,
     entry: &crate::hir::HirModule,
-    _enum_index: &EnumIndex,
+    enum_index: &EnumIndex,
     map: &mut HashMap<String, FnInfo>,
     runtime_intrinsics: &HashMap<String, FnInfo>,
     struct_layouts: &StructLayoutIndex,
@@ -624,7 +659,9 @@ fn register_user_functions(
         } else {
             (None, None)
         };
-        let abi_sig = abi_sig.or_else(|| lowered_abi_sig_for_return(&sig, &func.ret_ty, struct_layouts));
+        let abi_sig = abi_sig.or_else(|| {
+            lowered_abi_sig_for_return(&sig, &func.ret_ty, enum_index, struct_layouts)
+        });
         map.insert(
             key,
             FnInfo {
@@ -643,6 +680,7 @@ fn register_user_functions(
 fn register_extern_functions_from_hir(
     module: &crate::hir::HirModule,
     map: &mut HashMap<String, FnInfo>,
+    enum_index: &EnumIndex,
     struct_layouts: &StructLayoutIndex,
 ) -> Result<(), CodegenError> {
     let module_name = &module.name;
@@ -656,7 +694,7 @@ fn register_extern_functions_from_hir(
             ret: func.ret_ty.abi.clone(),
         };
         let key = format!("{}.{}", module_name, func.name);
-        let abi_sig = lowered_abi_sig_for_return(&sig, &func.ret_ty, struct_layouts);
+        let abi_sig = lowered_abi_sig_for_return(&sig, &func.ret_ty, enum_index, struct_layouts);
         map.insert(
             key,
             FnInfo {
@@ -676,18 +714,6 @@ fn validate_intrinsics(
     fn_map: &HashMap<String, FnInfo>,
     runtime_intrinsics: &HashMap<String, FnInfo>,
 ) -> Result<(), CodegenError> {
-    let missing_wrappers = runtime_intrinsics
-        .keys()
-        .filter(|key| !fn_map.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing_wrappers.is_empty() {
-        return Err(CodegenError::Codegen(format!(
-            "runtime intrinsics missing stdlib wrappers: {}",
-            missing_wrappers.join(", ")
-        )));
-    }
-
     let unknown_wrappers = fn_map
         .iter()
         .filter(|(key, info)| info.runtime_symbol.is_some() && !runtime_intrinsics.contains_key(*key))

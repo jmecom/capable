@@ -7,14 +7,14 @@ use sys::buffer
 fn count_text(c: Console, alloc: Alloc, s: string) -> i32 {
   let buf = s.bytes()
   let bytes = buf.len()
-  let words_vec = s.split_whitespace()
+  let words_vec = s.split_whitespace(alloc)
   let words = words_vec.len()
   alloc.vec_string_free(words_vec)
   let i: i32 = 0
   let lines: i32 = 0
   while (i < bytes) {
     let b = buf.at(i)
-    if (b == 10u8) {
+    if (b == '\n') {
       lines = lines + 1
     }
     i = i + 1
@@ -40,10 +40,10 @@ pub fn main(rc: RootCap) -> i32 {
 
   let code = match args.at(1) {
     Ok(path) => {
+      let alloc = rc.mint_alloc_default()
       let rfs = rc.mint_readfs("./")
-      match rfs.read_to_string(path) {
+      match rfs.read_to_string(alloc, path) {
         Ok(s) => {
-          let alloc = rc.mint_alloc_default()
           count_text(c, alloc, s)
         }
         Err(e) => {

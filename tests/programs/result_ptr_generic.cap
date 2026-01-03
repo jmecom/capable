@@ -1,0 +1,7 @@
+package unsafe
+module result_ptr_generic
+use sys::result
+
+pub fn id_ptr<T>(x: *T) -> Result<*T, unit> {
+  return Ok(x)
+}

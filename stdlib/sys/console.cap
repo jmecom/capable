@@ -1,25 +1,32 @@
+/// Console output utilities.
 package unsafe
 module sys::console
 
+/// Capability for stdout access.
 pub copy capability struct Console
 
 impl Console {
+  /// Print a string without a newline.
   pub fn print(self, s: string) -> unit {
     return ()
   }
 
+  /// Print a string with a newline.
   pub fn println(self, s: string) -> unit {
     return ()
   }
 
+  /// Print an i32 without a newline.
   pub fn print_i32(self, v: i32) -> unit {
     return ()
   }
 
+  /// Print an i32 with a newline.
   pub fn println_i32(self, v: i32) -> unit {
     return ()
   }
 
+  /// Trap if condition is false.
   pub fn assert(self, cond: bool) -> unit {
     return ()
   }

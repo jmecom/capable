@@ -1,88 +1,112 @@
+/// Filesystem capabilities and helpers.
 package unsafe
 module sys::fs
 
+use sys::buffer
 use sys::vec
 
+/// Read-only filesystem capability.
 pub capability struct ReadFS
+/// Read/write filesystem capability.
 pub capability struct Filesystem
+/// Directory capability.
 pub capability struct Dir
+/// File handle for reading; linear to enforce close.
 pub linear capability struct FileRead
 
+/// Filesystem error codes.
 pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }
 
 impl ReadFS {
-  pub fn read_to_string(self, path: string) -> Result<string, FsErr> {
+  /// Read an entire file into a string.
+  pub fn read_to_string(self, alloc: buffer::Alloc, path: string) -> Result<string, FsErr> {
     return ()
   }
 
-  pub fn read_bytes(self, path: string) -> Result<vec::Vec<u8>, FsErr> {
+  /// Read an entire file into a byte vec.
+  pub fn read_bytes(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  pub fn list_dir(self, path: string) -> Result<vec::Vec<string>, FsErr> {
+  /// List directory contents as strings.
+  pub fn list_dir(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
+  /// True if a path exists.
   pub fn exists(self, path: string) -> bool {
     return false
   }
 
+  /// Close the capability.
   pub fn close(self) -> unit {
     return ()
   }
 }
 
 impl Filesystem {
+  /// Get a Dir for the filesystem root.
   pub fn root_dir(self) -> Dir {
     return ()
   }
 
+  /// Close the capability.
   pub fn close(self) -> unit {
     return ()
   }
 }
 
 impl Dir {
+  /// Open a subdirectory.
   pub fn subdir(self, name: string) -> Dir {
     return ()
   }
 
+  /// Open a file for reading.
   pub fn open_read(self, name: string) -> FileRead {
     return ()
   }
 
-  pub fn read_bytes(self, name: string) -> Result<vec::Vec<u8>, FsErr> {
+  /// Read a file into a byte vec.
+  pub fn read_bytes(self, alloc: buffer::Alloc, name: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  pub fn list_dir(self) -> Result<vec::Vec<string>, FsErr> {
+  /// List directory contents.
+  pub fn list_dir(self, alloc: buffer::Alloc) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
+  /// True if a path exists.
   pub fn exists(self, name: string) -> bool {
     return false
   }
 
-  pub fn read_to_string(self, name: string) -> Result<string, FsErr> {
+  /// Read a file into a string.
+  pub fn read_to_string(self, alloc: buffer::Alloc, name: string) -> Result<string, FsErr> {
     let file = self.open_read(name)
-    return file.read_to_string()
+    return file.read_to_string(alloc)
   }
 
+  /// Close the capability.
   pub fn close(self) -> unit {
     return ()
   }
 }
 
 impl FileRead {
-  pub fn read_to_string(self) -> Result<string, FsErr> {
+  /// Read the file into a string.
+  pub fn read_to_string(self, alloc: buffer::Alloc) -> Result<string, FsErr> {
     return ()
   }
 
+  /// Close the file.
   pub fn close(self) -> unit {
     return ()
   }
 }
 
-pub fn join(a: string, b: string) -> string {
+/// Join two path segments with a platform separator.
+pub fn join(alloc: buffer::Alloc, a: string, b: string) -> string {
   return ""
 }

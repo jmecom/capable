@@ -56,3 +56,8 @@ lsp:
 
 website:
   python3 website/gen_website.py
+  open website/index.html
+
+code-browser:
+  python3 tools/gen_code_browser.py
+  open docs/code-browser/index.html

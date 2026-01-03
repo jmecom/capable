@@ -1,0 +1,23 @@
+package safe
+module should_fail_slice_enum_field
+use sys::system
+use sys::buffer
+
+enum Holder {
+  Bytes(Slice<u8>)
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let alloc = rc.mint_alloc_default()
+  let v = alloc.vec_u8_new()
+  let s = v.as_slice()
+  let h = Holder::Bytes(s)
+  match h {
+    Holder::Bytes(b) => {
+      if (b.len() == 0) {
+        return 0
+      }
+    }
+  }
+  return 1
+}

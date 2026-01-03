@@ -16,7 +16,7 @@ pub fn main(rc: RootCap) -> i32 {
   }
 
   let rfs2 = rc.mint_readfs("./config")
-  match rfs2.read_bytes("app.txt") {
+  match rfs2.read_bytes(alloc, "app.txt") {
     Ok(bytes) => {
       c.assert(bytes.len() > 0)
       alloc.vec_u8_free(bytes)
@@ -28,7 +28,7 @@ pub fn main(rc: RootCap) -> i32 {
   }
 
   let rfs3 = rc.mint_readfs("./config")
-  match rfs3.list_dir(".") {
+  match rfs3.list_dir(alloc, ".") {
     Ok(entries) => {
       c.assert(entries.len() > 0)
       alloc.vec_string_free(entries)
@@ -39,7 +39,7 @@ pub fn main(rc: RootCap) -> i32 {
     }
   }
 
-  let joined = fs::join("config", "app.txt")
+  let joined = fs::join(alloc, "config", "app.txt")
   if !joined.starts_with("config") {
     c.println("join failed")
     return 1

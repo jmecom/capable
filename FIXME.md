@@ -37,3 +37,9 @@ Fixes applied from review:
 - Support sret lowering in runtime wrapper emission to avoid ABI mismatches.
 - Use return lowering in `try` error path to avoid returning wrong signature.
 - Initialize zero values for non-opaque structs to avoid null deref when building Result payloads.
+
+Current known issues/workarounds:
+
+- Result<*T> still trips a typechecker mismatch (Param vs Path) in some generic
+  cases. Workaround: sys.vec allows limited arithmetic on type params so Vec<T>
+  can compute sizes; see tests/programs/result_ptr_generic.cap for coverage.

@@ -1,0 +1,35 @@
+/// Unsafe pointer and layout helpers for stdlib internals.
+package unsafe
+module sys::unsafe_ptr
+
+/// Return the size of T in bytes.
+pub extern fn sizeof<T>() -> i32
+
+/// Return the alignment of T in bytes.
+pub extern fn alignof<T>() -> i32
+
+/// Add element offset to a pointer.
+pub extern fn ptr_add<T>(ptr: *T, offset: i32) -> *T
+
+/// Read a value from a pointer (unchecked).
+pub extern fn ptr_read<T>(ptr: *T) -> T
+
+/// Write a value to a pointer (unchecked).
+pub extern fn ptr_write<T>(ptr: *T, value: T) -> unit
+
+/// Reinterpret a *u8 as a pointer to T.
+pub extern fn ptr_cast<T>(ptr: *u8) -> *T
+
+/// Reinterpret a pointer to T as *u8.
+pub extern fn ptr_cast_u8<T>(ptr: *T) -> *u8
+
+/// Return true if the pointer is null.
+/// This does not imply ownership or validity beyond null/non-null.
+pub extern fn ptr_is_null<T>(ptr: *T) -> bool
+
+/// Copy `count` elements from `src` to `dst` (no overlap).
+/// Use memmove when regions might overlap.
+pub extern fn memcpy<T>(dst: *T, src: *T, count: i32) -> unit
+
+/// Copy `count` elements from `src` to `dst` (overlap-safe).
+pub extern fn memmove<T>(dst: *T, src: *T, count: i32) -> unit

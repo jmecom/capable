@@ -605,7 +605,7 @@ fn type_of_ast_expr(
     }
     let mut scopes = super::Scopes::from_flat_map(ctx.local_types.clone());
     let mut recorder = super::check::TypeRecorder::new(None);
-    let type_params = HashSet::new();
+    let type_params = ctx.type_params.clone();
     check::check_expr(
         expr,
         ctx.functions,
@@ -768,6 +768,31 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                         span: call.span,
                     }));
                 }
+            }
+
+            if resolve_enum_variant(&path, ctx.use_map, ctx.enums, ctx.module_name).is_some() {
+                if call.args.len() > 1 {
+                    return Err(TypeError::new(
+                        "enum variant takes at most one argument".to_string(),
+                        call.span,
+                    ));
+                }
+                let variant_name = path
+                    .segments
+                    .last()
+                    .map(|s| s.item.clone())
+                    .unwrap_or_else(|| String::from("unknown"));
+                let payload = if call.args.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(lower_expr(&call.args[0], ctx, ret_ty)?))
+                };
+                return Ok(HirExpr::EnumVariant(HirEnumVariantExpr {
+                    enum_ty: hir_ty.clone(),
+                    variant_name,
+                    payload,
+                    span: call.span,
+                }));
             }
 
             let mut resolved = super::resolve_path(&path, ctx.use_map);
@@ -965,9 +990,20 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 type_name.clone()
             };
 
-            let info = ctx.structs.get(&key).ok_or_else(|| {
-                TypeError::new(format!("unknown struct `{}`", key), lit.span)
-            })?;
+            let (key, info) = match ctx.structs.get(&key) {
+                Some(info) => (key, info),
+                None => {
+                    let qualified = if lit.path.segments.len() == 1 {
+                        format!("{}.{}", ctx.module_name, key)
+                    } else {
+                        key.clone()
+                    };
+                    let info = ctx.structs.get(&qualified).ok_or_else(|| {
+                        TypeError::new(format!("unknown struct `{}`", key), lit.span)
+                    })?;
+                    (qualified, info)
+                }
+            };
 
             if info.is_opaque && info.module != ctx.module_name {
                 return Err(TypeError::new(
@@ -1050,34 +1086,30 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             // Check if this is a Vec type - if so, desugar to .get() call
             let object_ty = &object.ty().ty;
             let is_vec_type = matches!(object_ty,
-                Ty::Path(name, _) if name == "VecString" || name == "sys.vec.VecString"
-                    || name == "VecI32" || name == "sys.vec.VecI32"
-                    || name == "VecU8" || name == "sys.vec.VecU8"
+                Ty::Path(name, _) if name == "Vec" || name == "sys.vec.Vec"
             );
 
             if is_vec_type {
                 // Desugar vec[i] to vec.get(i)
-                // Get the short type name (e.g., "VecString" from "sys.vec.VecString")
-                let type_name = match object_ty {
-                    Ty::Path(name, _) => {
-                        if name.starts_with("sys.vec.") {
-                            name.strip_prefix("sys.vec.").unwrap()
-                        } else {
-                            name.as_str()
-                        }
-                    }
-                    _ => unreachable!(),
+                let type_args = match object_ty {
+                    Ty::Path(_, args) => args.clone(),
+                    _ => Vec::new(),
                 };
-                let key = format!("sys.vec.{}__get", type_name);
-                let symbol = format!("capable_{}", key.replace('.', "_").replace("__", "_"));
+                if type_args.len() != 1 {
+                    return Err(TypeError::new(
+                        "Vec expects exactly one type argument".to_string(),
+                        index_expr.span,
+                    ));
+                }
+                let symbol = "capable_sys_vec_Vec__get".to_string();
 
                 Ok(HirExpr::Call(crate::hir::HirCall {
                     callee: ResolvedCallee::Function {
                         module: "sys.vec".to_string(),
-                        name: format!("{}__get", type_name),
+                        name: "Vec__get".to_string(),
                         symbol,
                     },
-                    type_args: vec![],
+                    type_args,
                     args: vec![object, index],
                     ret_ty: hir_ty,
                     span: index_expr.span,

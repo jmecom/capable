@@ -5,20 +5,13 @@ use sys::system
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
-  match alloc.buffer_new(1) {
-    Ok(b) => {
-      let ok = match b.push(42u8) {
-        Ok(unit_val) => { 1 }
-        Err(e) => { 0 }
-      }
-      c.assert(ok == 1)
-      c.println("result unit ok - got Ok(unit)")
-      alloc.buffer_free(b)
-      return 0
-    }
-    Err(e) => {
-      c.println("buffer new failed")
-      return 1
-    }
+  let v = alloc.vec_u8_new()
+  let ok = match v.push('*') {
+    Ok(unit_val) => { 1 }
+    Err(e) => { 0 }
   }
+  c.assert(ok == 1)
+  c.println("result unit ok - got Ok(unit)")
+  alloc.vec_u8_free(v)
+  return 0
 }
