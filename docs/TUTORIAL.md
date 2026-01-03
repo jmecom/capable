@@ -1,9 +1,11 @@
 # Capable Tutorial
 
 Capable is a small, capability-secure systems language. Authority is a value: if
-you did not receive a capability, you cannot perform that action. The language
-leans Go-like in surface syntax while keeping a tighter, explicit memory and
-capability model.
+you did not receive a capability, you cannot perform that action. This is in contrast
+to most languages. Normally, any piece of code in your program, whether that be from
+a third-party library or yourself, has full permissions. In Capable, code only
+get the capabilities you pass it, so authority is explicit, auditable, and narrow
+by default.
 
 This tutorial is a cohesive walk-through of the language as it exists today.
 It focuses on how to write real programs, how the capability model works, and
@@ -103,7 +105,7 @@ impl Pair {
 
 ## 5) Results and error flow
 
-Capable uses `Result[T, E]` for recoverable errors.
+Capable uses `Result<T, E>` for recoverable errors, similar to Rust.
 
 ```cap
 package safe
@@ -130,6 +132,12 @@ let e = make().unwrap_err_or(0)
 
 Capabilities live in `sys.*` and are declared with `capability` (opaque, no
 public fields, no user construction). You only get them from `RootCap`.
+They are just structs, but special ones: the compiler treats capability
+types as authority tokens, and safe code cannot forge or construct them.
+This works because capability structs have no public fields or constructors,
+and the compiler rejects any attempt to synthesize them outside the stdlib.
+In other words: if you did not receive a capability value, there is no safe
+way to manufacture one.
 
 ```cap
 package safe
@@ -146,6 +154,17 @@ pub fn main(rc: RootCap) -> i32 {
   }
 }
 ```
+
+The stdlib is the only safe way to access privileged operations like the
+filesystem or network. In `package safe`, you cannot call raw syscalls or FFI.
+That means if a function does not receive a `ReadFS` (or `Net`, etc.), it simply
+cannot touch those resources. This keeps permissions explicit and local.
+
+If a package is marked `unsafe`, it can bypass memory safety and call raw FFI,
+which breaks the capability model entirely. Unsafe code is therefore a huge
+risk: it can forge or corrupt capability values, violate attenuation, or reach
+privileged operations directly. Treat unsafe dependencies as highly trusted
+code and use auditing/`--safe-only` to keep the boundary tight.
 
 Attenuation is one-way: methods that return capabilities must take `self` by
 value, so you give up the more powerful capability when you derive a narrower
@@ -168,14 +187,15 @@ Kinds:
 
 ## 8) Borrow-lite references: `&T`
 
-Capable has a minimal borrow system for read-only access:
+Capable has a minimal borrow system for read-only access. The goal is to make
+non-consuming reads ergonomic without a full borrow checker.
 
 ```cap
-impl Cap {
-  pub fn ping(self: &Cap) -> i32 { return 1 }
+impl Thing {
+  pub fn ping(self: &Thing) -> i32 { return 1 }
 }
 
-pub fn twice(c: &Cap) -> i32 {
+pub fn twice(c: &Thing) -> i32 {
   let a = c.ping()
   let b = c.ping()
   return a + b
@@ -184,12 +204,19 @@ pub fn twice(c: &Cap) -> i32 {
 
 Rules:
 - `&T` is allowed on parameters and locals.
+- Reference locals must be initialized from another local value.
 - References cannot be stored in structs/enums or returned.
 - References are read-only.
 
-This keeps the language simple without a full borrow checker.
+This keeps the language simple without a full borrow checker. It also keeps
+lifetimes simple: a borrow is only valid within the current scope, so you never
+have to reason about aliasing across function boundaries.
 
-## 9) Memory model (explicit ownership)
+Borrow-lite is intentionally conservative. If you need shared ownership across
+functions, pass the value by move (and return it), or design your API to do the
+read inside the callee.
+
+## 9) Memory model
 
 Capable has explicit memory management. Owned heap types must be freed.
 Non-owning views must not outlive their backing storage.
@@ -296,27 +323,39 @@ reports unsafe packages.
 ## 14) Putting it together: a small parser
 
 ```cap
-fn parse_key_value(line: string, alloc: Alloc) -> Result<string, unit> {
-  match (line.index_of_byte('=')) {
-    Ok(i) => {
-      let key = match (line.slice_range(0, i)) {
-        Ok(v) => { v }
-        Err(_) => { return Err(()) }
-      }
-      let val = match (line.slice_range(i + 1, line.len())) {
-        Ok(v) => { v }
-        Err(_) => { return Err(()) }
-      }
-      let mid = match (key.concat(alloc, "=")) {
-        Ok(v) => { v }
-        Err(_) => { return Err(()) }
-      }
-      match (mid.concat(alloc, val)) {
-        Ok(out) => { return Ok(out) }
-        Err(_) => { return Err(()) }
-      }
-    }
-    Err(_) => { return Err(()) }
+enum ParseErr { MissingEq, OutOfRange, Oom }
+
+fn parse_key_value(line: string, alloc: Alloc) -> Result<string, ParseErr> {
+  let eq = match (line.index_of_byte('=')) {
+    Ok(i) => { i }
+    Err(_) => { return Err(ParseErr::MissingEq) }
+  }
+  let key = match (line.slice_range(0, eq)) {
+    Ok(v) => { v }
+    Err(_) => { return Err(ParseErr::OutOfRange) }
+  }
+  let val = match (line.slice_range(eq + 1, line.len())) {
+    Ok(v) => { v }
+    Err(_) => { return Err(ParseErr::OutOfRange) }
+  }
+
+  let t = alloc.text_new()
+  defer t.free(alloc)
+  match (t.push_str(key)) {
+    Ok(_) => { }
+    Err(_) => { return Err(ParseErr::Oom) }
+  }
+  match (t.push_byte('=')) {
+    Ok(_) => { }
+    Err(_) => { return Err(ParseErr::Oom) }
+  }
+  match (t.push_str(val)) {
+    Ok(_) => { }
+    Err(_) => { return Err(ParseErr::Oom) }
+  }
+  match (t.to_string()) {
+    Ok(out) => { return Ok(out) }
+    Err(_) => { return Err(ParseErr::Oom) }
   }
 }
 ```
