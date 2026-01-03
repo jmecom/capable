@@ -187,31 +187,39 @@ def parse_cap_file(path: Path) -> dict:
     module_name = path.stem
     module_docs: list[str] = []
     doc_buf: list[str] = []
+    doc_start_line: int = 0
     items: list[dict] = []
     current_impl: str | None = None
     impl_depth: int | None = None
     brace_depth = 0
 
-    def flush_docs() -> list[str]:
-        nonlocal doc_buf
-        docs = doc_buf
-        doc_buf = []
-        return docs
+    # Track pending items that need their end line determined
+    pending_items: list[tuple[dict, int]] = []  # (item, start_depth)
 
-    for raw in lines:
+    def flush_docs() -> tuple[list[str], int]:
+        nonlocal doc_buf, doc_start_line
+        docs = doc_buf
+        start = doc_start_line
+        doc_buf = []
+        doc_start_line = 0
+        return docs, start
+
+    for line_num, raw in enumerate(lines):
         line = raw.strip()
         if line.startswith("///"):
+            if not doc_buf:
+                doc_start_line = line_num
             doc_buf.append(line[3:].lstrip())
             continue
 
         if line.startswith("package ") and doc_buf and not module_docs:
-            module_docs = flush_docs()
+            module_docs, _ = flush_docs()
         if line.startswith("module "):
             parts = line.split()
             if len(parts) >= 2:
                 module_name = parts[1]
             if doc_buf and not module_docs:
-                module_docs = flush_docs()
+                module_docs, _ = flush_docs()
 
         if line.startswith("impl "):
             parts = line.split()
@@ -221,43 +229,83 @@ def parse_cap_file(path: Path) -> dict:
             flush_docs()
 
         if "fn " in line and line.startswith(("pub fn", "fn")):
-            docs = flush_docs()
-            items.append({
+            docs, docs_start = flush_docs()
+            start_line = docs_start if docs else line_num
+            item = {
                 "kind": "method" if current_impl else "fn",
                 "impl": current_impl,
                 "sig": line.rstrip("{").strip(),
                 "docs": docs,
-            })
+                "start_line": start_line,
+                "end_line": line_num,  # Will be updated when we find closing brace
+            }
+            items.append(item)
+            if "{" in line and "}" not in line:
+                pending_items.append((item, brace_depth + line.count("{")))
+            elif "{" in line and "}" in line:
+                item["end_line"] = line_num
         elif "struct " in line and line.startswith((
             "pub struct", "struct",
             "pub copy struct", "pub copy opaque struct",
             "pub copy capability struct", "pub linear capability struct",
             "pub capability struct",
         )):
-            docs = flush_docs()
-            items.append({
+            docs, docs_start = flush_docs()
+            start_line = docs_start if docs else line_num
+            item = {
                 "kind": "struct",
                 "sig": line.rstrip("{").strip(),
                 "docs": docs,
-            })
+                "start_line": start_line,
+                "end_line": line_num,
+            }
+            items.append(item)
+            if "{" in line and "}" not in line:
+                pending_items.append((item, brace_depth + line.count("{")))
+            elif "{" in line and "}" in line:
+                item["end_line"] = line_num
         elif "enum " in line and line.startswith(("pub enum", "enum")):
-            docs = flush_docs()
-            items.append({
+            docs, docs_start = flush_docs()
+            start_line = docs_start if docs else line_num
+            item = {
                 "kind": "enum",
                 "sig": line.rstrip("{").strip(),
                 "docs": docs,
-            })
+                "start_line": start_line,
+                "end_line": line_num,
+            }
+            items.append(item)
+            if "{" in line and "}" not in line:
+                pending_items.append((item, brace_depth + line.count("{")))
+            elif "{" in line and "}" in line:
+                item["end_line"] = line_num
 
         opens = line.count("{")
         closes = line.count("}")
         brace_depth += opens - closes
+
+        # Check if any pending items are now complete
+        still_pending = []
+        for item, start_depth in pending_items:
+            if brace_depth < start_depth:
+                item["end_line"] = line_num
+            else:
+                still_pending.append((item, start_depth))
+        pending_items = still_pending
+
         if current_impl is not None and impl_depth is not None:
             if brace_depth <= impl_depth:
                 current_impl = None
                 impl_depth = None
 
     if doc_buf and not module_docs:
-        module_docs = flush_docs()
+        module_docs, _ = flush_docs()
+
+    # Extract source for each item
+    for item in items:
+        start = item["start_line"]
+        end = item["end_line"]
+        item["source"] = "\n".join(lines[start:end + 1])
 
     return {
         "path": str(path).replace("\\", "/"),
@@ -774,6 +822,47 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
     .item-docs {{
       margin-top: 0.5rem;
       font-size: 0.9rem;
+      margin-left: 1.25rem;
+    }}
+
+    .item-header {{
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      padding: 0.25rem 0;
+    }}
+
+    .item-header:hover {{
+      background: rgba(186, 204, 212, 0.05);
+      margin: 0 -0.5rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+    }}
+
+    .item-expand {{
+      color: var(--muted);
+      font-size: 0.7rem;
+      width: 0.75rem;
+      transition: transform 0.15s;
+    }}
+
+    .item-expand.expanded {{
+      color: var(--accent);
+    }}
+
+    .item-impl {{
+      margin-left: 1.25rem;
+    }}
+
+    .item-source {{
+      margin-top: 0.5rem;
+      margin-left: 1.25rem;
+    }}
+
+    .item-source pre {{
+      margin: 0;
+      font-size: 12px;
     }}
 
     .source-toggle {{
@@ -961,33 +1050,59 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
 
         html += `<div class="item-section"><h3>${{kinds[kind]}}</h3>`;
         for (const item of items) {{
+          const itemId = `item-${{Math.random().toString(36).substr(2, 9)}}`;
           html += `<div class="item">`;
-          html += `<div class="item-sig">${{escapeHtml(item.sig)}}</div>`;
+          html += `<div class="item-header" onclick="toggleItemSource('${{itemId}}')">`;
+          html += `<span class="item-expand">▶</span>`;
+          html += `<span class="item-sig">${{escapeHtml(item.sig)}}</span>`;
+          html += `</div>`;
           if (item.impl) {{
             html += `<div class="item-impl">impl ${{escapeHtml(item.impl)}}</div>`;
           }}
           if (item.docs && item.docs.length) {{
             html += `<div class="item-docs">${{item.docs.map(d => escapeHtml(d)).join(' ')}}</div>`;
           }}
+          if (item.source) {{
+            html += `<div class="item-source" id="${{itemId}}" style="display:none"><pre><code>${{highlightCode(item.source)}}</code></pre></div>`;
+          }}
           html += `</div>`;
         }}
         html += `</div>`;
       }}
 
-      html += `<button class="source-toggle" onclick="toggleSource(this)">Show Source</button>`;
+      html += `<button class="source-toggle" onclick="toggleSource(this)">Show Full Source</button>`;
       html += `<div class="source-code" style="display:none"><pre><code>${{highlightCode(mod.source)}}</code></pre></div>`;
 
       moduleContent.innerHTML = html;
     }}
 
+    window.toggleItemSource = function(id) {{
+      const source = document.getElementById(id);
+      const header = source.previousElementSibling.classList.contains('item-docs')
+        ? source.previousElementSibling.previousElementSibling
+        : source.previousElementSibling.classList.contains('item-impl')
+          ? source.previousElementSibling.previousElementSibling.previousElementSibling
+          : source.previousElementSibling;
+      const arrow = header.querySelector('.item-expand');
+      if (source.style.display === 'none') {{
+        source.style.display = 'block';
+        arrow.textContent = '▼';
+        arrow.classList.add('expanded');
+      }} else {{
+        source.style.display = 'none';
+        arrow.textContent = '▶';
+        arrow.classList.remove('expanded');
+      }}
+    }};
+
     window.toggleSource = function(btn) {{
       const source = btn.nextElementSibling;
       if (source.style.display === 'none') {{
         source.style.display = 'block';
-        btn.textContent = 'Hide Source';
+        btn.textContent = 'Hide Full Source';
       }} else {{
         source.style.display = 'none';
-        btn.textContent = 'Show Source';
+        btn.textContent = 'Show Full Source';
       }}
     }};
 
