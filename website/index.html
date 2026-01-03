@@ -959,7 +959,7 @@
       let mouse = { x: -1000, y: -1000 };
       const SPACING = 28;
       const DOT_RADIUS = 1;
-      const INFLUENCE_RADIUS = 120;
+      const INFLUENCE_RADIUS = 150;
       const BASE_COLOR = [186, 204, 212];
       const HOVER_COLOR = [245, 124, 108];
 
@@ -975,7 +975,7 @@
         const offsetY = (height % SPACING) / 2;
         for (let x = offsetX; x < width; x += SPACING) {
           for (let y = offsetY; y < height; y += SPACING) {
-            dots.push({ originX: x, originY: y, x: x, y: y });
+            dots.push({ x: x, y: y });
           }
         }
       }
@@ -984,25 +984,19 @@
         ctx.clearRect(0, 0, width, height);
 
         for (const dot of dots) {
-          const dx = mouse.x - dot.originX;
-          const dy = mouse.y - dot.originY;
+          const dx = mouse.x - dot.x;
+          const dy = mouse.y - dot.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
 
           let color, alpha;
 
           if (dist < INFLUENCE_RADIUS) {
             const t = 1 - dist / INFLUENCE_RADIUS;
-            const force = t * 10;
-            const angle = Math.atan2(dy, dx);
-            dot.x = dot.originX - Math.cos(angle) * force;
-            dot.y = dot.originY - Math.sin(angle) * force;
             color = HOVER_COLOR;
-            alpha = 0.15 + t * 0.45;
+            alpha = 0.1 + t * 0.4;
           } else {
-            dot.x += (dot.originX - dot.x) * 0.1;
-            dot.y += (dot.originY - dot.y) * 0.1;
             color = BASE_COLOR;
-            alpha = 0.12;
+            alpha = 0.1;
           }
 
           ctx.beginPath();
