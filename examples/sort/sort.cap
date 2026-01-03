@@ -16,11 +16,13 @@ fn min_i32(a: i32, b: i32) -> i32 {
 
 // Returns true if a < b lexicographically
 fn str_lt(a: string, b: string) -> bool {
-  let len = min_i32(a.len(), b.len())
+  let a_bytes = a.as_slice()
+  let b_bytes = b.as_slice()
+  let len = min_i32(a_bytes.len(), b_bytes.len())
   let i = 0
   while (i < len) {
-    let ca = a.byte_at(i)
-    let cb = b.byte_at(i)
+    let ca = a_bytes.at(i)
+    let cb = b_bytes.at(i)
     if (ca < cb) {
       return true
     }

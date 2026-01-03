@@ -188,6 +188,13 @@ impl Text {
     return string { bytes: self.as_slice() }
   }
 
+  /// Borrow a subslice of this Text as a string view (byte offsets, end exclusive).
+  /// The view is invalid after freeing this Text.
+  pub fn slice_range(self, start: i32, end: i32) -> Result<string, buffer::SliceErr> {
+    let sub = self.as_slice().slice_range(start, end)?
+    return Ok(string { bytes: sub })
+  }
+
   /// Copy contents into a new string view.
   /// This allocates a new owned slice for the string view.
   pub fn to_string(self) -> Result<string, buffer::AllocErr> {

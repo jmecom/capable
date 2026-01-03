@@ -19,6 +19,10 @@ pub fn main(rc: RootCap) -> i32 {
     Ok(_) => { }
     Err(_) => { c.assert(false); return 1 }
   }
+  match (text.slice_range(0, 2)) {
+    Ok(view) => { c.assert(view.eq("hi")) }
+    Err(_) => { c.assert(false); return 1 }
+  }
   let v = alloc.vec_u8_new()
   match (v.push('!')) {
     Ok(_) => { }
