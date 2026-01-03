@@ -35,8 +35,8 @@
       top: 0; left: 0;
       width: 100%; height: 100%;
       pointer-events: none;
-      background-image: radial-gradient(rgba(186, 204, 212, 0.08) 0.7px, transparent 0.7px);
-      background-size: 22px 22px;
+      background-image: radial-gradient(rgba(186, 204, 212, 0.18) 1px, transparent 1px);
+      background-size: 24px 24px;
       z-index: 0;
     }
 
@@ -523,13 +523,23 @@
         <p class="tagline">Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
       </div>
 
-      <pre class="hero-code"><code><span class="hl-keyword">module</span> hello
+      <pre class="hero-code"><code><span class="hl-keyword">module</span> config_reader
 <span class="hl-keyword">use</span> sys::system
+<span class="hl-keyword">use</span> sys::fs
 
 <span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span> main(rc: <span class="hl-type">RootCap</span>) -&gt; <span class="hl-type">i32</span> {
-  <span class="hl-keyword">let</span> c = rc.mint_console()
-  c.println(&quot;hello, world&quot;)
-  <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+  <span class="hl-comment">// Mint a filesystem capability scoped to ./config</span>
+  <span class="hl-keyword">let</span> fs = rc.mint_filesystem(&quot;./config<span class="hl-string">&quot;)
+  let dir = fs.root_dir()
+  let file = dir.open_read(&quot;</span>app.txt&quot;)
+
+  <span class="hl-keyword">match</span> file.read_to_string() {
+    <span class="hl-type">Ok</span>(contents) =&gt; {
+      rc.mint_console().println(contents)
+      <span class="hl-keyword">return</span> <span class="hl-number">0</span>
+    }
+    <span class="hl-type">Err</span>(e) =&gt; { <span class="hl-keyword">return</span> <span class="hl-number">1</span> }
+  }
 }</code></pre>
 
       <div class="security-section">

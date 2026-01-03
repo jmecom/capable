@@ -282,13 +282,23 @@ def collect_stdlib_modules(repo_root: Path) -> list[dict]:
 # HTML generation
 # ---------------------------------------------------------------------------
 
-HELLO_EXAMPLE = '''module hello
+HERO_EXAMPLE = '''module config_reader
 use sys::system
+use sys::fs
 
 pub fn main(rc: RootCap) -> i32 {
-  let c = rc.mint_console()
-  c.println("hello, world")
-  return 0
+  // Mint a filesystem capability scoped to ./config
+  let fs = rc.mint_filesystem("./config")
+  let dir = fs.root_dir()
+  let file = dir.open_read("app.txt")
+
+  match file.read_to_string() {
+    Ok(contents) => {
+      rc.mint_console().println(contents)
+      return 0
+    }
+    Err(e) => { return 1 }
+  }
 }'''
 
 
@@ -296,7 +306,7 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
     """Generate the complete website HTML."""
 
     modules_json = json.dumps(modules)
-    hello_highlighted = highlight_cap(HELLO_EXAMPLE)
+    hero_highlighted = highlight_cap(HERO_EXAMPLE)
 
     return f'''<!DOCTYPE html>
 <html lang="en">
@@ -335,8 +345,8 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
       top: 0; left: 0;
       width: 100%; height: 100%;
       pointer-events: none;
-      background-image: radial-gradient(rgba(186, 204, 212, 0.08) 0.7px, transparent 0.7px);
-      background-size: 22px 22px;
+      background-image: radial-gradient(rgba(186, 204, 212, 0.18) 1px, transparent 1px);
+      background-size: 24px 24px;
       z-index: 0;
     }}
 
@@ -823,7 +833,7 @@ def generate_html(tutorial_html: str, modules: list[dict]) -> str:
         <p class="tagline">Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
       </div>
 
-      <pre class="hero-code"><code>{hello_highlighted}</code></pre>
+      <pre class="hero-code"><code>{hero_highlighted}</code></pre>
 
       <div class="security-section">
         <h2>Capability-Based Security</h2>
