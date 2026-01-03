@@ -1,0 +1,21 @@
+module trait_bound_missing
+
+trait Summable {
+  fn sum(self) -> i32;
+}
+
+struct Pair { left: i32, right: i32 }
+
+impl Summable for Pair {
+  fn sum(self) -> i32 {
+    return self.left
+  }
+}
+
+fn use_sum<T>(value: T) -> i32 {
+  return value.sum()
+}
+
+pub fn main() -> i32 {
+  return 0
+}

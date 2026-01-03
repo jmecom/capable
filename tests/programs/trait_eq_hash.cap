@@ -1,0 +1,109 @@
+/// Test program for Eq and Hash traits.
+module trait_eq_hash
+use sys::system
+
+/// Trait for types that support equality comparison.
+trait Eq {
+  fn eq(self, other: Self) -> bool;
+}
+
+/// Trait for types that can be hashed.
+trait Hash {
+  fn hash(self) -> i32;
+}
+
+/// Built-in implementation for i32
+impl Eq for i32 {
+  fn eq(self, other: i32) -> bool {
+    return self == other
+  }
+}
+
+impl Hash for i32 {
+  fn hash(self) -> i32 {
+    let h = self
+    if (h < 0) {
+      h = 0 - h
+    }
+    h = h * 31 + h / 7
+    if (h < 0) {
+      h = 0 - h
+    }
+    return h
+  }
+}
+
+/// A simple key-value pair
+copy struct Pair {
+  key: i32,
+  value: i32
+}
+
+impl Eq for Pair {
+  fn eq(self, other: Pair) -> bool {
+    return self.key == other.key && self.value == other.value
+  }
+}
+
+impl Hash for Pair {
+  fn hash(self) -> i32 {
+    // Combine hashes of key and value
+    let h1 = self.key
+    let h2 = self.value
+    if (h1 < 0) { h1 = 0 - h1 }
+    if (h2 < 0) { h2 = 0 - h2 }
+    return h1 * 31 + h2
+  }
+}
+
+/// Generic function that uses Eq trait
+fn are_equal<T: Eq>(a: T, b: T) -> bool {
+  return a.eq(b)
+}
+
+/// Generic function that uses Hash trait
+fn get_hash<T: Hash>(value: T) -> i32 {
+  return value.hash()
+}
+
+/// Generic function that uses both traits (for copy types)
+fn hash_if_equal(a: i32, b: i32) -> i32 {
+  if (a == b) {
+    return get_hash<i32>(a)
+  }
+  return 0
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  // Test Eq for i32
+  c.assert(are_equal<i32>(42, 42))
+  c.assert(are_equal<i32>(1, 2) == false)
+
+  // Test Hash for i32
+  let h1 = get_hash<i32>(42)
+  let h2 = get_hash<i32>(42)
+  c.assert(h1 == h2)
+
+  // Test Eq for Pair
+  let p1 = Pair { key: 1, value: 10 }
+  let p2 = Pair { key: 1, value: 10 }
+  let p3 = Pair { key: 2, value: 20 }
+  c.assert(are_equal<Pair>(p1, p2))
+  c.assert(are_equal<Pair>(p1, p3) == false)
+
+  // Test Hash for Pair
+  let ph1 = get_hash<Pair>(Pair { key: 1, value: 10 })
+  let ph2 = get_hash<Pair>(Pair { key: 1, value: 10 })
+  c.assert(ph1 == ph2)
+
+  // Test combined function
+  let combined = hash_if_equal(5, 5)
+  c.assert(combined > 0)
+  let no_match = hash_if_equal(5, 6)
+  c.assert(no_match == 0)
+
+  c.println("Eq and Hash traits work correctly!")
+  return 0
+}

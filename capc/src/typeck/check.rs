@@ -4,11 +4,11 @@ use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    build_type_params, is_affine_type, is_numeric_type, is_orderable_type, is_string_ty,
-    lower_type, resolve_enum_variant, resolve_method_target, resolve_path, resolve_type_name,
-    stdlib_string_ty, type_contains_ref, type_kind, validate_type_args, BuiltinType, EnumInfo,
-    FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo, Ty, TypeKind, TypeTable,
-    UseMap, UseMode,
+    build_type_param_bounds, build_type_params, is_affine_type, is_numeric_type, is_orderable_type,
+    is_string_ty, lower_type, resolve_enum_variant, resolve_method_target, resolve_path,
+    resolve_type_name, stdlib_string_ty, type_contains_ref, type_kind, validate_type_args,
+    BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo,
+    TraitImplInfo, TraitInfo, Ty, TypeKind, TypeTable, UseMap, UseMode,
 };
 
 /// Optional recorder for expression types during checking.
@@ -318,6 +318,7 @@ pub(super) fn validate_package_safety(
                     }
                 }
             }
+            Item::Trait(_) => {}
         }
     }
     Ok(())
@@ -547,6 +548,8 @@ fn match_is_total(match_expr: &MatchExpr) -> bool {
 pub(super) fn check_function(
     func: &Function,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     use_map: &UseMap,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
@@ -555,6 +558,17 @@ pub(super) fn check_function(
     type_table: Option<&mut TypeTable>,
 ) -> Result<(), TypeError> {
     let type_params = build_type_params(&func.type_params)?;
+    let type_param_bounds = build_type_param_bounds(&func.type_params, use_map, module_name);
+    for (param, bounds) in &type_param_bounds {
+        for bound in bounds {
+            if !trait_map.contains_key(bound) {
+                return Err(TypeError::new(
+                    format!("unknown trait `{bound}` for type parameter `{param}`"),
+                    func.span,
+                ));
+            }
+        }
+    }
     let mut params_map = HashMap::new();
     for param in &func.params {
         let Some(ty) = &param.ty else {
@@ -602,6 +616,8 @@ pub(super) fn check_function(
             stmt,
             &ret_ty,
             functions,
+            trait_map,
+            trait_impls,
             &mut scopes,
             &mut recorder,
             use_map,
@@ -610,6 +626,7 @@ pub(super) fn check_function(
             stdlib,
             module_name,
             &type_params,
+            &type_param_bounds,
             false, // not inside a loop at function top level
         )?;
     }
@@ -640,6 +657,8 @@ fn check_stmt(
     stmt: &Stmt,
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     scopes: &mut Scopes,
     recorder: &mut TypeRecorder,
     use_map: &UseMap,
@@ -648,6 +667,7 @@ fn check_stmt(
     stdlib: &StdlibIndex,
     module_name: &str,
     type_params: &HashSet<String>,
+    type_param_bounds: &HashMap<String, Vec<String>>,
     in_loop: bool,
 ) -> Result<(), TypeError> {
     match stmt {
@@ -670,6 +690,8 @@ fn check_stmt(
             let expr_ty = check_expr(
                 &let_stmt.expr,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 expr_use_mode,
                 recorder,
@@ -680,6 +702,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             let final_ty = if let Some(annot) = &let_stmt.ty {
                 if let Some(span) = type_contains_ref(annot) {
@@ -768,6 +791,8 @@ fn check_stmt(
             let expr_ty = check_expr(
                 &assign.expr,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Move,
                 recorder,
@@ -778,6 +803,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             if expr_ty != existing && !matches!(expr_ty, Ty::Builtin(BuiltinType::Never)) {
                 return Err(TypeError::new(
@@ -802,6 +828,8 @@ fn check_stmt(
             let _ = check_expr(
                 &defer_stmt.expr,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Move,
                 recorder,
@@ -812,6 +840,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
         }
         Stmt::Return(ret_stmt) => {
@@ -819,6 +848,8 @@ fn check_stmt(
                 check_expr(
                     expr,
                     functions,
+                    trait_map,
+                    trait_impls,
                     scopes,
                     UseMode::Move,
                     recorder,
@@ -829,6 +860,7 @@ fn check_stmt(
                     ret_ty,
                     module_name,
                     type_params,
+                    type_param_bounds,
                 )?
             } else {
                 Ty::Builtin(BuiltinType::Unit)
@@ -879,6 +911,8 @@ fn check_stmt(
             let cond_ty = check_expr(
                 &if_stmt.cond,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -889,6 +923,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
@@ -901,6 +936,8 @@ fn check_stmt(
                 &if_stmt.then_block,
                 ret_ty,
                 functions,
+                trait_map,
+                trait_impls,
                 &mut then_scopes,
                 recorder,
                 use_map,
@@ -909,6 +946,7 @@ fn check_stmt(
                 stdlib,
                 module_name,
                 type_params,
+                type_param_bounds,
                 in_loop,
             )?;
             let mut else_scopes = scopes.clone();
@@ -917,6 +955,8 @@ fn check_stmt(
                     block,
                     ret_ty,
                     functions,
+                    trait_map,
+                    trait_impls,
                     &mut else_scopes,
                     recorder,
                     use_map,
@@ -925,6 +965,7 @@ fn check_stmt(
                     stdlib,
                     module_name,
                     type_params,
+                    type_param_bounds,
                     in_loop,
                 )?;
             }
@@ -941,6 +982,8 @@ fn check_stmt(
             let cond_ty = check_expr(
                 &while_stmt.cond,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -951,6 +994,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             if cond_ty != Ty::Builtin(BuiltinType::Bool) {
                 return Err(TypeError::new(
@@ -964,6 +1008,8 @@ fn check_stmt(
                 &while_stmt.body,
                 ret_ty,
                 functions,
+                trait_map,
+                trait_impls,
                 &mut body_scopes,
                 recorder,
                 use_map,
@@ -972,6 +1018,7 @@ fn check_stmt(
                 stdlib,
                 module_name,
                 type_params,
+                type_param_bounds,
                 true, // inside loop, break/continue allowed
             )?;
             body_scopes.pop_loop();
@@ -988,6 +1035,8 @@ fn check_stmt(
             let start_ty = check_expr(
                 &for_stmt.start,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -998,6 +1047,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             if start_ty != Ty::Builtin(BuiltinType::I32) {
                 return Err(TypeError::new(
@@ -1010,6 +1060,8 @@ fn check_stmt(
             let end_ty = check_expr(
                 &for_stmt.end,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -1020,6 +1072,7 @@ fn check_stmt(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             if end_ty != Ty::Builtin(BuiltinType::I32) {
                 return Err(TypeError::new(
@@ -1041,6 +1094,8 @@ fn check_stmt(
                 &for_stmt.body,
                 ret_ty,
                 functions,
+                trait_map,
+                trait_impls,
                 &mut body_scopes,
                 recorder,
                 use_map,
@@ -1049,6 +1104,7 @@ fn check_stmt(
                 stdlib,
                 module_name,
                 type_params,
+                type_param_bounds,
                 true, // inside loop, break/continue allowed
             )?;
             body_scopes.pop_loop();
@@ -1069,6 +1125,8 @@ fn check_stmt(
                 let _ = check_match_stmt(
                     match_expr,
                     functions,
+                    trait_map,
+                    trait_impls,
                     scopes,
                     UseMode::Move,
                     recorder,
@@ -1079,12 +1137,15 @@ fn check_stmt(
                     ret_ty,
                     module_name,
                     type_params,
+                    type_param_bounds,
                     in_loop,
                 )?;
             } else {
                 check_expr(
                     &expr_stmt.expr,
                     functions,
+                    trait_map,
+                    trait_impls,
                     scopes,
                     UseMode::Move,
                     recorder,
@@ -1095,6 +1156,7 @@ fn check_stmt(
                     ret_ty,
                     module_name,
                     type_params,
+                    type_param_bounds,
                 )?;
             }
         }
@@ -1108,6 +1170,8 @@ fn check_block(
     block: &Block,
     ret_ty: &Ty,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     scopes: &mut Scopes,
     recorder: &mut TypeRecorder,
     use_map: &UseMap,
@@ -1116,6 +1180,7 @@ fn check_block(
     stdlib: &StdlibIndex,
     module_name: &str,
     type_params: &HashSet<String>,
+    type_param_bounds: &HashMap<String, Vec<String>>,
     in_loop: bool,
 ) -> Result<(), TypeError> {
     scopes.push_scope();
@@ -1124,6 +1189,8 @@ fn check_block(
             stmt,
             ret_ty,
             functions,
+            trait_map,
+            trait_impls,
             scopes,
             recorder,
             use_map,
@@ -1132,6 +1199,7 @@ fn check_block(
             stdlib,
             module_name,
             type_params,
+            type_param_bounds,
             in_loop,
         )?;
     }
@@ -1346,6 +1414,8 @@ fn merge_match_states(
 pub(super) fn check_expr(
     expr: &Expr,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     scopes: &mut Scopes,
     use_mode: UseMode,
     recorder: &mut TypeRecorder,
@@ -1356,6 +1426,7 @@ pub(super) fn check_expr(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    type_param_bounds: &HashMap<String, Vec<String>>,
 ) -> Result<Ty, TypeError> {
     let ty = match expr {
         Expr::Literal(lit) => match &lit.value {
@@ -1431,6 +1502,8 @@ pub(super) fn check_expr(
                     let _ = check_expr(
                         &call.args[0],
                         functions,
+                        trait_map,
+                        trait_impls,
                         scopes,
                         UseMode::Move,
                         recorder,
@@ -1441,6 +1514,7 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                         type_params,
+                        type_param_bounds,
                     )?;
                     return record_expr_type(recorder, expr, Ty::Builtin(BuiltinType::Unit));
                 }
@@ -1464,6 +1538,8 @@ pub(super) fn check_expr(
                     let arg_ty = check_expr(
                         &call.args[0],
                         functions,
+                        trait_map,
+                        trait_impls,
                         scopes,
                         UseMode::Move,
                         recorder,
@@ -1474,6 +1550,7 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                         type_params,
+                        type_param_bounds,
                     )?;
                     if let Ty::Path(ty_name, args) = ret_ty {
                         if ty_name == "sys.result.Result" && args.len() == 2 {
@@ -1536,6 +1613,8 @@ pub(super) fn check_expr(
                     let arg_ty = check_expr(
                         &call.args[0],
                         functions,
+                        trait_map,
+                        trait_impls,
                         scopes,
                         UseMode::Move,
                         recorder,
@@ -1546,6 +1625,7 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                         type_params,
+                        type_param_bounds,
                     )?;
                     if !infer_enum_args(&payload_ty, &arg_ty, &mut inferred) {
                         return Err(TypeError::new(
@@ -1609,6 +1689,7 @@ pub(super) fn check_expr(
                 type_params,
             )?;
             let subs = build_call_substitution(sig, &explicit_type_args, HashMap::new(), call.span)?;
+            enforce_type_param_bounds(sig, &subs, trait_impls, call.span)?;
             let instantiated_params: Vec<Ty> = sig
                 .params
                 .iter()
@@ -1634,6 +1715,8 @@ pub(super) fn check_expr(
                 let arg_ty = check_expr(
                     arg,
                     functions,
+                    trait_map,
+                    trait_impls,
                     scopes,
                     use_mode,
                     recorder,
@@ -1644,6 +1727,7 @@ pub(super) fn check_expr(
                     ret_ty,
                     module_name,
                     type_params,
+                    type_param_bounds,
                 )?;
                 if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
                     return Err(TypeError::new(
@@ -1722,6 +1806,7 @@ pub(super) fn check_expr(
                 )?;
                 let subs =
                     build_call_substitution(sig, &explicit_type_args, HashMap::new(), method_call.span)?;
+                enforce_type_param_bounds(sig, &subs, trait_impls, method_call.span)?;
                 let instantiated_params: Vec<Ty> = sig
                     .params
                     .iter()
@@ -1747,6 +1832,8 @@ pub(super) fn check_expr(
                     let arg_ty = check_expr(
                         arg,
                         functions,
+                        trait_map,
+                        trait_impls,
                         scopes,
                         use_mode,
                         recorder,
@@ -1757,6 +1844,7 @@ pub(super) fn check_expr(
                         ret_ty,
                         module_name,
                         type_params,
+                        type_param_bounds,
                     )?;
                     if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
                         return Err(TypeError::new(
@@ -1787,6 +1875,8 @@ pub(super) fn check_expr(
             let receiver_ty = check_expr(
                 &method_call.receiver,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -1797,12 +1887,167 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             enforce_vec_method_constraints(
                 &receiver_ty,
                 &method_call.method.item,
                 method_call.method.span,
             )?;
+            let receiver_base = match &receiver_ty {
+                Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+                _ => &receiver_ty,
+            };
+            if let Ty::Param(param_name) = receiver_base {
+                let bounds = type_param_bounds
+                    .get(param_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut candidates = Vec::new();
+                for bound in bounds {
+                    if let Some(info) = trait_map.get(&bound) {
+                        if let Some(sig) = info.methods.get(&method_call.method.item) {
+                            candidates.push((bound, sig));
+                        }
+                    }
+                }
+                if candidates.is_empty() {
+                    return Err(TypeError::new(
+                        format!(
+                            "no trait bound provides method `{}` for `{}`",
+                            method_call.method.item, param_name
+                        ),
+                        method_call.span,
+                    ));
+                }
+                if candidates.len() > 1 {
+                    return Err(TypeError::new(
+                        format!(
+                            "ambiguous method `{}` for `{}`; multiple trait bounds apply",
+                            method_call.method.item, param_name
+                        ),
+                        method_call.span,
+                    ));
+                }
+                let (_trait_name, sig) = candidates.remove(0);
+                let mut inferred = HashMap::new();
+                let expected_receiver = match &sig.params[0] {
+                    Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+                    other => other,
+                };
+                let actual_receiver = match &receiver_ty {
+                    Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+                    other => other,
+                };
+                match_type_params(
+                    expected_receiver,
+                    actual_receiver,
+                    &mut inferred,
+                    method_call.receiver.span(),
+                )?;
+                let explicit_type_args = lower_type_args(
+                    &method_call.type_args,
+                    use_map,
+                    stdlib,
+                    struct_map,
+                    enum_map,
+                    type_params,
+                )?;
+                let subs =
+                    build_call_substitution(sig, &explicit_type_args, inferred, method_call.span)?;
+                enforce_type_param_bounds(sig, &subs, trait_impls, method_call.span)?;
+                let instantiated_params: Vec<Ty> = sig
+                    .params
+                    .iter()
+                    .map(|ty| substitute_type(ty, &subs))
+                    .collect();
+                let instantiated_ret = substitute_type(&sig.ret, &subs);
+                if instantiated_params.len() != method_call.args.len() + 1 {
+                    return Err(TypeError::new(
+                        format!(
+                            "argument count mismatch: expected {}, found {}",
+                            instantiated_params.len() - 1,
+                            method_call.args.len()
+                        ),
+                        method_call.span,
+                    ));
+                }
+                if instantiated_params[0] != receiver_ty {
+                    return Err(TypeError::new(
+                        format!(
+                            "method receiver type mismatch: expected {expected:?}, found {receiver_ty:?}",
+                            expected = instantiated_params[0]
+                        ),
+                        method_call.receiver.span(),
+                    ));
+                }
+                if !matches!(instantiated_params[0], Ty::Ref(_)) {
+                    let _ = check_expr(
+                        &method_call.receiver,
+                        functions,
+                        trait_map,
+                        trait_impls,
+                        scopes,
+                        UseMode::Move,
+                        recorder,
+                        use_map,
+                        struct_map,
+                        enum_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                        type_params,
+                        type_param_bounds,
+                    )?;
+                }
+                for (arg, expected) in method_call.args.iter().zip(&instantiated_params[1..]) {
+                    let (expected_inner, use_mode) = if let Ty::Ref(inner) = expected {
+                        (inner.as_ref(), UseMode::Read)
+                    } else {
+                        (expected, UseMode::Move)
+                    };
+                    let arg_ty = check_expr(
+                        arg,
+                        functions,
+                        trait_map,
+                        trait_impls,
+                        scopes,
+                        use_mode,
+                        recorder,
+                        use_map,
+                        struct_map,
+                        enum_map,
+                        stdlib,
+                        ret_ty,
+                        module_name,
+                        type_params,
+                        type_param_bounds,
+                    )?;
+                    if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
+                        return Err(TypeError::new(
+                            "cannot pass a reference to a value parameter".to_string(),
+                            arg.span(),
+                        ));
+                    }
+                    let matches_ref = if let Ty::Ref(inner) = expected {
+                        &arg_ty == inner.as_ref() || &arg_ty == expected
+                    } else {
+                        false
+                    };
+                    if &arg_ty != expected_inner
+                        && !matches_ref
+                        && !matches!(arg_ty, Ty::Builtin(BuiltinType::Never))
+                    {
+                        return Err(TypeError::new(
+                            format!(
+                                "argument type mismatch: expected {expected:?}, found {arg_ty:?}"
+                            ),
+                            arg.span(),
+                        ));
+                    }
+                }
+                return record_expr_type(recorder, expr, instantiated_ret);
+            }
             let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
                 module_name,
@@ -1867,6 +2112,7 @@ pub(super) fn check_expr(
                 type_params,
             )?;
             let subs = build_call_substitution(sig, &explicit_type_args, inferred, method_call.span)?;
+            enforce_type_param_bounds(sig, &subs, trait_impls, method_call.span)?;
             let instantiated_params: Vec<Ty> = sig
                 .params
                 .iter()
@@ -1943,6 +2189,8 @@ pub(super) fn check_expr(
                 let _ = check_expr(
                     &method_call.receiver,
                     functions,
+                    trait_map,
+                    trait_impls,
                     scopes,
                     UseMode::Move,
                     recorder,
@@ -1953,6 +2201,7 @@ pub(super) fn check_expr(
                     ret_ty,
                     module_name,
                     type_params,
+                    type_param_bounds,
                 )?;
             }
             for (arg, expected) in method_call.args.iter().zip(&instantiated_params[1..]) {
@@ -1964,6 +2213,8 @@ pub(super) fn check_expr(
                 let arg_ty = check_expr(
                     arg,
                     functions,
+                    trait_map,
+                    trait_impls,
                     scopes,
                     use_mode,
                     recorder,
@@ -1974,6 +2225,7 @@ pub(super) fn check_expr(
                     ret_ty,
                     module_name,
                     type_params,
+                    type_param_bounds,
                 )?;
                 if !matches!(expected, Ty::Ref(_)) && matches!(arg_ty, Ty::Ref(_)) {
                     return Err(TypeError::new(
@@ -2001,6 +2253,8 @@ pub(super) fn check_expr(
         Expr::StructLiteral(lit) => check_struct_literal(
             lit,
             functions,
+            trait_map,
+            trait_impls,
             scopes,
             recorder,
             use_map,
@@ -2010,11 +2264,14 @@ pub(super) fn check_expr(
             ret_ty,
             module_name,
             type_params,
+            type_param_bounds,
         ),
         Expr::Unary(unary) => {
             let expr_ty = check_expr(
                 &unary.expr,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -2025,6 +2282,7 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             match unary.op {
                 UnaryOp::Neg => {
@@ -2035,6 +2293,16 @@ pub(super) fn check_expr(
                     } else {
                         Err(TypeError::new(
                             "unary - expects integer".to_string(),
+                            unary.span,
+                        ))
+                    }
+                }
+                UnaryOp::BitNot => {
+                    if is_numeric_type(&expr_ty) {
+                        Ok(expr_ty)
+                    } else {
+                        Err(TypeError::new(
+                            "unary ~ expects integer".to_string(),
                             unary.span,
                         ))
                     }
@@ -2055,6 +2323,8 @@ pub(super) fn check_expr(
             let left = check_expr(
                 &binary.left,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -2065,10 +2335,13 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             let right = check_expr(
                 &binary.right,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -2079,12 +2352,14 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             match binary.op {
                 BinaryOp::Add
                 | BinaryOp::Sub
                 | BinaryOp::Mul
-                | BinaryOp::Div => {
+                | BinaryOp::Div
+                | BinaryOp::Mod => {
                     if left == right && (left == Ty::Builtin(BuiltinType::I32)
                         || left == Ty::Builtin(BuiltinType::I64))
                     {
@@ -2106,6 +2381,44 @@ pub(super) fn check_expr(
                     } else {
                         Err(TypeError::new(
                             "binary arithmetic expects matching integer types".to_string(),
+                            binary.span,
+                        ))
+                    }
+                }
+                BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+                    if left == right && is_numeric_type(&left) {
+                        Ok(left)
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
+                        Ok(Ty::Builtin(BuiltinType::Never))
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
+                    } else {
+                        Err(TypeError::new(
+                            "bitwise operators expect matching integer types".to_string(),
+                            binary.span,
+                        ))
+                    }
+                }
+                BinaryOp::Shl | BinaryOp::Shr => {
+                    if left == right && is_numeric_type(&left) {
+                        Ok(left)
+                    } else if matches!(left, Ty::Builtin(BuiltinType::Never))
+                        || matches!(right, Ty::Builtin(BuiltinType::Never))
+                    {
+                        Ok(Ty::Builtin(BuiltinType::Never))
+                    } else if left != right && is_numeric_type(&left) && is_numeric_type(&right) {
+                        Err(TypeError::new(
+                            "implicit numeric conversions are not allowed".to_string(),
+                            binary.span,
+                        ))
+                    } else {
+                        Err(TypeError::new(
+                            "shift operators expect matching integer types".to_string(),
                             binary.span,
                         ))
                     }
@@ -2165,6 +2478,8 @@ pub(super) fn check_expr(
         Expr::Match(match_expr) => check_match_expr_value(
             match_expr,
             functions,
+            trait_map,
+            trait_impls,
             scopes,
             use_mode,
             recorder,
@@ -2175,12 +2490,15 @@ pub(super) fn check_expr(
             ret_ty,
             module_name,
             type_params,
+            type_param_bounds,
             false, // break/continue not allowed in value-producing match
         ),
         Expr::Try(try_expr) => {
             let inner_ty = check_expr(
                 &try_expr.expr,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Move,
                 recorder,
@@ -2191,6 +2509,7 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             let (ok_ty, err_ty) = match inner_ty {
                 Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
@@ -2228,6 +2547,8 @@ pub(super) fn check_expr(
         Expr::Grouping(group) => check_expr(
             &group.expr,
             functions,
+            trait_map,
+            trait_impls,
             scopes,
             use_mode,
             recorder,
@@ -2238,6 +2559,7 @@ pub(super) fn check_expr(
             ret_ty,
             module_name,
             type_params,
+            type_param_bounds,
         ),
         Expr::FieldAccess(field_access) => {
             fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
@@ -2267,6 +2589,8 @@ pub(super) fn check_expr(
             let object_ty = check_expr(
                 &field_access.object,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Project,
                 recorder,
@@ -2277,6 +2601,7 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
             let Ty::Path(struct_name, struct_args) = object_ty else {
                 return Err(TypeError::new(
@@ -2345,6 +2670,8 @@ pub(super) fn check_expr(
             let object_ty = check_expr(
                 &index_expr.object,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -2355,12 +2682,15 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
 
             // Type check the index (must be i32)
             let index_ty = check_expr(
                 &index_expr.index,
                 functions,
+                trait_map,
+                trait_impls,
                 scopes,
                 UseMode::Read,
                 recorder,
@@ -2371,6 +2701,7 @@ pub(super) fn check_expr(
                 ret_ty,
                 module_name,
                 type_params,
+                type_param_bounds,
             )?;
 
             if index_ty != Ty::Builtin(BuiltinType::I32) {
@@ -2444,6 +2775,8 @@ pub(super) fn check_expr(
 fn check_match_stmt(
     match_expr: &MatchExpr,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     scopes: &mut Scopes,
     scrutinee_mode: UseMode,
     recorder: &mut TypeRecorder,
@@ -2454,11 +2787,14 @@ fn check_match_stmt(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    type_param_bounds: &HashMap<String, Vec<String>>,
     in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
         functions,
+        trait_map,
+        trait_impls,
         scopes,
         scrutinee_mode,
         recorder,
@@ -2469,6 +2805,7 @@ fn check_match_stmt(
         ret_ty,
         module_name,
         type_params,
+        type_param_bounds,
     )?;
     let mut arm_scopes = Vec::with_capacity(match_expr.arms.len());
     for arm in &match_expr.arms {
@@ -2479,6 +2816,8 @@ fn check_match_stmt(
             &arm.body,
             ret_ty,
             functions,
+            trait_map,
+            trait_impls,
             &mut arm_scope,
             recorder,
             use_map,
@@ -2487,6 +2826,7 @@ fn check_match_stmt(
             stdlib,
             module_name,
             type_params,
+            type_param_bounds,
             in_loop,
         )?;
         arm_scope.pop_scope();
@@ -2508,6 +2848,8 @@ fn check_match_stmt(
 fn check_match_expr_value(
     match_expr: &MatchExpr,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     scopes: &mut Scopes,
     scrutinee_mode: UseMode,
     recorder: &mut TypeRecorder,
@@ -2518,11 +2860,14 @@ fn check_match_expr_value(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    type_param_bounds: &HashMap<String, Vec<String>>,
     in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let match_ty = check_expr(
         &match_expr.expr,
         functions,
+        trait_map,
+        trait_impls,
         scopes,
         scrutinee_mode,
         recorder,
@@ -2533,6 +2878,7 @@ fn check_match_expr_value(
         ret_ty,
         module_name,
         type_params,
+        type_param_bounds,
     )?;
     let mut result_ty: Option<Ty> = None;
     let mut arm_scopes = Vec::with_capacity(match_expr.arms.len());
@@ -2543,6 +2889,8 @@ fn check_match_expr_value(
         let arm_ty = check_match_arm_value(
             &arm.body,
             functions,
+            trait_map,
+            trait_impls,
             &mut arm_scope,
             recorder,
             use_map,
@@ -2552,6 +2900,7 @@ fn check_match_expr_value(
             ret_ty,
             module_name,
             type_params,
+            type_param_bounds,
             in_loop,
         )?;
         arm_scope.pop_scope();
@@ -2587,6 +2936,8 @@ fn check_match_expr_value(
 fn check_match_arm_value(
     block: &Block,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     scopes: &mut Scopes,
     recorder: &mut TypeRecorder,
     use_map: &UseMap,
@@ -2596,6 +2947,7 @@ fn check_match_arm_value(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    type_param_bounds: &HashMap<String, Vec<String>>,
     in_loop: bool,
 ) -> Result<Ty, TypeError> {
     let Some((last, prefix)) = block.stmts.split_last() else {
@@ -2615,6 +2967,8 @@ fn check_match_arm_value(
             stmt,
             ret_ty,
             functions,
+            trait_map,
+            trait_impls,
             scopes,
             recorder,
             use_map,
@@ -2623,6 +2977,7 @@ fn check_match_arm_value(
             stdlib,
             module_name,
             type_params,
+            type_param_bounds,
             in_loop,
         )?;
     }
@@ -2630,6 +2985,8 @@ fn check_match_arm_value(
         Stmt::Expr(expr_stmt) => check_expr(
             &expr_stmt.expr,
             functions,
+            trait_map,
+            trait_impls,
             scopes,
             UseMode::Move,
             recorder,
@@ -2640,6 +2997,7 @@ fn check_match_arm_value(
             ret_ty,
             module_name,
             type_params,
+            type_param_bounds,
         ),
         _ => Err(TypeError::new(
             "match arm must end with expression".to_string(),
@@ -2780,6 +3138,8 @@ fn same_type_constructor(left: &Ty, right: &Ty) -> bool {
 fn check_struct_literal(
     lit: &StructLiteralExpr,
     functions: &HashMap<String, FunctionSig>,
+    trait_map: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     scopes: &mut Scopes,
     recorder: &mut TypeRecorder,
     use_map: &UseMap,
@@ -2789,6 +3149,7 @@ fn check_struct_literal(
     ret_ty: &Ty,
     module_name: &str,
     type_params: &HashSet<String>,
+    type_param_bounds: &HashMap<String, Vec<String>>,
 ) -> Result<Ty, TypeError> {
     let type_args = lower_type_args(
         &lit.type_args,
@@ -2863,6 +3224,8 @@ fn check_struct_literal(
         let actual = check_expr(
             &field.expr,
             functions,
+            trait_map,
+            trait_impls,
             scopes,
             UseMode::Move,
             recorder,
@@ -2873,6 +3236,7 @@ fn check_struct_literal(
             ret_ty,
             module_name,
             type_params,
+            type_param_bounds,
         )?;
         if actual != expected {
             return Err(TypeError::new(
@@ -3050,6 +3414,49 @@ fn build_call_substitution(
         subs.insert(name, arg.clone());
     }
     Ok(subs)
+}
+
+fn enforce_type_param_bounds(
+    sig: &FunctionSig,
+    subs: &HashMap<String, Ty>,
+    trait_impls: &[TraitImplInfo],
+    span: Span,
+) -> Result<(), TypeError> {
+    for (param, bounds) in &sig.type_param_bounds {
+        let Some(actual) = subs.get(param) else {
+            continue;
+        };
+        for bound in bounds {
+            if type_satisfies_trait(actual, bound, trait_impls, span).is_err() {
+                return Err(TypeError::new(
+                    format!("type parameter `{param}` does not implement `{bound}`"),
+                    span,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn type_satisfies_trait(
+    actual: &Ty,
+    trait_name: &str,
+    trait_impls: &[TraitImplInfo],
+    span: Span,
+) -> Result<(), TypeError> {
+    for impl_info in trait_impls {
+        if impl_info.trait_name != trait_name {
+            continue;
+        }
+        let mut subs = HashMap::new();
+        if match_type_params(&impl_info.target_ty, actual, &mut subs, span).is_ok() {
+            return Ok(());
+        }
+    }
+    Err(TypeError::new(
+        format!("type `{actual:?}` does not implement `{trait_name}`"),
+        span,
+    ))
 }
 
 /// Bind locals introduced by a match pattern.

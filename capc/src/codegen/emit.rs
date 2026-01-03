@@ -1317,6 +1317,11 @@ fn emit_hir_expr_inner(
                 crate::hir::ResolvedCallee::Function { module, name, symbol } => {
                     (module.clone(), name.clone(), symbol.clone())
                 }
+                crate::hir::ResolvedCallee::TraitMethod { .. } => {
+                    return Err(CodegenError::Unsupported(
+                        "trait methods must be resolved before codegen".to_string(),
+                    ));
+                }
                 crate::hir::ResolvedCallee::Intrinsic(crate::hir::IntrinsicId::Drop) => {
                     for arg in &call.args {
                         let _ = emit_hir_expr(
@@ -1680,6 +1685,29 @@ fn emit_hir_expr_inner(
                 (BinaryOp::Div, ValueRepr::Single(a), ValueRepr::Single(b)) => {
                     Ok(ValueRepr::Single(emit_checked_div(builder, a, b, &binary.ty)?))
                 }
+                (BinaryOp::Mod, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(emit_checked_mod(builder, a, b, &binary.ty)?))
+                }
+                (BinaryOp::BitAnd, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().band(a, b)))
+                }
+                (BinaryOp::BitOr, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().bor(a, b)))
+                }
+                (BinaryOp::BitXor, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().bxor(a, b)))
+                }
+                (BinaryOp::Shl, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    Ok(ValueRepr::Single(builder.ins().ishl(a, b)))
+                }
+                (BinaryOp::Shr, ValueRepr::Single(a), ValueRepr::Single(b)) => {
+                    let value = if crate::typeck::is_unsigned_type(&binary.ty.ty) {
+                        builder.ins().ushr(a, b)
+                    } else {
+                        builder.ins().sshr(a, b)
+                    };
+                    Ok(ValueRepr::Single(value))
+                }
                 (BinaryOp::Eq, ValueRepr::Single(a), ValueRepr::Single(b))
                     if is_string_type(&binary.left.ty().ty) =>
                 {
@@ -1757,6 +1785,9 @@ fn emit_hir_expr_inner(
                 (UnaryOp::Not, ValueRepr::Single(v)) => {
                     let one = builder.ins().iconst(ir::types::I8, 1);
                     Ok(ValueRepr::Single(builder.ins().bxor(v, one)))
+                }
+                (UnaryOp::BitNot, ValueRepr::Single(v)) => {
+                    Ok(ValueRepr::Single(builder.ins().bnot(v)))
                 }
                 _ => Err(CodegenError::Unsupported("unary op".to_string())),
             }
@@ -1902,6 +1933,31 @@ fn emit_checked_div(
         builder.ins().udiv(a, b)
     } else {
         builder.ins().sdiv(a, b)
+    };
+    Ok(value)
+}
+
+fn emit_checked_mod(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    ty: &crate::hir::HirType,
+) -> Result<Value, CodegenError> {
+    let b_ty = builder.func.dfg.value_type(b);
+    let zero = builder.ins().iconst(b_ty, 0);
+    let is_zero = builder.ins().icmp(IntCC::Equal, b, zero);
+    let ok_block = builder.create_block();
+    let trap_block = builder.create_block();
+    builder.ins().brif(is_zero, trap_block, &[], ok_block, &[]);
+    builder.switch_to_block(trap_block);
+    builder.ins().trap(ir::TrapCode::IntegerDivisionByZero);
+    builder.switch_to_block(ok_block);
+    builder.seal_block(trap_block);
+    builder.seal_block(ok_block);
+    let value = if crate::typeck::is_unsigned_type(&ty.ty) {
+        builder.ins().urem(a, b)
+    } else {
+        builder.ins().srem(a, b)
     };
     Ok(value)
 }

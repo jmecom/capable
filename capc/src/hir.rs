@@ -40,6 +40,7 @@ pub struct HirProgram {
     pub entry: HirModule,
     pub user_modules: Vec<HirModule>,
     pub stdlib: Vec<HirModule>,
+    pub trait_impls: Vec<HirTraitImpl>,
 }
 
 /// A function in HIR
@@ -93,6 +94,15 @@ pub struct HirEnum {
 pub struct HirEnumVariant {
     pub name: String,
     pub payload: Option<HirType>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirTraitImpl {
+    pub trait_name: String,
+    pub type_name: String,
+    pub type_params: Vec<String>,
+    pub target_ty: Ty,
+    pub module: String,
 }
 
 /// A block of statements
@@ -298,6 +308,11 @@ pub enum ResolvedCallee {
         name: String,
         /// Full symbol for linking (e.g., "capable_sys_string_len")
         symbol: String,
+    },
+    /// A trait method call to be resolved during monomorphization.
+    TraitMethod {
+        trait_name: String,
+        method: String,
     },
     /// A runtime intrinsic
     Intrinsic(IntrinsicId),

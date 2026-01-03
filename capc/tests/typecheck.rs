@@ -61,6 +61,45 @@ fn typecheck_if_while_ok() {
 }
 
 #[test]
+fn typecheck_bitwise_ops_ok() {
+    let source = load_program("bitwise_ops.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_trait_basic_ok() {
+    let source = load_program("trait_basic.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_trait_missing_method_fails() {
+    let source = load_program("should_fail_trait_missing_method.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(msg.contains("missing method `add`"), "got: {msg}");
+}
+
+#[test]
+fn typecheck_trait_bound_missing_fails() {
+    let source = load_program("should_fail_trait_bound_missing.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("no trait bound provides method `sum` for `T`"),
+        "got: {msg}"
+    );
+}
+
+#[test]
 fn typecheck_match_bool_ok() {
     let source = load_program("match_bool.cap");
     let module = parse_module(&source).expect("parse module");

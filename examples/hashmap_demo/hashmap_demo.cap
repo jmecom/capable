@@ -1,0 +1,462 @@
+/// Hash-map demonstration using the Hash trait.
+/// This implements a hash-map with i32 keys and i32 values using open addressing.
+///
+/// DEMONSTRATES:
+/// - Trait definition and implementation
+/// - Trait bounds on generic functions
+/// - Using traits for polymorphic hashing
+///
+/// REMAINING LIMITATIONS:
+/// - Vec<T> only works with u8, i32, and string (no custom Entry structs)
+/// - We work around this by using parallel vectors for states/keys/values
+///
+/// The hash-map uses open addressing with linear probing.
+package safe
+module hashmap_demo
+use sys::console
+use sys::buffer
+use sys::vec
+
+/// Trait for types that can be hashed.
+/// The hash value should be stable: equal values produce equal hashes.
+trait Hash {
+  fn hash(self) -> i32;
+}
+
+/// Trait for types that support equality comparison.
+trait Eq {
+  fn eq(self, other: Self) -> bool;
+}
+
+/// Hash implementation for i32.
+impl Hash for i32 {
+  fn hash(self) -> i32 {
+    let k = self
+    if (k < 0) {
+      k = 0 - k
+    }
+    // Multiplicative hash
+    let h = k * 31 + k / 7 + k * 127
+    if (h < 0) {
+      h = 0 - h
+    }
+    return h
+  }
+}
+
+/// Eq implementation for i32.
+impl Eq for i32 {
+  fn eq(self, other: i32) -> bool {
+    return self == other
+  }
+}
+
+/// Compute a % b using integer division.
+fn mod_i32(a: i32, b: i32) -> i32 {
+  if (b == 0) {
+    panic()
+  }
+  let quotient = a / b
+  return a - quotient * b
+}
+
+/// A hash-map with i32 keys and i32 values.
+/// Uses parallel vectors for storage since Vec<Entry> isn't supported.
+copy struct HashMap {
+  /// Entry states: 0=Empty, 1=Occupied, 2=Deleted
+  states: Vec<i32>,
+  /// Keys
+  keys: Vec<i32>,
+  /// Values
+  values: Vec<i32>,
+  /// Metadata: [size, capacity]
+  meta: Vec<i32>,
+  alloc: buffer::Alloc
+}
+
+/// Generic hash function using the Hash trait.
+fn compute_hash<K: Hash>(key: K) -> i32 {
+  return key.hash()
+}
+
+/// Create a new empty hash-map with initial capacity.
+pub fn hashmap_new(alloc: buffer::Alloc, initial_capacity: i32) -> HashMap {
+  let cap = initial_capacity
+  if (cap < 8) {
+    cap = 8
+  }
+
+  let states = alloc.vec_i32_new()
+  let keys = alloc.vec_i32_new()
+  let values = alloc.vec_i32_new()
+  let meta = alloc.vec_i32_new()
+
+  // Initialize all entries as empty (state = 0)
+  for i in 0..cap {
+    match (states.push(0)) { Ok(_) => {} Err(_) => { panic() } }
+    match (keys.push(0)) { Ok(_) => {} Err(_) => { panic() } }
+    match (values.push(0)) { Ok(_) => {} Err(_) => { panic() } }
+  }
+
+  // Store metadata: [size, capacity]
+  match (meta.push(0)) { Ok(_) => {} Err(_) => { panic() } }
+  match (meta.push(cap)) { Ok(_) => {} Err(_) => { panic() } }
+
+  return HashMap {
+    states: states,
+    keys: keys,
+    values: values,
+    meta: meta,
+    alloc: alloc
+  }
+}
+
+/// Get the current size of the hash-map.
+fn hashmap_size(map: HashMap) -> i32 {
+  return map.meta[0].unwrap_or(0)
+}
+
+/// Get the capacity of the hash-map.
+fn hashmap_capacity(map: HashMap) -> i32 {
+  return map.meta[1].unwrap_or(8)
+}
+
+/// Set the size of the hash-map.
+fn hashmap_set_size(map: HashMap, size: i32) -> unit {
+  match (map.meta.set(0, size)) {
+    Ok(_) => {}
+    Err(_) => {}
+  }
+  return ()
+}
+
+/// Look up a value by key using the Hash trait.
+pub fn hashmap_get(map: HashMap, key: i32) -> Result<i32, unit> {
+  let cap = hashmap_capacity(map)
+  // Use the Hash trait to compute the hash
+  let hash = compute_hash<i32>(key)
+  let index = mod_i32(hash, cap)
+  let start = index
+
+  for {
+    let state = map.states[index].unwrap_or(0)
+
+    if (state == 0) {
+      // Empty - key not found
+      return Err(())
+    }
+
+    if (state == 1) {
+      // Occupied - check if it's our key
+      let k = map.keys[index].unwrap_or(0)
+      if (k == key) {
+        let v = map.values[index].unwrap_or(0)
+        return Ok(v)
+      }
+    }
+
+    // Continue probing (either deleted or collision)
+    index = mod_i32(index + 1, cap)
+    if (index == start) {
+      // Wrapped around completely
+      return Err(())
+    }
+  }
+
+  return Err(())
+}
+
+/// Insert or update a key-value pair.
+pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> bool {
+  let cap = hashmap_capacity(map)
+  let size = hashmap_size(map)
+
+  // Check load factor (keep below 70%)
+  if (size * 10 >= cap * 7) {
+    // Table too full
+    return false
+  }
+
+  // Use the Hash trait to compute the hash
+  let hash = compute_hash<i32>(key)
+  let index = mod_i32(hash, cap)
+  let start = index
+  let first_available = 0 - 1
+
+  for {
+    let state = map.states[index].unwrap_or(0)
+
+    if (state == 0) {
+      // Empty slot found
+      if (first_available < 0) {
+        first_available = index
+      }
+      break
+    }
+
+    if (state == 2) {
+      // Deleted slot - remember it but keep looking for the key
+      if (first_available < 0) {
+        first_available = index
+      }
+    }
+
+    if (state == 1) {
+      // Occupied - check if it's the same key (update case)
+      let k = map.keys[index].unwrap_or(0)
+      if (k == key) {
+        // Update existing entry
+        match (map.values.set(index, value)) {
+          Ok(_) => {}
+          Err(_) => { return false }
+        }
+        return true
+      }
+    }
+
+    index = mod_i32(index + 1, cap)
+    if (index == start) {
+      // Wrapped around
+      break
+    }
+  }
+
+  if (first_available < 0) {
+    return false
+  }
+
+  // Insert at first available slot
+  match (map.states.set(first_available, 1)) {
+    Ok(_) => {}
+    Err(_) => { return false }
+  }
+  match (map.keys.set(first_available, key)) {
+    Ok(_) => {}
+    Err(_) => { return false }
+  }
+  match (map.values.set(first_available, value)) {
+    Ok(_) => {}
+    Err(_) => { return false }
+  }
+
+  hashmap_set_size(map, size + 1)
+  return true
+}
+
+/// Remove a key from the hash-map.
+pub fn hashmap_remove(map: HashMap, key: i32) -> bool {
+  let cap = hashmap_capacity(map)
+  let hash = compute_hash<i32>(key)
+  let index = mod_i32(hash, cap)
+  let start = index
+
+  for {
+    let state = map.states[index].unwrap_or(0)
+
+    if (state == 0) {
+      // Empty - key not found
+      return false
+    }
+
+    if (state == 1) {
+      // Occupied - check if it's our key
+      let k = map.keys[index].unwrap_or(0)
+      if (k == key) {
+        // Mark as deleted
+        match (map.states.set(index, 2)) {
+          Ok(_) => {}
+          Err(_) => { return false }
+        }
+        let size = hashmap_size(map)
+        hashmap_set_size(map, size - 1)
+        return true
+      }
+    }
+
+    // Continue probing
+    index = mod_i32(index + 1, cap)
+    if (index == start) {
+      return false
+    }
+  }
+
+  return false
+}
+
+/// Check if a key exists.
+pub fn hashmap_contains(map: HashMap, key: i32) -> bool {
+  match (hashmap_get(map, key)) {
+    Ok(_) => { return true }
+    Err(_) => { return false }
+  }
+}
+
+/// Free the hash-map.
+pub fn hashmap_free(map: HashMap) -> unit {
+  map.states.free()
+  map.keys.free()
+  map.values.free()
+  map.meta.free()
+  return ()
+}
+
+/// Demo: insert some values and look them up.
+fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
+  c.println("=== Hash-Map Demo (with Hash trait) ===")
+  c.println("")
+  c.println("This demonstrates a hash-map using the Hash trait")
+  c.println("for polymorphic hashing of keys.")
+  c.println("")
+
+  // Create a hash-map with capacity 16
+  let map = hashmap_new(alloc, 16)
+
+  c.println("Inserting entries...")
+
+  // Insert some key-value pairs
+  let test_keys = alloc.vec_i32_new()
+  let test_vals = alloc.vec_i32_new()
+
+  // key -> key * 10
+  match (test_keys.push(42)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(420)) { Ok(_) => {} Err(_) => {} }
+
+  match (test_keys.push(17)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(170)) { Ok(_) => {} Err(_) => {} }
+
+  match (test_keys.push(99)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(990)) { Ok(_) => {} Err(_) => {} }
+
+  match (test_keys.push(1)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(10)) { Ok(_) => {} Err(_) => {} }
+
+  match (test_keys.push(256)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(2560)) { Ok(_) => {} Err(_) => {} }
+
+  // Keys that will likely collide
+  match (test_keys.push(0)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(0)) { Ok(_) => {} Err(_) => {} }
+
+  match (test_keys.push(16)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(160)) { Ok(_) => {} Err(_) => {} }
+
+  match (test_keys.push(32)) { Ok(_) => {} Err(_) => {} }
+  match (test_vals.push(320)) { Ok(_) => {} Err(_) => {} }
+
+  // Insert all entries
+  let num_entries = test_keys.len()
+  for i in 0..num_entries {
+    let k = test_keys[i].unwrap_or(0)
+    let v = test_vals[i].unwrap_or(0)
+    let ok = hashmap_insert(map, k, v)
+    if (ok) {
+      c.print("  insert(")
+      c.print_i32(k)
+      c.print(", ")
+      c.print_i32(v)
+      c.println(") = true")
+    } else {
+      c.print("  insert(")
+      c.print_i32(k)
+      c.println(") = false (failed)")
+    }
+  }
+
+  c.println("")
+  c.print("Map size: ")
+  c.print_i32(hashmap_size(map))
+  c.println("")
+
+  c.println("")
+  c.println("Looking up entries...")
+
+  // Look up each key
+  for i in 0..num_entries {
+    let k = test_keys[i].unwrap_or(0)
+    c.print("  get(")
+    c.print_i32(k)
+    c.print(") = ")
+    match (hashmap_get(map, k)) {
+      Ok(v) => {
+        c.print_i32(v)
+        c.println("")
+      }
+      Err(_) => {
+        c.println("not found")
+      }
+    }
+  }
+
+  c.println("")
+  c.println("Updating an entry...")
+  c.println("  insert(42, 999) - updating existing key")
+  let updated = hashmap_insert(map, 42, 999)
+  c.print("  get(42) = ")
+  match (hashmap_get(map, 42)) {
+    Ok(v) => {
+      c.print_i32(v)
+      c.println("")
+    }
+    Err(_) => {
+      c.println("not found")
+    }
+  }
+
+  c.println("")
+  c.println("Looking up non-existent keys...")
+
+  let missing = alloc.vec_i32_new()
+  match (missing.push(100)) { Ok(_) => {} Err(_) => {} }
+  match (missing.push(999)) { Ok(_) => {} Err(_) => {} }
+  match (missing.push(12345)) { Ok(_) => {} Err(_) => {} }
+
+  let num_missing = missing.len()
+  for i in 0..num_missing {
+    let k = missing[i].unwrap_or(0)
+    c.print("  contains(")
+    c.print_i32(k)
+    c.print(") = ")
+    if (hashmap_contains(map, k)) {
+      c.println("true")
+    } else {
+      c.println("false")
+    }
+  }
+
+  c.println("")
+  c.println("Removing entries...")
+  c.print("  remove(17) = ")
+  if (hashmap_remove(map, 17)) {
+    c.println("true")
+  } else {
+    c.println("false")
+  }
+  c.print("  contains(17) = ")
+  if (hashmap_contains(map, 17)) {
+    c.println("true")
+  } else {
+    c.println("false")
+  }
+  c.print("Map size: ")
+  c.print_i32(hashmap_size(map))
+  c.println("")
+
+  // Cleanup
+  alloc.vec_i32_free(test_keys)
+  alloc.vec_i32_free(test_vals)
+  alloc.vec_i32_free(missing)
+  hashmap_free(map)
+
+  c.println("")
+  c.println("=== Demo Complete ===")
+  return ()
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+
+  run_demo(c, alloc)
+
+  return 0
+}

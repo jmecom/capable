@@ -208,6 +208,15 @@ impl Parser {
                 }
                 Ok(Item::Enum(self.parse_enum(is_pub, doc)?))
             }
+            Some(TokenKind::Trait) => {
+                if is_opaque || is_linear || is_copy || is_capability {
+                    return Err(self.error_current(
+                        "linear/copy/opaque/capability applies only to struct declarations"
+                            .to_string(),
+                    ));
+                }
+                Ok(Item::Trait(self.parse_trait(is_pub, doc)?))
+            }
             Some(TokenKind::Impl) => {
                 if is_pub {
                     return Err(self.error_current(
@@ -232,7 +241,28 @@ impl Parser {
     fn parse_impl_block(&mut self, impl_doc: Option<String>) -> Result<ImplBlock, ParseError> {
         let start = self.expect(TokenKind::Impl)?.span.start;
         let type_params = self.parse_type_params()?;
-        let target = self.parse_type()?;
+        let first_type = self.parse_type()?;
+        let (trait_path, target) = if self.maybe_consume(TokenKind::For).is_some() {
+            let trait_path = match first_type {
+                Type::Path { path, args, .. } => {
+                    if !args.is_empty() {
+                        return Err(self.error_current(
+                            "trait impls do not support type arguments yet".to_string(),
+                        ));
+                    }
+                    path
+                }
+                _ => {
+                    return Err(self.error_current(
+                        "trait impls require a trait name".to_string(),
+                    ))
+                }
+            };
+            let target = self.parse_type()?;
+            (Some(trait_path), target)
+        } else {
+            (None, first_type)
+        };
         self.expect(TokenKind::LBrace)?;
         let mut methods = Vec::new();
         while self.peek_kind() != Some(TokenKind::RBrace) {
@@ -250,6 +280,7 @@ impl Parser {
             target,
             methods,
             type_params,
+            trait_path,
             doc: impl_doc,
             span: Span::new(start, end),
         })
@@ -341,6 +372,76 @@ impl Parser {
             is_pub,
             doc,
             span,
+        })
+    }
+
+    fn parse_trait(&mut self, is_pub: bool, doc: Option<String>) -> Result<TraitDecl, ParseError> {
+        let start = self.expect(TokenKind::Trait)?.span.start;
+        let name = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut methods = Vec::new();
+        while self.peek_kind() != Some(TokenKind::RBrace) {
+            let doc = self.take_doc_comments();
+            if self.maybe_consume(TokenKind::Pub).is_some() {
+                return Err(self.error_current(
+                    "trait methods cannot be marked pub".to_string(),
+                ));
+            }
+            methods.push(self.parse_trait_method(doc)?);
+        }
+        let end = self.expect(TokenKind::RBrace)?.span.end;
+        Ok(TraitDecl {
+            name,
+            type_params,
+            methods,
+            is_pub,
+            doc,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_trait_method(&mut self, doc: Option<String>) -> Result<TraitMethod, ParseError> {
+        let start = self.expect(TokenKind::Fn)?.span.start;
+        let name = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
+        self.expect(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if self.peek_kind() != Some(TokenKind::RParen) {
+            loop {
+                let param_name = self.expect_ident()?;
+                let ty = if self.maybe_consume(TokenKind::Colon).is_some() {
+                    Some(self.parse_type()?)
+                } else if param_name.item == "self" {
+                    None
+                } else {
+                    return Err(self.error_current(
+                        "expected ':' after parameter name".to_string(),
+                    ));
+                };
+                params.push(Param {
+                    name: param_name,
+                    ty,
+                });
+                if self.maybe_consume(TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+        }
+        let rparen = self.expect(TokenKind::RParen)?;
+        let ret = if self.maybe_consume(TokenKind::Arrow).is_some() {
+            self.parse_type()?
+        } else {
+            unit_type_at(Span::new(rparen.span.end, rparen.span.end))
+        };
+        let end = self.expect(TokenKind::Semi)?.span.end;
+        Ok(TraitMethod {
+            name,
+            type_params,
+            params,
+            ret,
+            doc,
+            span: Span::new(start, end),
         })
     }
 
@@ -949,16 +1050,22 @@ impl Parser {
             let op = match self.peek_kind() {
                 Some(TokenKind::OrOr) => BinaryOp::Or,
                 Some(TokenKind::AndAnd) => BinaryOp::And,
+                Some(TokenKind::Pipe) => BinaryOp::BitOr,
+                Some(TokenKind::Caret) => BinaryOp::BitXor,
+                Some(TokenKind::Ampersand) => BinaryOp::BitAnd,
                 Some(TokenKind::EqEq) => BinaryOp::Eq,
                 Some(TokenKind::NotEq) => BinaryOp::Neq,
                 Some(TokenKind::Lt) => BinaryOp::Lt,
                 Some(TokenKind::Lte) => BinaryOp::Lte,
                 Some(TokenKind::Gt) => BinaryOp::Gt,
                 Some(TokenKind::Gte) => BinaryOp::Gte,
+                Some(TokenKind::Shl) => BinaryOp::Shl,
+                Some(TokenKind::Shr) => BinaryOp::Shr,
                 Some(TokenKind::Plus) => BinaryOp::Add,
                 Some(TokenKind::Minus) => BinaryOp::Sub,
                 Some(TokenKind::Star) => BinaryOp::Mul,
                 Some(TokenKind::Slash) => BinaryOp::Div,
+                Some(TokenKind::Percent) => BinaryOp::Mod,
                 _ => break,
             };
 
@@ -990,6 +1097,16 @@ impl Parser {
                 let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Neg,
+                    span: Span::new(start, expr.span().end),
+                    expr: Box::new(expr),
+                }))
+            }
+            Some(TokenKind::Tilde) => {
+                let start = self.bump().unwrap().span.start;
+                // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
+                let expr = self.parse_expr_bp(7, allow_struct_literal)?;
+                Ok(Expr::Unary(UnaryExpr {
+                    op: UnaryOp::BitNot,
                     span: Span::new(start, expr.span().end),
                     expr: Box::new(expr),
                 }))
@@ -1360,7 +1477,7 @@ impl Parser {
         }))
     }
 
-    fn parse_type_params(&mut self) -> Result<Vec<Ident>, ParseError> {
+    fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, ParseError> {
         if self.peek_kind() != Some(TokenKind::Lt) {
             return Ok(Vec::new());
         }
@@ -1368,8 +1485,18 @@ impl Parser {
         let mut params = Vec::new();
         if self.peek_kind() != Some(TokenKind::Gt) {
             loop {
-                let ident = self.expect_ident()?;
-                params.push(ident);
+                let name = self.expect_ident()?;
+                let mut bounds = Vec::new();
+                if self.maybe_consume(TokenKind::Colon).is_some() {
+                    loop {
+                        let bound = self.parse_path()?;
+                        bounds.push(bound);
+                        if self.maybe_consume(TokenKind::Plus).is_none() {
+                            break;
+                        }
+                    }
+                }
+                params.push(TypeParam { name, bounds });
                 if self.maybe_consume(TokenKind::Comma).is_none() {
                     break;
                 }
@@ -1468,16 +1595,21 @@ fn infix_binding_power(op: &BinaryOp) -> (u8, u8) {
     match op {
         BinaryOp::Or => (1, 2),
         BinaryOp::And => (3, 4),
-        BinaryOp::Eq | BinaryOp::Neq => (5, 6),
-        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => (7, 8),
-        BinaryOp::Add | BinaryOp::Sub => (9, 10),
-        BinaryOp::Mul | BinaryOp::Div => (11, 12),
+        BinaryOp::BitOr => (5, 6),
+        BinaryOp::BitXor => (7, 8),
+        BinaryOp::BitAnd => (9, 10),
+        BinaryOp::Eq | BinaryOp::Neq => (11, 12),
+        BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte => (13, 14),
+        BinaryOp::Shl | BinaryOp::Shr => (15, 16),
+        BinaryOp::Add | BinaryOp::Sub => (17, 18),
+        BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => (19, 20),
     }
 }
 
 fn postfix_binding_power(kind: &TokenKind) -> Option<u8> {
     match kind {
-        TokenKind::Dot | TokenKind::LParen | TokenKind::LBracket | TokenKind::Question => Some(13),
+        // Postfix operators have highest precedence (higher than any infix operator)
+        TokenKind::Dot | TokenKind::LParen | TokenKind::LBracket | TokenKind::Question => Some(23),
         _ => None,
     }
 }

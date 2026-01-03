@@ -1,0 +1,27 @@
+module trait_basic
+use sys::system
+
+trait Summable {
+  fn sum(self) -> i32;
+}
+
+struct Pair { left: i32, right: i32 }
+
+impl Summable for Pair {
+  fn sum(self) -> i32 {
+    return self.left
+  }
+}
+
+fn sum_pair<T: Summable>(value: T) -> i32 {
+  return value.sum()
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let a = sum_pair<Pair>(Pair { left: 4, right: 6 })
+  let b = sum_pair<Pair>(Pair { left: 1, right: 2 })
+  c.assert(a == 4)
+  c.assert(b == 1)
+  return 0
+}

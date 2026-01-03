@@ -57,6 +57,8 @@ pub enum TokenKind {
     Enum,
     #[token("impl")]
     Impl,
+    #[token("trait")]
+    Trait,
     #[token("opaque")]
     Opaque,
     #[token("capability")]
@@ -88,6 +90,14 @@ pub enum TokenKind {
     AndAnd,
     #[token("||")]
     OrOr,
+    #[token("|")]
+    Pipe,
+    #[token("^")]
+    Caret,
+    #[token("<<")]
+    Shl,
+    #[token(">>")]
+    Shr,
     #[token("&")]
     Ampersand,
 
@@ -99,6 +109,8 @@ pub enum TokenKind {
     Star,
     #[token("/")]
     Slash,
+    #[token("%")]
+    Percent,
     #[token("=")]
     Eq,
     #[token("<")]
@@ -107,6 +119,8 @@ pub enum TokenKind {
     Gt,
     #[token("!")]
     Bang,
+    #[token("~")]
+    Tilde,
     #[token("?")]
     Question,
 

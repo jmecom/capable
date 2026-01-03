@@ -42,6 +42,7 @@ struct MonoCtx {
     externs: HashMap<String, HirExternFunction>,
     structs: HashMap<String, HirStruct>,
     enums: HashMap<String, HirEnum>,
+    trait_impls: Vec<HirTraitImpl>,
     out_modules: HashMap<String, ModuleOut>,
     generated_functions: HashSet<String>,
     generated_externs: HashSet<String>,
@@ -95,12 +96,14 @@ impl MonoCtx {
             register_module(module);
         }
 
+        let trait_impls = program.trait_impls.clone();
         Ok(Self {
             program,
             functions,
             externs,
             structs,
             enums,
+            trait_impls,
             out_modules,
             generated_functions: HashSet::new(),
             generated_externs: HashSet::new(),
@@ -219,6 +222,7 @@ impl MonoCtx {
             entry: entry.into(),
             user_modules: user_modules.into_iter().map(Into::into).collect(),
             stdlib: stdlib.into_iter().map(Into::into).collect(),
+            trait_impls: self.program.trait_impls,
         }
     }
 
@@ -524,6 +528,66 @@ impl MonoCtx {
                         return Ok(HirExpr::Call(HirCall {
                             callee: ResolvedCallee::Intrinsic(*id),
                             type_args: Vec::new(),
+                            args,
+                            ret_ty,
+                            span: call.span,
+                        }));
+                    }
+                    ResolvedCallee::TraitMethod { trait_name, method } => {
+                        if args.is_empty() {
+                            return Err(TypeError::new(
+                                "trait method call missing receiver".to_string(),
+                                DUMMY_SPAN,
+                            ));
+                        }
+                        let actual = &args[0].ty().ty;
+                        let mut matches = Vec::new();
+                        for impl_info in &self.trait_impls {
+                            if &impl_info.trait_name != trait_name {
+                                continue;
+                            }
+                            let mut inferred = HashMap::new();
+                            if match_type_params(&impl_info.target_ty, actual, &mut inferred, DUMMY_SPAN).is_ok() {
+                                matches.push(impl_info.clone());
+                            }
+                        }
+                        if matches.is_empty() {
+                            return Err(TypeError::new(
+                                format!("no impl found for `{trait_name}`"),
+                                DUMMY_SPAN,
+                            ));
+                        }
+                        if matches.len() > 1 {
+                            return Err(TypeError::new(
+                                format!("ambiguous impl for `{trait_name}`"),
+                                DUMMY_SPAN,
+                            ));
+                        }
+                        let impl_info = matches.remove(0);
+                        let method_name =
+                            super::trait_method_name(trait_name, &impl_info.type_name, method);
+                        let key = qualify(&impl_info.module, &method_name);
+                        let Some(func) = self.functions.get(&key).cloned() else {
+                            return Err(TypeError::new(
+                                format!("unknown function `{}`", key),
+                                DUMMY_SPAN,
+                            ));
+                        };
+                        let (new_name, symbol, type_args) = self.mono_callee(
+                            &impl_info.module,
+                            &func,
+                            &call.args,
+                            &call.type_args,
+                            subs,
+                        )?;
+                        let callee = ResolvedCallee::Function {
+                            module: impl_info.module,
+                            name: new_name,
+                            symbol,
+                        };
+                        return Ok(HirExpr::Call(HirCall {
+                            callee,
+                            type_args,
                             args,
                             ret_ty,
                             span: call.span,

@@ -17,10 +17,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::error::TypeError;
-use crate::hir::HirModule;
+use crate::hir::{HirModule, HirTraitImpl};
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 7] = [
-    "i32", "i64", "u32", "u8", "bool", "unit", "never",
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
+    "i32", "i64", "u32", "u8", "bool", "unit", "never", "Self",
 ];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
@@ -36,46 +36,66 @@ pub enum Ty {
     Param(String),
 }
 
-pub(super) fn build_type_params(params: &[Ident]) -> Result<HashSet<String>, TypeError> {
+pub(super) fn build_type_params(params: &[TypeParam]) -> Result<HashSet<String>, TypeError> {
     let mut set = HashSet::new();
     for param in params {
-        let name = param.item.as_str();
+        let name = param.name.item.as_str();
         if RESERVED_TYPE_PARAMS.contains(&name) {
             return Err(TypeError::new(
-                format!("type parameter `{}` is reserved", param.item),
-                param.span,
+                format!("type parameter `{}` is reserved", param.name.item),
+                param.name.span,
             ));
         }
-        if !set.insert(param.item.clone()) {
+        if !set.insert(param.name.item.clone()) {
             return Err(TypeError::new(
-                format!("duplicate type parameter `{}`", param.item),
-                param.span,
+                format!("duplicate type parameter `{}`", param.name.item),
+                param.name.span,
             ));
         }
     }
     Ok(set)
 }
 
+fn build_type_param_bounds(
+    params: &[TypeParam],
+    use_map: &UseMap,
+    module_name: &str,
+) -> HashMap<String, Vec<String>> {
+    let mut bounds = HashMap::new();
+    for param in params {
+        let mut resolved = Vec::new();
+        for bound in &param.bounds {
+            resolved.push(resolve_trait_name(bound, use_map, module_name));
+        }
+        bounds.insert(param.name.item.clone(), resolved);
+    }
+    bounds
+}
+
+pub(super) fn type_param_names(params: &[TypeParam]) -> Vec<String> {
+    params.iter().map(|param| param.name.item.clone()).collect()
+}
+
 fn merge_type_params(
     base: &HashSet<String>,
-    params: &[Ident],
+    params: &[TypeParam],
 ) -> Result<HashSet<String>, TypeError> {
     let mut set = base.clone();
     for param in params {
-        let name = param.item.as_str();
+        let name = param.name.item.as_str();
         if RESERVED_TYPE_PARAMS.contains(&name) {
             return Err(TypeError::new(
-                format!("type parameter `{}` is reserved", param.item),
-                param.span,
+                format!("type parameter `{}` is reserved", param.name.item),
+                param.name.span,
             ));
         }
-        if set.contains(&param.item) {
+        if set.contains(&param.name.item) {
             return Err(TypeError::new(
-                format!("duplicate type parameter `{}`", param.item),
-                param.span,
+                format!("duplicate type parameter `{}`", param.name.item),
+                param.name.span,
             ));
         }
-        set.insert(param.item.clone());
+        set.insert(param.name.item.clone());
     }
     Ok(set)
 }
@@ -143,10 +163,48 @@ type FunctionTypeTables = HashMap<String, TypeTable>;
 #[derive(Debug, Clone)]
 struct FunctionSig {
     type_params: Vec<String>,
+    type_param_bounds: HashMap<String, Vec<String>>,
     params: Vec<Ty>,
     ret: Ty,
     module: String,
     is_pub: bool,
+}
+
+/// Metadata about a trait declaration.
+#[derive(Debug, Clone)]
+pub(super) struct TraitInfo {
+    #[allow(dead_code)]
+    type_params: Vec<String>,
+    methods: HashMap<String, FunctionSig>,
+    module: String,
+    is_pub: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct TraitImplInfo {
+    trait_name: String,
+    type_name: String,
+    type_params: Vec<String>,
+    target_ty: Ty,
+    module: String,
+}
+
+fn trait_method_name(trait_name: &str, type_name: &str, method: &str) -> String {
+    let trait_part = trait_name.replace('.', "_");
+    format!("trait__{trait_part}__{type_name}__{method}")
+}
+
+fn substitute_self(ty: &Ty, target: &Ty) -> Ty {
+    match ty {
+        Ty::Param(name) if name == "Self" => target.clone(),
+        Ty::Ptr(inner) => Ty::Ptr(Box::new(substitute_self(inner, target))),
+        Ty::Ref(inner) => Ty::Ref(Box::new(substitute_self(inner, target))),
+        Ty::Path(name, args) => Ty::Path(
+            name.clone(),
+            args.iter().map(|arg| substitute_self(arg, target)).collect(),
+        ),
+        Ty::Builtin(_) | Ty::Param(_) => ty.clone(),
+    }
 }
 
 /// Metadata about a struct needed by the type checker.
@@ -502,7 +560,10 @@ fn resolve_impl_target(
                 ));
             }
         }
-        Ty::Builtin(BuiltinType::U8) => ("sys.bytes".to_string(), "u8".to_string()),
+        Ty::Builtin(BuiltinType::I32) => (module_name.to_string(), "i32".to_string()),
+        Ty::Builtin(BuiltinType::U32) => (module_name.to_string(), "u32".to_string()),
+        Ty::Builtin(BuiltinType::U8) => (module_name.to_string(), "u8".to_string()),
+        Ty::Builtin(BuiltinType::Bool) => (module_name.to_string(), "bool".to_string()),
         _ => {
             return Err(TypeError::new(
                 "impl target must be a struct or enum type name".to_string(),
@@ -600,7 +661,7 @@ fn desugar_impl_method(
     type_name: &str,
     method: &Function,
     params: Vec<Param>,
-    type_params: Vec<Ident>,
+    type_params: Vec<TypeParam>,
 ) -> Function {
     let name = Spanned::new(
         format!("{type_name}__{}", method.name.item),
@@ -625,6 +686,7 @@ fn desugar_impl_methods(
     stdlib: &StdlibIndex,
     struct_map: &HashMap<String, StructInfo>,
     enum_map: &HashMap<String, EnumInfo>,
+    trait_map: &HashMap<String, TraitInfo>,
 ) -> Result<Vec<Function>, TypeError> {
     let impl_type_params = build_type_params(&impl_block.type_params)?;
     let (_impl_module, type_name, target_ty) = resolve_impl_target(
@@ -637,12 +699,36 @@ fn desugar_impl_methods(
         module_name,
         impl_block.span,
     )?;
+    let trait_name = impl_block
+        .trait_path
+        .as_ref()
+        .map(|path| resolve_trait_name(path, use_map, module_name));
+    if let Some(trait_name) = &trait_name {
+        let Some(trait_info) = trait_map.get(trait_name) else {
+            return Err(TypeError::new(
+                format!("unknown trait `{trait_name}`"),
+                impl_block.span,
+            ));
+        };
+        if trait_info.module != module_name && !trait_info.is_pub {
+            return Err(TypeError::new(
+                format!("trait `{trait_name}` is private"),
+                impl_block.span,
+            ));
+        }
+    }
     let mut method_names = std::collections::HashSet::new();
     let mut methods = Vec::with_capacity(impl_block.methods.len());
     for method in &impl_block.methods {
         if !method_names.insert(method.name.item.clone()) {
             return Err(TypeError::new(
                 format!("duplicate method `{}` in impl block", method.name.item),
+                method.name.span,
+            ));
+        }
+        if trait_name.is_some() && !method.type_params.is_empty() {
+            return Err(TypeError::new(
+                "trait impl methods cannot declare type parameters".to_string(),
                 method.name.span,
             ));
         }
@@ -662,12 +748,102 @@ fn desugar_impl_methods(
             &method_type_params,
             method.span,
         )?;
-        methods.push(desugar_impl_method(
-            &type_name,
-            method,
-            params,
-            combined_type_params,
-        ));
+        if let Some(trait_name) = &trait_name {
+            let trait_info = trait_map
+                .get(trait_name)
+                .expect("trait already validated");
+            let trait_method = trait_info
+                .methods
+                .get(&method.name.item)
+                .ok_or_else(|| {
+                    TypeError::new(
+                        format!(
+                            "method `{}` is not declared in trait `{trait_name}`",
+                            method.name.item
+                        ),
+                        method.name.span,
+                    )
+                })?;
+            let mut lowered_params = Vec::new();
+            for param in &params {
+                let Some(ty) = &param.ty else {
+                    return Err(TypeError::new(
+                        format!("parameter `{}` requires a type annotation", param.name.item),
+                        param.name.span,
+                    ));
+                };
+                lowered_params.push(lower_type(ty, use_map, stdlib, &method_type_params)?);
+            }
+            let lowered_ret = lower_type(&method.ret, use_map, stdlib, &method_type_params)?;
+            let mut expected_params = Vec::new();
+            for ty in &trait_method.params {
+                expected_params.push(substitute_self(ty, &target_ty));
+            }
+            let expected_ret = substitute_self(&trait_method.ret, &target_ty);
+            if lowered_params.len() != expected_params.len() {
+                return Err(TypeError::new(
+                    format!(
+                        "method `{}` has wrong arity for trait `{trait_name}`",
+                        method.name.item
+                    ),
+                    method.name.span,
+                ));
+            }
+            for (actual, expected) in lowered_params.iter().zip(expected_params.iter()) {
+                if actual != expected {
+                    return Err(TypeError::new(
+                        format!(
+                            "method `{}` has wrong parameter type for trait `{trait_name}`",
+                            method.name.item
+                        ),
+                        method.name.span,
+                    ));
+                }
+            }
+            if lowered_ret != expected_ret {
+                return Err(TypeError::new(
+                    format!(
+                        "method `{}` has wrong return type for trait `{trait_name}`",
+                        method.name.item
+                    ),
+                    method.name.span,
+                ));
+            }
+            let name = Spanned::new(
+                trait_method_name(trait_name, &type_name, &method.name.item),
+                method.name.span,
+            );
+            methods.push(Function {
+                name,
+                type_params: combined_type_params,
+                params,
+                ret: method.ret.clone(),
+                body: method.body.clone(),
+                is_pub: method.is_pub,
+                doc: method.doc.clone(),
+                span: method.span,
+            });
+        } else {
+            methods.push(desugar_impl_method(
+                &type_name,
+                method,
+                params,
+                combined_type_params,
+            ));
+        }
+    }
+    if let Some(trait_name) = &trait_name {
+        let trait_info = trait_map
+            .get(trait_name)
+            .expect("trait already validated");
+        for name in trait_info.methods.keys() {
+            if !method_names.contains(name) {
+                return Err(TypeError::new(
+                    format!("missing method `{name}` for trait `{trait_name}`"),
+                    impl_block.span,
+                ));
+            }
+        }
     }
     Ok(methods)
 }
@@ -813,6 +989,14 @@ fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> Str
         if let Some(full) = stdlib.types.get(&resolved[0]) {
             return full.clone();
         }
+    }
+    resolved.join(".")
+}
+
+fn resolve_trait_name(path: &Path, use_map: &UseMap, module_name: &str) -> String {
+    let resolved = resolve_path(path, use_map);
+    if resolved.len() == 1 {
+        return format!("{module_name}.{}", resolved[0]);
     }
     resolved.join(".")
 }
@@ -1082,6 +1266,16 @@ pub fn type_check_program(
         .map_err(|err| err.with_context("while collecting structs"))?;
     let enum_map = collect::collect_enums(&modules, &module_name, &stdlib_index)
         .map_err(|err| err.with_context("while collecting enums"))?;
+    let trait_map = collect::collect_traits(&modules, &stdlib_index)
+        .map_err(|err| err.with_context("while collecting traits"))?;
+    let trait_impls = collect::collect_trait_impls(
+        &modules,
+        &stdlib_index,
+        &struct_map,
+        &enum_map,
+        &trait_map,
+    )
+    .map_err(|err| err.with_context("while collecting trait impls"))?;
     collect::validate_type_defs(&modules, &stdlib_index, &struct_map, &enum_map)
         .map_err(|err| err.with_context("while validating type arguments"))?;
     collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)
@@ -1092,6 +1286,7 @@ pub fn type_check_program(
         &stdlib_index,
         &struct_map,
         &enum_map,
+        &trait_map,
     )
         .map_err(|err| err.with_context("while collecting functions"))?;
 
@@ -1107,6 +1302,8 @@ pub fn type_check_program(
                     check::check_function(
                         func,
                         &functions,
+                        &trait_map,
+                        &trait_impls,
                         &module_use,
                         &struct_map,
                         &enum_map,
@@ -1125,12 +1322,15 @@ pub fn type_check_program(
                         &stdlib_index,
                         &struct_map,
                         &enum_map,
+                        &trait_map,
                     )?;
                     for method in methods {
                         let mut table = TypeTable::default();
                         check::check_function(
                             &method,
                             &functions,
+                            &trait_map,
+                            &trait_impls,
                             &module_use,
                             &struct_map,
                             &enum_map,
@@ -1162,6 +1362,8 @@ pub fn type_check_program(
                 &functions,
                 &struct_map,
                 &enum_map,
+                &trait_map,
+                &trait_impls,
                 &use_map,
                 &stdlib_index,
                 Some(&type_tables),
@@ -1180,6 +1382,8 @@ pub fn type_check_program(
                 &functions,
                 &struct_map,
                 &enum_map,
+                &trait_map,
+                &trait_impls,
                 &use_map,
                 &stdlib_index,
                 Some(&type_tables),
@@ -1194,6 +1398,8 @@ pub fn type_check_program(
         &functions,
         &struct_map,
         &enum_map,
+        &trait_map,
+        &trait_impls,
         &use_map,
         &stdlib_index,
         Some(&type_tables),
@@ -1201,10 +1407,22 @@ pub fn type_check_program(
     )
     .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
 
+    let hir_trait_impls: Vec<HirTraitImpl> = trait_impls
+        .iter()
+        .map(|info| HirTraitImpl {
+            trait_name: info.trait_name.clone(),
+            type_name: info.type_name.clone(),
+            type_params: info.type_params.clone(),
+            target_ty: info.target_ty.clone(),
+            module: info.module.clone(),
+        })
+        .collect();
+
     let hir_program = crate::hir::HirProgram {
         entry: hir_entry,
         user_modules: hir_user_modules?,
         stdlib: hir_stdlib?,
+        trait_impls: hir_trait_impls,
     };
     monomorphize::monomorphize_program(hir_program)
 }

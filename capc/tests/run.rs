@@ -1115,3 +1115,44 @@ fn run_for_forever() {
     assert_eq!(code, 0);
     assert!(stdout.contains("0\n1\n2\nfor_forever ok\n"), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_trait_basic() {
+    let out_dir = make_out_dir("trait_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, _stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/trait_basic.cap",
+    ]);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn run_trait_eq_hash() {
+    let out_dir = make_out_dir("trait_eq_hash");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/trait_eq_hash.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("Eq and Hash traits work correctly!"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_hashmap_demo() {
+    let out_dir = make_out_dir("hashmap_demo");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "examples/hashmap_demo/hashmap_demo.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("=== Demo Complete ==="), "stdout was: {stdout:?}");
+}

@@ -26,6 +26,12 @@ impl<T> Spanned<T> {
 
 pub type Ident = Spanned<String>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeParam {
+    pub name: Ident,
+    pub bounds: Vec<Path>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageSafety {
     Safe,
@@ -53,13 +59,14 @@ pub enum Item {
     ExternFunction(ExternFunction),
     Struct(StructDecl),
     Enum(EnumDecl),
+    Trait(TraitDecl),
     Impl(ImplBlock),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: Ident,
-    pub type_params: Vec<Ident>,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub ret: Type,
     pub body: Block,
@@ -71,7 +78,7 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternFunction {
     pub name: Ident,
-    pub type_params: Vec<Ident>,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub ret: Type,
     pub is_pub: bool,
@@ -80,8 +87,29 @@ pub struct ExternFunction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitDecl {
+    pub name: Ident,
+    pub type_params: Vec<TypeParam>,
+    pub methods: Vec<TraitMethod>,
+    pub is_pub: bool,
+    pub doc: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitMethod {
+    pub name: Ident,
+    pub type_params: Vec<TypeParam>,
+    pub params: Vec<Param>,
+    pub ret: Type,
+    pub doc: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImplBlock {
-    pub type_params: Vec<Ident>,
+    pub type_params: Vec<TypeParam>,
+    pub trait_path: Option<Path>,
     pub target: Type,
     pub methods: Vec<Function>,
     pub doc: Option<String>,
@@ -97,7 +125,7 @@ pub struct Param {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructDecl {
     pub name: Ident,
-    pub type_params: Vec<Ident>,
+    pub type_params: Vec<TypeParam>,
     pub fields: Vec<Field>,
     pub is_pub: bool,
     pub is_opaque: bool,
@@ -111,7 +139,7 @@ pub struct StructDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDecl {
     pub name: Ident,
-    pub type_params: Vec<Ident>,
+    pub type_params: Vec<TypeParam>,
     pub variants: Vec<EnumVariant>,
     pub is_pub: bool,
     pub doc: Option<String>,
@@ -349,6 +377,7 @@ pub struct UnaryExpr {
 pub enum UnaryOp {
     Neg,
     Not,
+    BitNot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -371,6 +400,12 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
     Eq,
     Neq,
     Lt,

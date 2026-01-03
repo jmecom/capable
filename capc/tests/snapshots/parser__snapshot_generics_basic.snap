@@ -88,12 +88,15 @@ Module {
                     },
                 },
                 type_params: [
-                    Spanned {
-                        item: "T",
-                        span: Span {
-                            start: 80,
-                            end: 81,
+                    TypeParam {
+                        name: Spanned {
+                            item: "T",
+                            span: Span {
+                                start: 80,
+                                end: 81,
+                            },
                         },
+                        bounds: [],
                     },
                 ],
                 fields: [
@@ -151,12 +154,15 @@ Module {
                     },
                 },
                 type_params: [
-                    Spanned {
-                        item: "T",
-                        span: Span {
-                            start: 106,
-                            end: 107,
+                    TypeParam {
+                        name: Spanned {
+                            item: "T",
+                            span: Span {
+                                start: 106,
+                                end: 107,
+                            },
                         },
+                        bounds: [],
                     },
                 ],
                 params: [

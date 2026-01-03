@@ -13,8 +13,9 @@ use crate::hir::{
 };
 
 use super::{
-    build_type_params, check, function_key, lower_type, resolve_enum_variant, resolve_method_target,
-    resolve_type_name, EnumInfo, FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo,
+    build_type_param_bounds, build_type_params, check, function_key, lower_type,
+    resolve_enum_variant, resolve_method_target, resolve_type_name, type_param_names, EnumInfo,
+    FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo, TraitImplInfo, TraitInfo,
     Ty, TypeTable, UseMap,
 };
 
@@ -23,6 +24,8 @@ struct LoweringCtx<'a> {
     functions: &'a HashMap<String, FunctionSig>,
     structs: &'a HashMap<String, StructInfo>,
     enums: &'a HashMap<String, EnumInfo>,
+    traits: &'a HashMap<String, TraitInfo>,
+    trait_impls: &'a [TraitImplInfo],
     use_map: &'a UseMap,
     stdlib: &'a StdlibIndex,
     module_name: &'a str,
@@ -35,6 +38,7 @@ struct LoweringCtx<'a> {
     local_types: HashMap<String, Ty>,
     local_counter: usize,
     type_params: HashSet<String>,
+    type_param_bounds: HashMap<String, Vec<String>>,
 }
 
 impl<'a> LoweringCtx<'a> {
@@ -42,6 +46,8 @@ impl<'a> LoweringCtx<'a> {
         functions: &'a HashMap<String, FunctionSig>,
         structs: &'a HashMap<String, StructInfo>,
         enums: &'a HashMap<String, EnumInfo>,
+        traits: &'a HashMap<String, TraitInfo>,
+        trait_impls: &'a [TraitImplInfo],
         use_map: &'a UseMap,
         stdlib: &'a StdlibIndex,
         module_name: &'a str,
@@ -52,6 +58,8 @@ impl<'a> LoweringCtx<'a> {
             functions,
             structs,
             enums,
+            traits,
+            trait_impls,
             use_map,
             stdlib,
             module_name,
@@ -62,6 +70,7 @@ impl<'a> LoweringCtx<'a> {
             local_types: HashMap::new(),
             local_counter: 0,
             type_params: HashSet::new(),
+            type_param_bounds: HashMap::new(),
         }
     }
 
@@ -92,6 +101,8 @@ pub(super) fn lower_module(
     functions: &HashMap<String, FunctionSig>,
     structs: &HashMap<String, StructInfo>,
     enums: &HashMap<String, EnumInfo>,
+    traits: &HashMap<String, TraitInfo>,
+    trait_impls: &[TraitImplInfo],
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     type_tables: Option<&FunctionTypeTables>,
@@ -102,6 +113,8 @@ pub(super) fn lower_module(
         functions,
         structs,
         enums,
+        traits,
+        trait_impls,
         use_map,
         stdlib,
         &module_name,
@@ -125,6 +138,7 @@ pub(super) fn lower_module(
                     stdlib,
                     structs,
                     enums,
+                    traits,
                 )?;
                 for method in methods {
                     let hir_func = lower_function(&method, &mut ctx)?;
@@ -152,7 +166,7 @@ pub(super) fn lower_module(
                     .collect();
                 hir_extern_functions.push(HirExternFunction {
                     name: func.name.item.clone(),
-                    type_params: func.type_params.iter().map(|p| p.item.clone()).collect(),
+                    type_params: type_param_names(&func.type_params),
                     params: params?,
                     ret_ty: {
                         let lowered = lower_type(&func.ret, use_map, stdlib, &type_params)?;
@@ -181,7 +195,7 @@ pub(super) fn lower_module(
                 .collect();
             hir_structs.push(HirStruct {
                 name: decl.name.item.clone(),
-                type_params: decl.type_params.iter().map(|p| p.item.clone()).collect(),
+                type_params: type_param_names(&decl.type_params),
                 fields: fields?,
                 is_opaque: decl.is_opaque || decl.is_capability,
             });
@@ -212,7 +226,7 @@ pub(super) fn lower_module(
                 .collect();
             hir_enums.push(HirEnum {
                 name: decl.name.item.clone(),
-                type_params: decl.type_params.iter().map(|p| p.item.clone()).collect(),
+                type_params: type_param_names(&decl.type_params),
                 variants: variants?,
             });
         }
@@ -237,6 +251,8 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         .and_then(|tables| tables.get(&function_key(ctx.module_name, &func.name.item)));
     let type_params = build_type_params(&func.type_params)?;
     ctx.type_params = type_params.clone();
+    ctx.type_param_bounds =
+        build_type_param_bounds(&func.type_params, ctx.use_map, ctx.module_name);
 
     let params: Result<Vec<HirParam>, TypeError> = func
         .params
@@ -265,7 +281,7 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
 
     Ok(HirFunction {
         name: func.name.item.clone(),
-        type_params: func.type_params.iter().map(|p| p.item.clone()).collect(),
+        type_params: type_param_names(&func.type_params),
         params,
         ret_ty: hir_ret_ty,
         body,
@@ -478,6 +494,64 @@ fn lower_defer_stmt(
 
             let receiver = capture_defer_expr(&method_call.receiver, ctx, ret_ty, &mut stmts)?;
             let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let receiver_base = match &receiver_ty {
+                Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+                _ => &receiver_ty,
+            };
+            if let Ty::Param(param_name) = receiver_base {
+                let bounds = ctx
+                    .type_param_bounds
+                    .get(param_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut candidates = Vec::new();
+                for bound in bounds {
+                    if let Some(info) = ctx.traits.get(&bound) {
+                        if info.methods.contains_key(&method_call.method.item) {
+                            candidates.push(bound);
+                        }
+                    }
+                }
+                if candidates.is_empty() {
+                    return Err(TypeError::new(
+                        format!(
+                            "no trait bound provides method `{}` for `{}`",
+                            method_call.method.item, param_name
+                        ),
+                        method_call.span,
+                    ));
+                }
+                if candidates.len() > 1 {
+                    return Err(TypeError::new(
+                        format!(
+                            "ambiguous method `{}` for `{}`; multiple trait bounds apply",
+                            method_call.method.item, param_name
+                        ),
+                        method_call.span,
+                    ));
+                }
+                let trait_name = candidates.remove(0);
+                let mut args = Vec::with_capacity(method_call.args.len() + 1);
+                args.push(receiver);
+                for arg in &method_call.args {
+                    args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
+                }
+                let deferred = HirExpr::Call(HirCall {
+                    callee: ResolvedCallee::TraitMethod {
+                        trait_name,
+                        method: method_call.method.item.clone(),
+                    },
+                    type_args: lower_call_type_args(&method_call.type_args, ctx)?,
+                    args,
+                    ret_ty: hir_ret_ty,
+                    span: method_call.span,
+                });
+                stmts.push(HirStmt::Defer(HirDeferStmt {
+                    expr: deferred,
+                    span: defer_stmt.span,
+                }));
+                return Ok(stmts);
+            }
             let (method_module, type_name, _) = resolve_method_target(
                 &receiver_ty,
                 ctx.module_name,
@@ -609,6 +683,8 @@ fn type_of_ast_expr(
     check::check_expr(
         expr,
         ctx.functions,
+        ctx.traits,
+        ctx.trait_impls,
         &mut scopes,
         super::UseMode::Read,
         &mut recorder,
@@ -619,6 +695,7 @@ fn type_of_ast_expr(
         ret_ty,
         ctx.module_name,
         &type_params,
+        &ctx.type_param_bounds,
     )
 }
 
@@ -883,6 +960,59 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
             let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let receiver_base = match &receiver_ty {
+                Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
+                _ => &receiver_ty,
+            };
+            if let Ty::Param(param_name) = receiver_base {
+                let bounds = ctx
+                    .type_param_bounds
+                    .get(param_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut candidates = Vec::new();
+                for bound in bounds {
+                    if let Some(info) = ctx.traits.get(&bound) {
+                        if info.methods.contains_key(&method_call.method.item) {
+                            candidates.push(bound);
+                        }
+                    }
+                }
+                if candidates.is_empty() {
+                    return Err(TypeError::new(
+                        format!(
+                            "no trait bound provides method `{}` for `{}`",
+                            method_call.method.item, param_name
+                        ),
+                        method_call.span,
+                    ));
+                }
+                if candidates.len() > 1 {
+                    return Err(TypeError::new(
+                        format!(
+                            "ambiguous method `{}` for `{}`; multiple trait bounds apply",
+                            method_call.method.item, param_name
+                        ),
+                        method_call.span,
+                    ));
+                }
+                let trait_name = candidates.remove(0);
+                let mut args = Vec::with_capacity(method_call.args.len() + 1);
+                args.push(receiver);
+                for arg in &method_call.args {
+                    args.push(lower_expr(arg, ctx, ret_ty)?);
+                }
+                return Ok(HirExpr::Call(HirCall {
+                    callee: ResolvedCallee::TraitMethod {
+                        trait_name,
+                        method: method_call.method.item.clone(),
+                    },
+                    type_args: lower_call_type_args(&method_call.type_args, ctx)?,
+                    args,
+                    ret_ty: hir_ty,
+                    span: method_call.span,
+                }));
+            }
             let (method_module, type_name, _) = resolve_method_target(
                 &receiver_ty,
                 ctx.module_name,
@@ -1277,6 +1407,8 @@ mod tests {
         let use_map = UseMap {
             aliases: HashMap::new(),
         };
+        let traits = HashMap::new();
+        let trait_impls = Vec::new();
         let stdlib = StdlibIndex {
             types: HashMap::new(),
         };
@@ -1284,6 +1416,8 @@ mod tests {
             &functions,
             &structs,
             &enums,
+            &traits,
+            &trait_impls,
             &use_map,
             &stdlib,
             "foo",
