@@ -1,0 +1,74 @@
+package safe
+module vec_custom_eq
+use sys::eq
+
+copy struct Entry {
+  key: i32,
+  value: i32
+}
+
+impl eq::Eq for Entry {
+  fn eq(self, other: Entry) -> bool {
+    return self.key == other.key && self.value == other.value
+  }
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+
+  // Test Vec<Entry> with custom Eq
+  let v = alloc.vec_new<Entry>()
+  match (v.push(Entry { key: 1, value: 10 })) {
+    Ok(_) => { }
+    Err(_) => { c.println("push failed"); return 1 }
+  }
+  match (v.push(Entry { key: 2, value: 20 })) {
+    Ok(_) => { }
+    Err(_) => { c.println("push failed"); return 1 }
+  }
+  match (v.push(Entry { key: 2, value: 20 })) {
+    Ok(_) => { }
+    Err(_) => { c.println("push failed"); return 1 }
+  }
+  match (v.push(Entry { key: 3, value: 30 })) {
+    Ok(_) => { }
+    Err(_) => { c.println("push failed"); return 1 }
+  }
+
+  // Test contains_eq
+  let target = Entry { key: 2, value: 20 }
+  c.assert(v.contains_eq(target))
+  c.assert(!v.contains_eq(Entry { key: 2, value: 99 }))
+  c.assert(!v.contains_eq(Entry { key: 99, value: 99 }))
+
+  // Test count_eq
+  c.assert(v.count_eq(target) == 2)
+  c.assert(v.count_eq(Entry { key: 1, value: 10 }) == 1)
+  c.assert(v.count_eq(Entry { key: 99, value: 99 }) == 0)
+
+  // Test index_of_eq
+  match (v.index_of_eq(Entry { key: 2, value: 20 })) {
+    Ok(idx) => { c.assert(idx == 1) }
+    Err(_) => { c.println("index_of_eq failed"); return 1 }
+  }
+  match (v.index_of_eq(Entry { key: 3, value: 30 })) {
+    Ok(idx) => { c.assert(idx == 3) }
+    Err(_) => { c.println("index_of_eq failed"); return 1 }
+  }
+
+  // Test last_index_of_eq
+  match (v.last_index_of_eq(Entry { key: 2, value: 20 })) {
+    Ok(idx) => { c.assert(idx == 2) }
+    Err(_) => { c.println("last_index_of_eq failed"); return 1 }
+  }
+
+  // Test filter_eq
+  let filtered = v.filter_eq(Entry { key: 2, value: 20 })
+  c.assert(filtered.len() == 2)
+  filtered.free()
+
+  v.free()
+  c.println("vec custom eq ok")
+  return 0
+}

@@ -5,6 +5,7 @@ package safe
 module sys::vec
 
 use sys::buffer
+use sys::eq
 use sys::string
 use sys::unsafe_ptr
 
@@ -450,6 +451,106 @@ impl<T> Vec<T> {
     free_elems(header.alloc, header.raw)
     free_elems(header.alloc, self.header)
     return ()
+  }
+}
+
+/// Equality-based Vec methods using Eq trait.
+/// These work with any type T that implements eq::Eq.
+impl<T: eq::Eq> Vec<T> {
+  /// True if the Vec contains value (uses .eq() trait method).
+  pub fn contains_eq(self, value: T) -> bool {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v.eq(value)) {
+            return true
+          }
+        }
+        Err(_) => { return false }
+      }
+      i = i + 1
+    }
+    return false
+  }
+
+  /// Count occurrences of value (uses .eq() trait method).
+  pub fn count_eq(self, value: T) -> i32 {
+    let len = self.len()
+    let i = 0
+    let out = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v.eq(value)) {
+            out = out + 1
+          }
+        }
+        Err(_) => { return out }
+      }
+      i = i + 1
+    }
+    return out
+  }
+
+  /// Find the first index of value (uses .eq() trait method).
+  pub fn index_of_eq(self, value: T) -> Result<i32, VecErr> {
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v.eq(value)) {
+            return Ok(i)
+          }
+        }
+        Err(_) => { return Err(VecErr::OutOfRange) }
+      }
+      i = i + 1
+    }
+    return Err(VecErr::OutOfRange)
+  }
+
+  /// Find the last index of value (uses .eq() trait method).
+  pub fn last_index_of_eq(self, value: T) -> Result<i32, VecErr> {
+    let len = self.len()
+    let i = len - 1
+    while (i >= 0) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v.eq(value)) {
+            return Ok(i)
+          }
+        }
+        Err(_) => { return Err(VecErr::OutOfRange) }
+      }
+      i = i - 1
+    }
+    return Err(VecErr::OutOfRange)
+  }
+
+  /// Filter elements equal to value (uses .eq() trait method).
+  pub fn filter_eq(self, value: T) -> Vec<T> {
+    let header = read_header<T>(self)
+    let out = new_with<T>(header.alloc)
+    let len = self.len()
+    let i = 0
+    while (i < len) {
+      match (self.get(i)) {
+        Ok(v) => {
+          if (v.eq(value)) {
+            match (out.push(v)) {
+              Ok(_) => { }
+              Err(_) => { panic() }
+            }
+          }
+        }
+        Err(_) => { return out }
+      }
+      i = i + 1
+    }
+    return out
   }
 }
 

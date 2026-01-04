@@ -36,6 +36,28 @@ pub enum Ty {
     Param(String),
 }
 
+/// Build type argument suffix for method names (e.g., "__u8" for Vec<u8>).
+/// This is used to distinguish type-specific impl methods from generic ones.
+pub(crate) fn build_type_arg_suffix(type_args: &[Ty]) -> String {
+    if type_args.is_empty() {
+        return String::new();
+    }
+    let args: Vec<String> = type_args
+        .iter()
+        .filter_map(|arg| match arg {
+            Ty::Builtin(b) => Some(format!("{:?}", b).to_lowercase()),
+            Ty::Path(name, _) => name.rsplit_once('.').map(|(_, t)| t.to_string()),
+            Ty::Param(_) => None, // Skip type params, only concrete types
+            _ => None,
+        })
+        .collect();
+    if args.is_empty() {
+        String::new()
+    } else {
+        format!("__{}", args.join("_"))
+    }
+}
+
 pub(super) fn build_type_params(params: &[TypeParam]) -> Result<HashSet<String>, TypeError> {
     let mut set = HashSet::new();
     for param in params {
@@ -523,22 +545,42 @@ fn resolve_impl_target(
 ) -> Result<(String, String, Ty), TypeError> {
     let target_ty = lower_type(target, use_map, stdlib, type_params)?;
     let (impl_module, type_name) = match &target_ty {
-        Ty::Path(target_name, _target_args) => {
+        Ty::Path(target_name, target_args) => {
+            // Build suffix for concrete type args (e.g., "__u8" for Vec<u8>)
+            let type_arg_suffix = if target_args.is_empty() {
+                String::new()
+            } else {
+                let args: Vec<String> = target_args
+                    .iter()
+                    .filter_map(|arg| match arg {
+                        Ty::Builtin(b) => Some(format!("{:?}", b).to_lowercase()),
+                        Ty::Path(name, _) => name.rsplit_once('.').map(|(_, t)| t.to_string()),
+                        Ty::Param(_) => None, // Skip type params, only concrete types
+                        _ => None,
+                    })
+                    .collect();
+                if args.is_empty() {
+                    String::new()
+                } else {
+                    format!("__{}", args.join("_"))
+                }
+            };
+
             // Check struct_map first
             if let Some(info) = struct_map.get(target_name) {
-                let type_name = target_name
+                let base_name = target_name
                     .rsplit_once('.')
                     .map(|(_, t)| t)
-                    .unwrap_or(target_name)
-                    .to_string();
+                    .unwrap_or(target_name);
+                let type_name = format!("{}{}", base_name, type_arg_suffix);
                 (info.module.clone(), type_name)
             // Check enum_map
             } else if enum_map.contains_key(target_name) {
-                let type_name = target_name
+                let base_name = target_name
                     .rsplit_once('.')
                     .map(|(_, t)| t)
-                    .unwrap_or(target_name)
-                    .to_string();
+                    .unwrap_or(target_name);
+                let type_name = format!("{}{}", base_name, type_arg_suffix);
                 let mod_part = target_name
                     .rsplit_once('.')
                     .map(|(m, _)| m)
@@ -548,11 +590,14 @@ fn resolve_impl_target(
                 let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
                     TypeError::new("invalid type path".to_string(), span)
                 })?;
-                (mod_part.to_string(), type_part.to_string())
+                let type_name = format!("{}{}", type_part, type_arg_suffix);
+                (mod_part.to_string(), type_name)
             } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
-                (info.module.clone(), target_name.clone())
+                let type_name = format!("{}{}", target_name, type_arg_suffix);
+                (info.module.clone(), type_name)
             } else if enum_map.contains_key(&format!("{module_name}.{target_name}")) {
-                (module_name.to_string(), target_name.clone())
+                let type_name = format!("{}{}", target_name, type_arg_suffix);
+                (module_name.to_string(), type_name)
             } else {
                 return Err(TypeError::new(
                     "impl target must be a struct or enum type name".to_string(),

@@ -552,15 +552,26 @@ fn lower_defer_stmt(
                 }));
                 return Ok(stmts);
             }
-            let (method_module, type_name, _) = resolve_method_target(
+            let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
                 ctx.module_name,
                 ctx.structs,
                 ctx.enums,
                 method_call.receiver.span(),
             )?;
-            let method_fn = format!("{type_name}__{}", method_call.method.item);
-            let key = format!("{method_module}.{method_fn}");
+
+            // Try type-specific method first (e.g., Slice__u8__at), fall back to base (Slice__at)
+            let type_arg_suffix = super::build_type_arg_suffix(&receiver_args);
+            let base_method_fn = format!("{type_name}__{}", method_call.method.item);
+            let specific_method_fn = format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
+            let qualified_specific = format!("{method_module}.{specific_method_fn}");
+            let qualified_base = format!("{method_module}.{base_method_fn}");
+
+            let (method_fn, key) = if !type_arg_suffix.is_empty() && ctx.functions.contains_key(&qualified_specific) {
+                (specific_method_fn, qualified_specific)
+            } else {
+                (base_method_fn, qualified_base)
+            };
             let symbol = format!("capable_{}", key.replace('.', "_"));
 
             let mut args = Vec::with_capacity(method_call.args.len() + 1);
@@ -1013,15 +1024,26 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                     span: method_call.span,
                 }));
             }
-            let (method_module, type_name, _) = resolve_method_target(
+            let (method_module, type_name, receiver_args) = resolve_method_target(
                 &receiver_ty,
                 ctx.module_name,
                 ctx.structs,
                 ctx.enums,
                 method_call.receiver.span(),
             )?;
-            let method_fn = format!("{type_name}__{}", method_call.method.item);
-            let key = format!("{method_module}.{method_fn}");
+
+            // Try type-specific method first (e.g., Slice__u8__at), fall back to base (Slice__at)
+            let type_arg_suffix = super::build_type_arg_suffix(&receiver_args);
+            let base_method_fn = format!("{type_name}__{}", method_call.method.item);
+            let specific_method_fn = format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
+            let qualified_specific = format!("{method_module}.{specific_method_fn}");
+            let qualified_base = format!("{method_module}.{base_method_fn}");
+
+            let (method_fn, key) = if !type_arg_suffix.is_empty() && ctx.functions.contains_key(&qualified_specific) {
+                (specific_method_fn, qualified_specific)
+            } else {
+                (base_method_fn, qualified_base)
+            };
             let symbol = format!("capable_{}", key.replace('.', "_"));
 
             let mut args = Vec::with_capacity(method_call.args.len() + 1);

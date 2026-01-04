@@ -2055,15 +2055,28 @@ pub(super) fn check_expr(
                 enum_map,
                 method_call.receiver.span(),
             )?;
-            let method_fn = format!("{type_name}__{}", method_call.method.item);
-            let qualified_key = format!("{method_module}.{method_fn}");
-            let key = if functions.contains_key(&qualified_key) {
-                qualified_key
-            } else if method_module == module_name && functions.contains_key(&method_fn) {
-                method_fn.clone()
+
+            // Build type-specific method name (e.g., Vec__u8__map_add for Vec<u8>.map_add())
+            let type_arg_suffix = super::build_type_arg_suffix(&receiver_args);
+
+            let base_method_fn = format!("{type_name}__{}", method_call.method.item);
+            let specific_method_fn = format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
+
+            // Try type-specific method first (e.g., Vec__u8__map_add), then generic (Vec__map_add)
+            let qualified_specific = format!("{method_module}.{specific_method_fn}");
+            let qualified_base = format!("{method_module}.{base_method_fn}");
+
+            let key = if !type_arg_suffix.is_empty() && functions.contains_key(&qualified_specific) {
+                qualified_specific
+            } else if functions.contains_key(&qualified_base) {
+                qualified_base
+            } else if method_module == module_name && !type_arg_suffix.is_empty() && functions.contains_key(&specific_method_fn) {
+                specific_method_fn.clone()
+            } else if method_module == module_name && functions.contains_key(&base_method_fn) {
+                base_method_fn.clone()
             } else {
                 return Err(TypeError::new(
-                    format!("unknown method `{qualified_key}`"),
+                    format!("unknown method `{qualified_base}`"),
                     method_call.span,
                 ));
             };
