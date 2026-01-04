@@ -213,7 +213,7 @@ fn enforce_vec_method_constraints(
                 ));
             }
         }
-        "filter" | "map_add" | "set" => {
+        "filter" | "map_add" => {
             if !is_u8 && !is_i32 {
                 return Err(TypeError::new(
                     format!("Vec<{elem:?}> does not support `{method}`"),
@@ -221,6 +221,8 @@ fn enforce_vec_method_constraints(
                 ));
             }
         }
+        // set works for any type
+        "set" => {}
         "join" => {
             if !is_string {
                 return Err(TypeError::new(

@@ -5,10 +5,7 @@
 /// - Trait definition and implementation
 /// - Trait bounds on generic functions
 /// - Using traits for polymorphic hashing
-///
-/// REMAINING LIMITATIONS:
-/// - Vec<T> only works with u8, i32, and string (no custom Entry structs)
-/// - We work around this by using parallel vectors for states/keys/values
+/// - Vec<CustomStruct> with custom Entry type
 ///
 /// The hash-map uses open addressing with linear probing.
 package safe
@@ -60,17 +57,57 @@ fn mod_i32(a: i32, b: i32) -> i32 {
   return a - quotient * b
 }
 
+/// Entry states
+copy struct EntryState {
+  /// 0=Empty, 1=Occupied, 2=Deleted
+  value: i32
+}
+
+fn empty_state() -> EntryState {
+  return EntryState { value: 0 }
+}
+
+fn occupied_state() -> EntryState {
+  return EntryState { value: 1 }
+}
+
+fn deleted_state() -> EntryState {
+  return EntryState { value: 2 }
+}
+
+fn is_empty(s: EntryState) -> bool {
+  return s.value == 0
+}
+
+fn is_occupied(s: EntryState) -> bool {
+  return s.value == 1
+}
+
+fn is_deleted(s: EntryState) -> bool {
+  return s.value == 2
+}
+
+/// A hash-map entry containing state, key, and value.
+copy struct Entry {
+  state: EntryState,
+  key: i32,
+  value: i32
+}
+
+/// Create an empty entry.
+fn empty_entry() -> Entry {
+  return Entry { state: empty_state(), key: 0, value: 0 }
+}
+
 /// A hash-map with i32 keys and i32 values.
-/// Uses parallel vectors for storage since Vec<Entry> isn't supported.
+/// Now uses Vec<Entry> instead of parallel vectors!
 copy struct HashMap {
-  /// Entry states: 0=Empty, 1=Occupied, 2=Deleted
-  states: Vec<i32>,
-  /// Keys
-  keys: Vec<i32>,
-  /// Values
-  values: Vec<i32>,
-  /// Metadata: [size, capacity]
-  meta: Vec<i32>,
+  /// All entries in a single vector
+  entries: Vec<Entry>,
+  /// Current size (number of occupied entries)
+  size: i32,
+  /// Capacity
+  capacity: i32,
   alloc: buffer::Alloc
 }
 
@@ -86,48 +123,32 @@ pub fn hashmap_new(alloc: buffer::Alloc, initial_capacity: i32) -> HashMap {
     cap = 8
   }
 
-  let states = alloc.vec_i32_new()
-  let keys = alloc.vec_i32_new()
-  let values = alloc.vec_i32_new()
-  let meta = alloc.vec_i32_new()
+  let entries = alloc.vec_new<Entry>()
 
-  // Initialize all entries as empty (state = 0)
+  // Initialize all entries as empty
   for i in 0..cap {
-    match (states.push(0)) { Ok(_) => {} Err(_) => { panic() } }
-    match (keys.push(0)) { Ok(_) => {} Err(_) => { panic() } }
-    match (values.push(0)) { Ok(_) => {} Err(_) => { panic() } }
+    match (entries.push(empty_entry())) {
+      Ok(_) => {}
+      Err(_) => { panic() }
+    }
   }
 
-  // Store metadata: [size, capacity]
-  match (meta.push(0)) { Ok(_) => {} Err(_) => { panic() } }
-  match (meta.push(cap)) { Ok(_) => {} Err(_) => { panic() } }
-
   return HashMap {
-    states: states,
-    keys: keys,
-    values: values,
-    meta: meta,
+    entries: entries,
+    size: 0,
+    capacity: cap,
     alloc: alloc
   }
 }
 
 /// Get the current size of the hash-map.
 fn hashmap_size(map: HashMap) -> i32 {
-  return map.meta[0].unwrap_or(0)
+  return map.size
 }
 
 /// Get the capacity of the hash-map.
 fn hashmap_capacity(map: HashMap) -> i32 {
-  return map.meta[1].unwrap_or(8)
-}
-
-/// Set the size of the hash-map.
-fn hashmap_set_size(map: HashMap, size: i32) -> unit {
-  match (map.meta.set(0, size)) {
-    Ok(_) => {}
-    Err(_) => {}
-  }
-  return ()
+  return map.capacity
 }
 
 /// Look up a value by key using the Hash trait.
@@ -139,27 +160,28 @@ pub fn hashmap_get(map: HashMap, key: i32) -> Result<i32, unit> {
   let start = index
 
   for {
-    let state = map.states[index].unwrap_or(0)
+    match (map.entries.get(index)) {
+      Ok(entry) => {
+        if (is_empty(entry.state)) {
+          // Empty - key not found
+          return Err(())
+        }
 
-    if (state == 0) {
-      // Empty - key not found
-      return Err(())
-    }
+        if (is_occupied(entry.state)) {
+          // Occupied - check if it's our key
+          if (entry.key == key) {
+            return Ok(entry.value)
+          }
+        }
 
-    if (state == 1) {
-      // Occupied - check if it's our key
-      let k = map.keys[index].unwrap_or(0)
-      if (k == key) {
-        let v = map.values[index].unwrap_or(0)
-        return Ok(v)
+        // Continue probing (either deleted or collision)
+        index = mod_i32(index + 1, cap)
+        if (index == start) {
+          // Wrapped around completely
+          return Err(())
+        }
       }
-    }
-
-    // Continue probing (either deleted or collision)
-    index = mod_i32(index + 1, cap)
-    if (index == start) {
-      // Wrapped around completely
-      return Err(())
+      Err(_) => { return Err(()) }
     }
   }
 
@@ -167,14 +189,14 @@ pub fn hashmap_get(map: HashMap, key: i32) -> Result<i32, unit> {
 }
 
 /// Insert or update a key-value pair.
-pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> bool {
+pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, unit> {
   let cap = hashmap_capacity(map)
   let size = hashmap_size(map)
 
   // Check load factor (keep below 70%)
   if (size * 10 >= cap * 7) {
     // Table too full
-    return false
+    return Err(())
   }
 
   // Use the Hash trait to compute the hash
@@ -184,103 +206,109 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> bool {
   let first_available = 0 - 1
 
   for {
-    let state = map.states[index].unwrap_or(0)
-
-    if (state == 0) {
-      // Empty slot found
-      if (first_available < 0) {
-        first_available = index
-      }
-      break
-    }
-
-    if (state == 2) {
-      // Deleted slot - remember it but keep looking for the key
-      if (first_available < 0) {
-        first_available = index
-      }
-    }
-
-    if (state == 1) {
-      // Occupied - check if it's the same key (update case)
-      let k = map.keys[index].unwrap_or(0)
-      if (k == key) {
-        // Update existing entry
-        match (map.values.set(index, value)) {
-          Ok(_) => {}
-          Err(_) => { return false }
+    match (map.entries.get(index)) {
+      Ok(entry) => {
+        if (is_empty(entry.state)) {
+          // Empty slot found
+          if (first_available < 0) {
+            first_available = index
+          }
+          break
         }
-        return true
-      }
-    }
 
-    index = mod_i32(index + 1, cap)
-    if (index == start) {
-      // Wrapped around
-      break
+        if (is_deleted(entry.state)) {
+          // Deleted slot - remember it but keep looking for the key
+          if (first_available < 0) {
+            first_available = index
+          }
+        }
+
+        if (is_occupied(entry.state)) {
+          // Occupied - check if it's the same key (update case)
+          if (entry.key == key) {
+            // Update existing entry
+            let new_entry = Entry { state: occupied_state(), key: key, value: value }
+            match (map.entries.set(index, new_entry)) {
+              Ok(_) => {}
+              Err(_) => { return Err(()) }
+            }
+            return Ok(map)
+          }
+        }
+
+        index = mod_i32(index + 1, cap)
+        if (index == start) {
+          // Wrapped around
+          break
+        }
+      }
+      Err(_) => { return Err(()) }
     }
   }
 
   if (first_available < 0) {
-    return false
+    return Err(())
   }
 
   // Insert at first available slot
-  match (map.states.set(first_available, 1)) {
+  let new_entry = Entry { state: occupied_state(), key: key, value: value }
+  match (map.entries.set(first_available, new_entry)) {
     Ok(_) => {}
-    Err(_) => { return false }
-  }
-  match (map.keys.set(first_available, key)) {
-    Ok(_) => {}
-    Err(_) => { return false }
-  }
-  match (map.values.set(first_available, value)) {
-    Ok(_) => {}
-    Err(_) => { return false }
+    Err(_) => { return Err(()) }
   }
 
-  hashmap_set_size(map, size + 1)
-  return true
+  return Ok(HashMap {
+    entries: map.entries,
+    size: size + 1,
+    capacity: cap,
+    alloc: map.alloc
+  })
 }
 
 /// Remove a key from the hash-map.
-pub fn hashmap_remove(map: HashMap, key: i32) -> bool {
+pub fn hashmap_remove(map: HashMap, key: i32) -> Result<HashMap, unit> {
   let cap = hashmap_capacity(map)
   let hash = compute_hash<i32>(key)
   let index = mod_i32(hash, cap)
   let start = index
 
   for {
-    let state = map.states[index].unwrap_or(0)
-
-    if (state == 0) {
-      // Empty - key not found
-      return false
-    }
-
-    if (state == 1) {
-      // Occupied - check if it's our key
-      let k = map.keys[index].unwrap_or(0)
-      if (k == key) {
-        // Mark as deleted
-        match (map.states.set(index, 2)) {
-          Ok(_) => {}
-          Err(_) => { return false }
+    match (map.entries.get(index)) {
+      Ok(entry) => {
+        if (is_empty(entry.state)) {
+          // Empty - key not found
+          return Err(())
         }
-        let size = hashmap_size(map)
-        hashmap_set_size(map, size - 1)
-        return true
-      }
-    }
 
-    // Continue probing
-    index = mod_i32(index + 1, cap)
-    if (index == start) {
-      return false
+        if (is_occupied(entry.state)) {
+          // Occupied - check if it's our key
+          if (entry.key == key) {
+            // Mark as deleted
+            let deleted_entry = Entry { state: deleted_state(), key: entry.key, value: entry.value }
+            match (map.entries.set(index, deleted_entry)) {
+              Ok(_) => {}
+              Err(_) => { return Err(()) }
+            }
+            return Ok(HashMap {
+              entries: map.entries,
+              size: map.size - 1,
+              capacity: cap,
+              alloc: map.alloc
+            })
+          }
+        }
+
+        // Continue probing
+        index = mod_i32(index + 1, cap)
+        if (index == start) {
+          return Err(())
+        }
+      }
+      Err(_) => { return Err(()) }
     }
   }
 
-  return false
+  return Err(())
 }
 
 /// Check if a key exists.
@@ -293,19 +321,17 @@ pub fn hashmap_contains(map: HashMap, key: i32) -> bool {
 
 /// Free the hash-map.
 pub fn hashmap_free(map: HashMap) -> unit {
-  map.states.free()
-  map.keys.free()
-  map.values.free()
-  map.meta.free()
+  map.entries.free()
   return ()
 }
 
 /// Demo: insert some values and look them up.
 fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
-  c.println("=== Hash-Map Demo (with Hash trait) ===")
+  c.println("=== Hash-Map Demo (with Hash trait and Vec<Entry>) ===")
   c.println("")
-  c.println("This demonstrates a hash-map using the Hash trait")
-  c.println("for polymorphic hashing of keys.")
+  c.println("This demonstrates a hash-map using:")
+  c.println("  - The Hash trait for polymorphic hashing")
+  c.println("  - Vec<Entry> for storing custom structs")
   c.println("")
 
   // Create a hash-map with capacity 16
@@ -348,17 +374,20 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   for i in 0..num_entries {
     let k = test_keys[i].unwrap_or(0)
     let v = test_vals[i].unwrap_or(0)
-    let ok = hashmap_insert(map, k, v)
-    if (ok) {
-      c.print("  insert(")
-      c.print_i32(k)
-      c.print(", ")
-      c.print_i32(v)
-      c.println(") = true")
-    } else {
-      c.print("  insert(")
-      c.print_i32(k)
-      c.println(") = false (failed)")
+    match (hashmap_insert(map, k, v)) {
+      Ok(new_map) => {
+        map = new_map
+        c.print("  insert(")
+        c.print_i32(k)
+        c.print(", ")
+        c.print_i32(v)
+        c.println(") = Ok")
+      }
+      Err(_) => {
+        c.print("  insert(")
+        c.print_i32(k)
+        c.println(") = Err (failed)")
+      }
     }
   }
 
@@ -390,7 +419,10 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   c.println("")
   c.println("Updating an entry...")
   c.println("  insert(42, 999) - updating existing key")
-  let updated = hashmap_insert(map, 42, 999)
+  match (hashmap_insert(map, 42, 999)) {
+    Ok(new_map) => { map = new_map }
+    Err(_) => {}
+  }
   c.print("  get(42) = ")
   match (hashmap_get(map, 42)) {
     Ok(v) => {
@@ -426,10 +458,14 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   c.println("")
   c.println("Removing entries...")
   c.print("  remove(17) = ")
-  if (hashmap_remove(map, 17)) {
-    c.println("true")
-  } else {
-    c.println("false")
+  match (hashmap_remove(map, 17)) {
+    Ok(new_map) => {
+      map = new_map
+      c.println("Ok")
+    }
+    Err(_) => {
+      c.println("Err")
+    }
   }
   c.print("  contains(17) = ")
   if (hashmap_contains(map, 17)) {
