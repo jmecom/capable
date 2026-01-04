@@ -1,0 +1,57 @@
+/// Test field access on borrowed self (borrow-lite).
+/// Regression test for: typechecker and codegen must unwrap Ty::Ref
+/// before resolving struct field access.
+package safe
+module borrow_field_access
+
+/// A simple struct to test field access.
+struct Pair {
+  left: i32,
+  right: i32
+}
+
+impl Pair {
+  /// Read-only method using borrow-lite.
+  pub fn sum(self: &Pair) -> i32 {
+    return self.left + self.right
+  }
+
+  /// Multiple field accesses in one method.
+  pub fn diff(self: &Pair) -> i32 {
+    return self.left - self.right
+  }
+}
+
+/// An affine (move-only) struct to verify borrow-lite works without copy.
+struct Counter {
+  value: i32
+}
+
+impl Counter {
+  pub fn get(self: &Counter) -> i32 {
+    return self.value
+  }
+}
+
+pub fn main() -> i32 {
+  // Test copy struct with borrow-lite
+  let p = Pair { left: 10, right: 3 }
+  let s = p.sum()
+  let d = p.diff()
+  // Can call multiple times since we borrow, not move
+  let s2 = p.sum()
+
+  if (s != 13) { return 1 }
+  if (d != 7) { return 2 }
+  if (s2 != 13) { return 3 }
+
+  // Test affine struct with borrow-lite
+  let c = Counter { value: 42 }
+  let v1 = c.get()
+  let v2 = c.get()  // Should work - borrow, not move
+
+  if (v1 != 42) { return 4 }
+  if (v2 != 42) { return 5 }
+
+  return 0
+}

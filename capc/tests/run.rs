@@ -1170,3 +1170,16 @@ fn run_hashmap_demo() {
     assert_eq!(code, 0);
     assert!(stdout.contains("=== Demo Complete ==="), "stdout was: {stdout:?}");
 }
+
+#[test]
+fn run_borrow_field_access() {
+    let out_dir = make_out_dir("borrow_field_access");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, _stdout, stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/borrow_field_access.cap",
+    ]);
+    assert_eq!(code, 0, "borrow field access failed: {stderr}");
+}
