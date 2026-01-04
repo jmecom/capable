@@ -6,6 +6,7 @@
 /// - Trait bounds on generic functions
 /// - Using traits for polymorphic hashing
 /// - Vec<CustomStruct> with custom Entry type
+/// - Proper tombstone handling and rehashing
 ///
 /// The hash-map uses open addressing with linear probing.
 package safe
@@ -26,17 +27,27 @@ trait Eq {
 }
 
 /// Hash implementation for i32.
+/// Uses bit mixing to avoid INT_MIN overflow issues.
 impl Hash for i32 {
   fn hash(self) -> i32 {
+    // Handle INT_MIN specially to avoid overflow on negation
+    // INT_MIN = -2147483648, and 0 - INT_MIN overflows
     let k = self
+    if (k == 0 - 2147483647 - 1) {
+      // INT_MIN: use a fixed hash value
+      return 2147483647
+    }
     if (k < 0) {
       k = 0 - k
     }
-    // Multiplicative hash
-    let h = k * 31 + k / 7 + k * 127
-    if (h < 0) {
-      h = 0 - h
-    }
+    // Multiplicative hash with overflow-safe mixing
+    // Use XOR to mix bits without risking sign issues
+    let h = k ^ (k / 16)
+    h = h * 31
+    h = h ^ (k / 256)
+    h = h * 127
+    // Ensure non-negative by masking off sign bit
+    h = h & 2147483647
     return h
   }
 }
@@ -100,12 +111,15 @@ fn empty_entry() -> Entry {
 }
 
 /// A hash-map with i32 keys and i32 values.
-/// Now uses Vec<Entry> instead of parallel vectors!
+/// Like Vec, this is copy (for borrow-lite) but semantically owned.
+/// Call hashmap_free() exactly once when done.
 copy struct HashMap {
   /// All entries in a single vector
   entries: Vec<Entry>,
   /// Current size (number of occupied entries)
   size: i32,
+  /// Number of deleted (tombstone) entries
+  deleted: i32,
   /// Capacity
   capacity: i32,
   alloc: buffer::Alloc
@@ -136,77 +150,174 @@ pub fn hashmap_new(alloc: buffer::Alloc, initial_capacity: i32) -> HashMap {
   return HashMap {
     entries: entries,
     size: 0,
+    deleted: 0,
     capacity: cap,
     alloc: alloc
   }
 }
 
-/// Get the current size of the hash-map.
-fn hashmap_size(map: HashMap) -> i32 {
-  return map.size
-}
+impl HashMap {
+  /// Get the current size of the hash-map.
+  pub fn size(self) -> i32 {
+    return self.size
+  }
 
-/// Get the capacity of the hash-map.
-fn hashmap_capacity(map: HashMap) -> i32 {
-  return map.capacity
-}
+  /// Get the capacity of the hash-map.
+  pub fn capacity(self) -> i32 {
+    return self.capacity
+  }
 
-/// Look up a value by key using the Hash trait.
-pub fn hashmap_get(map: HashMap, key: i32) -> Result<i32, unit> {
-  let cap = hashmap_capacity(map)
-  // Use the Hash trait to compute the hash
-  let hash = compute_hash<i32>(key)
-  let index = mod_i32(hash, cap)
-  let start = index
+  /// Get the number of used slots (occupied + deleted).
+  pub fn used(self) -> i32 {
+    return self.size + self.deleted
+  }
 
-  for {
-    match (map.entries.get(index)) {
-      Ok(entry) => {
-        if (is_empty(entry.state)) {
-          // Empty - key not found
-          return Err(())
+  /// Check if the map contains a key.
+  pub fn contains(self, key: i32) -> bool {
+    let cap = self.capacity
+    let hash = compute_hash<i32>(key)
+    let index = mod_i32(hash, cap)
+    let start = index
+
+    for {
+      match (self.entries.get(index)) {
+        Ok(entry) => {
+          if (is_empty(entry.state)) {
+            return false
+          }
+          if (is_occupied(entry.state) && entry.key == key) {
+            return true
+          }
         }
+        Err(_) => { return false }
+      }
+      index = mod_i32(index + 1, cap)
+      if (index == start) {
+        return false
+      }
+    }
+    return false
+  }
 
-        if (is_occupied(entry.state)) {
-          // Occupied - check if it's our key
-          if (entry.key == key) {
+  /// Get a value by key.
+  pub fn get(self, key: i32) -> Result<i32, unit> {
+    let cap = self.capacity
+    let hash = compute_hash<i32>(key)
+    let index = mod_i32(hash, cap)
+    let start = index
+
+    for {
+      match (self.entries.get(index)) {
+        Ok(entry) => {
+          if (is_empty(entry.state)) {
+            return Err(())
+          }
+          if (is_occupied(entry.state) && entry.key == key) {
             return Ok(entry.value)
           }
         }
-
-        // Continue probing (either deleted or collision)
-        index = mod_i32(index + 1, cap)
-        if (index == start) {
-          // Wrapped around completely
-          return Err(())
-        }
+        Err(_) => { return Err(()) }
       }
-      Err(_) => { return Err(()) }
+      index = mod_i32(index + 1, cap)
+      if (index == start) {
+        return Err(())
+      }
+    }
+    return Err(())
+  }
+}
+
+/// Rehash the map into a new table with the given capacity.
+/// Only reinserts occupied entries, clearing all tombstones.
+fn hashmap_rehash(map: HashMap, new_cap: i32) -> HashMap {
+  let old_entries = map.entries
+  let old_cap = map.capacity
+  let alloc = map.alloc
+
+  // Create new entries vector
+  let new_entries = alloc.vec_new<Entry>()
+  for i in 0..new_cap {
+    match (new_entries.push(empty_entry())) {
+      Ok(_) => {}
+      Err(_) => { panic() }
     }
   }
 
-  return Err(())
+  let new_size = 0
+
+  // Reinsert all occupied entries
+  for i in 0..old_cap {
+    match (old_entries.get(i)) {
+      Ok(entry) => {
+        if (is_occupied(entry.state)) {
+          // Find slot in new table
+          let hash = compute_hash<i32>(entry.key)
+          let index = mod_i32(hash, new_cap)
+
+          for {
+            match (new_entries.get(index)) {
+              Ok(slot) => {
+                if (is_empty(slot.state)) {
+                  // Found empty slot, insert here
+                  let new_entry = Entry { state: occupied_state(), key: entry.key, value: entry.value }
+                  match (new_entries.set(index, new_entry)) {
+                    Ok(_) => {}
+                    Err(_) => { panic() }
+                  }
+                  new_size = new_size + 1
+                  break
+                }
+                index = mod_i32(index + 1, new_cap)
+              }
+              Err(_) => { panic() }
+            }
+          }
+        }
+      }
+      Err(_) => { panic() }
+    }
+  }
+
+  // Free old entries
+  old_entries.free()
+
+  return HashMap {
+    entries: new_entries,
+    size: new_size,
+    deleted: 0,
+    capacity: new_cap,
+    alloc: alloc
+  }
 }
 
 /// Insert or update a key-value pair.
+/// Automatically rehashes if load factor is too high.
 pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, unit> {
-  let cap = hashmap_capacity(map)
-  let size = hashmap_size(map)
+  let init_cap = map.capacity
+  let used = map.size + map.deleted
 
-  // Check load factor (keep below 70%)
-  if (size * 10 >= cap * 7) {
-    // Table too full
-    return Err(())
+  // Check load factor: rehash if used slots > 70% of capacity
+  // This accounts for both occupied entries AND tombstones
+  let m = map
+  if (used * 10 >= init_cap * 7) {
+    // Grow to 2x capacity and rehash (clears tombstones)
+    m = hashmap_rehash(m, init_cap * 2)
+  } else if (m.deleted * 4 > init_cap) {
+    // Too many tombstones (>25% of capacity), rehash at same size
+    m = hashmap_rehash(m, init_cap)
   }
+
+  let cap = m.capacity
 
   // Use the Hash trait to compute the hash
   let hash = compute_hash<i32>(key)
   let index = mod_i32(hash, cap)
   let start = index
   let first_available = 0 - 1
+  let reusing_tombstone = false
 
   for {
-    match (map.entries.get(index)) {
+    match (m.entries.get(index)) {
       Ok(entry) => {
         if (is_empty(entry.state)) {
           // Empty slot found
@@ -220,6 +331,7 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, uni
           // Deleted slot - remember it but keep looking for the key
           if (first_available < 0) {
             first_available = index
+            reusing_tombstone = true
           }
         }
 
@@ -228,11 +340,11 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, uni
           if (entry.key == key) {
             // Update existing entry
             let new_entry = Entry { state: occupied_state(), key: key, value: value }
-            match (map.entries.set(index, new_entry)) {
+            match (m.entries.set(index, new_entry)) {
               Ok(_) => {}
               Err(_) => { return Err(()) }
             }
-            return Ok(map)
+            return Ok(m)
           }
         }
 
@@ -252,22 +364,29 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, uni
 
   // Insert at first available slot
   let new_entry = Entry { state: occupied_state(), key: key, value: value }
-  match (map.entries.set(first_available, new_entry)) {
+  match (m.entries.set(first_available, new_entry)) {
     Ok(_) => {}
     Err(_) => { return Err(()) }
   }
 
+  // Update counts: if we reused a tombstone, decrement deleted count
+  let new_deleted = m.deleted
+  if (reusing_tombstone) {
+    new_deleted = new_deleted - 1
+  }
+
   return Ok(HashMap {
-    entries: map.entries,
-    size: size + 1,
+    entries: m.entries,
+    size: m.size + 1,
+    deleted: new_deleted,
     capacity: cap,
-    alloc: map.alloc
+    alloc: m.alloc
   })
 }
 
 /// Remove a key from the hash-map.
 pub fn hashmap_remove(map: HashMap, key: i32) -> Result<HashMap, unit> {
-  let cap = hashmap_capacity(map)
+  let cap = map.capacity
   let hash = compute_hash<i32>(key)
   let index = mod_i32(hash, cap)
   let start = index
@@ -292,6 +411,7 @@ pub fn hashmap_remove(map: HashMap, key: i32) -> Result<HashMap, unit> {
             return Ok(HashMap {
               entries: map.entries,
               size: map.size - 1,
+              deleted: map.deleted + 1,
               capacity: cap,
               alloc: map.alloc
             })
@@ -311,14 +431,6 @@ pub fn hashmap_remove(map: HashMap, key: i32) -> Result<HashMap, unit> {
   return Err(())
 }
 
-/// Check if a key exists.
-pub fn hashmap_contains(map: HashMap, key: i32) -> bool {
-  match (hashmap_get(map, key)) {
-    Ok(_) => { return true }
-    Err(_) => { return false }
-  }
-}
-
 /// Free the hash-map.
 pub fn hashmap_free(map: HashMap) -> unit {
   map.entries.free()
@@ -332,6 +444,8 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   c.println("This demonstrates a hash-map using:")
   c.println("  - The Hash trait for polymorphic hashing")
   c.println("  - Vec<Entry> for storing custom structs")
+  c.println("  - Automatic rehashing when load factor is high")
+  c.println("  - Proper tombstone tracking")
   c.println("")
 
   // Create a hash-map with capacity 16
@@ -393,7 +507,9 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
 
   c.println("")
   c.print("Map size: ")
-  c.print_i32(hashmap_size(map))
+  c.print_i32(map.size())
+  c.print(", capacity: ")
+  c.print_i32(map.capacity())
   c.println("")
 
   c.println("")
@@ -405,7 +521,7 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
     c.print("  get(")
     c.print_i32(k)
     c.print(") = ")
-    match (hashmap_get(map, k)) {
+    match (map.get(k)) {
       Ok(v) => {
         c.print_i32(v)
         c.println("")
@@ -424,7 +540,7 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
     Err(_) => {}
   }
   c.print("  get(42) = ")
-  match (hashmap_get(map, 42)) {
+  match (map.get(42)) {
     Ok(v) => {
       c.print_i32(v)
       c.println("")
@@ -448,7 +564,7 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
     c.print("  contains(")
     c.print_i32(k)
     c.print(") = ")
-    if (hashmap_contains(map, k)) {
+    if (map.contains(k)) {
       c.println("true")
     } else {
       c.println("false")
@@ -468,13 +584,60 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
     }
   }
   c.print("  contains(17) = ")
-  if (hashmap_contains(map, 17)) {
+  if (map.contains(17)) {
     c.println("true")
   } else {
     c.println("false")
   }
   c.print("Map size: ")
-  c.print_i32(hashmap_size(map))
+  c.print_i32(map.size())
+  c.print(", deleted: ")
+  c.print_i32(map.deleted)
+  c.println("")
+
+  // Test rehashing by doing many insert/delete cycles
+  c.println("")
+  c.println("Testing rehash (insert/delete cycles)...")
+  for i in 0..20 {
+    let k = 1000 + i
+    match (hashmap_insert(map, k, k * 10)) {
+      Ok(new_map) => { map = new_map }
+      Err(_) => {}
+    }
+  }
+  c.print("After 20 inserts - size: ")
+  c.print_i32(map.size())
+  c.print(", capacity: ")
+  c.print_i32(map.capacity())
+  c.println("")
+
+  for i in 0..15 {
+    let k = 1000 + i
+    match (hashmap_remove(map, k)) {
+      Ok(new_map) => { map = new_map }
+      Err(_) => {}
+    }
+  }
+  c.print("After 15 deletes - size: ")
+  c.print_i32(map.size())
+  c.print(", deleted: ")
+  c.print_i32(map.deleted)
+  c.println("")
+
+  // Insert more to trigger tombstone cleanup rehash
+  for i in 0..10 {
+    let k = 2000 + i
+    match (hashmap_insert(map, k, k * 10)) {
+      Ok(new_map) => { map = new_map }
+      Err(_) => {}
+    }
+  }
+  c.print("After 10 more inserts - size: ")
+  c.print_i32(map.size())
+  c.print(", deleted: ")
+  c.print_i32(map.deleted)
+  c.print(", capacity: ")
+  c.print_i32(map.capacity())
   c.println("")
 
   // Cleanup
