@@ -59,14 +59,6 @@ impl Eq for i32 {
   }
 }
 
-/// Compute a % b using integer division.
-fn mod_i32(a: i32, b: i32) -> i32 {
-  if (b == 0) {
-    panic()
-  }
-  let quotient = a / b
-  return a - quotient * b
-}
 
 /// Entry states
 copy struct EntryState {
@@ -176,7 +168,7 @@ impl HashMap {
   pub fn contains(self: &HashMap, key: i32) -> bool {
     let cap = self.capacity
     let hash = compute_hash<i32>(key)
-    let index = mod_i32(hash, cap)
+    let index = hash % cap
     let start = index
 
     for {
@@ -191,7 +183,7 @@ impl HashMap {
         }
         Err(_) => { return false }
       }
-      index = mod_i32(index + 1, cap)
+      index = (index + 1) % cap
       if (index == start) {
         return false
       }
@@ -203,7 +195,7 @@ impl HashMap {
   pub fn get(self: &HashMap, key: i32) -> Result<i32, unit> {
     let cap = self.capacity
     let hash = compute_hash<i32>(key)
-    let index = mod_i32(hash, cap)
+    let index = hash % cap
     let start = index
 
     for {
@@ -218,7 +210,7 @@ impl HashMap {
         }
         Err(_) => { return Err(()) }
       }
-      index = mod_i32(index + 1, cap)
+      index = (index + 1) % cap
       if (index == start) {
         return Err(())
       }
@@ -252,7 +244,7 @@ fn hashmap_rehash(map: HashMap, new_cap: i32) -> HashMap {
         if (is_occupied(entry.state)) {
           // Find slot in new table
           let hash = compute_hash<i32>(entry.key)
-          let index = mod_i32(hash, new_cap)
+          let index = hash % new_cap
 
           for {
             match (new_entries.get(index)) {
@@ -267,7 +259,7 @@ fn hashmap_rehash(map: HashMap, new_cap: i32) -> HashMap {
                   new_size = new_size + 1
                   break
                 }
-                index = mod_i32(index + 1, new_cap)
+                index = (index + 1) % new_cap
               }
               Err(_) => { panic() }
             }
@@ -311,7 +303,7 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, uni
 
   // Use the Hash trait to compute the hash
   let hash = compute_hash<i32>(key)
-  let index = mod_i32(hash, cap)
+  let index = hash % cap
   let start = index
   let first_available = 0 - 1
   let reusing_tombstone = false
@@ -348,7 +340,7 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, uni
           }
         }
 
-        index = mod_i32(index + 1, cap)
+        index = (index + 1) % cap
         if (index == start) {
           // Wrapped around
           break
@@ -388,7 +380,7 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, uni
 pub fn hashmap_remove(map: HashMap, key: i32) -> Result<HashMap, unit> {
   let cap = map.capacity
   let hash = compute_hash<i32>(key)
-  let index = mod_i32(hash, cap)
+  let index = hash % cap
   let start = index
 
   for {
@@ -419,7 +411,7 @@ pub fn hashmap_remove(map: HashMap, key: i32) -> Result<HashMap, unit> {
         }
 
         // Continue probing
-        index = mod_i32(index + 1, cap)
+        index = (index + 1) % cap
         if (index == start) {
           return Err(())
         }
