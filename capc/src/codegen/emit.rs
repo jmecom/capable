@@ -2317,11 +2317,16 @@ fn emit_hir_field_access(
             "field access on opaque non-pointer field".to_string(),
         ));
     }
+    // Unwrap reference type to get the underlying struct type
+    let struct_ty = match &object_ty.ty {
+        crate::typeck::Ty::Ref(inner) => inner.as_ref(),
+        other => other,
+    };
     let layout =
-        resolve_struct_layout(&object_ty.ty, "", &struct_layouts.layouts).ok_or_else(|| {
+        resolve_struct_layout(struct_ty, "", &struct_layouts.layouts).ok_or_else(|| {
             CodegenError::Unsupported(format!(
                 "struct layout missing for {:?}",
-                object_ty.ty
+                struct_ty
             ))
         })?;
     let Some(field_layout) = layout.fields.get(&field_access.field_name) else {

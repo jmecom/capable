@@ -2618,6 +2618,11 @@ pub(super) fn check_expr(
                 type_params,
                 type_param_bounds,
             )?;
+            // Unwrap reference if present (for borrow-lite field access)
+            let object_ty = match &object_ty {
+                Ty::Ref(inner) => inner.as_ref().clone(),
+                other => other.clone(),
+            };
             let Ty::Path(struct_name, struct_args) = object_ty else {
                 return Err(TypeError::new(
                     "field access requires a struct value".to_string(),

@@ -111,9 +111,9 @@ fn empty_entry() -> Entry {
 }
 
 /// A hash-map with i32 keys and i32 values.
-/// Like Vec, this is copy (for borrow-lite) but semantically owned.
-/// Call hashmap_free() exactly once when done.
-copy struct HashMap {
+/// This is affine (move-only) to prevent aliasing and double-free.
+/// Use borrow-lite methods (self: &HashMap) for read-only access.
+struct HashMap {
   /// All entries in a single vector
   entries: Vec<Entry>,
   /// Current size (number of occupied entries)
@@ -158,22 +158,22 @@ pub fn hashmap_new(alloc: buffer::Alloc, initial_capacity: i32) -> HashMap {
 
 impl HashMap {
   /// Get the current size of the hash-map.
-  pub fn size(self) -> i32 {
+  pub fn size(self: &HashMap) -> i32 {
     return self.size
   }
 
   /// Get the capacity of the hash-map.
-  pub fn capacity(self) -> i32 {
+  pub fn capacity(self: &HashMap) -> i32 {
     return self.capacity
   }
 
   /// Get the number of used slots (occupied + deleted).
-  pub fn used(self) -> i32 {
+  pub fn used(self: &HashMap) -> i32 {
     return self.size + self.deleted
   }
 
   /// Check if the map contains a key.
-  pub fn contains(self, key: i32) -> bool {
+  pub fn contains(self: &HashMap, key: i32) -> bool {
     let cap = self.capacity
     let hash = compute_hash<i32>(key)
     let index = mod_i32(hash, cap)
@@ -200,7 +200,7 @@ impl HashMap {
   }
 
   /// Get a value by key.
-  pub fn get(self, key: i32) -> Result<i32, unit> {
+  pub fn get(self: &HashMap, key: i32) -> Result<i32, unit> {
     let cap = self.capacity
     let hash = compute_hash<i32>(key)
     let index = mod_i32(hash, cap)
