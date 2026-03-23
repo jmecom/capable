@@ -3,81 +3,48 @@ module config_loader
 use sys::system
 use sys::console
 use sys::fs
-use sys::string
-use sys::vec
-use sys::buffer
 
-fn print_kv(c: Console, alloc: Alloc, key: string, val: string) -> unit {
-  let out = alloc.text_new()
-  match (out.push_str("key: ")) {
-    Ok(_) => { }
-    Err(_) => { out.free(alloc); return () }
-  }
-  match (out.push_str(key)) {
-    Ok(_) => { }
-    Err(_) => { out.free(alloc); return () }
-  }
-  match (out.push_str("\nvalue: ")) {
-    Ok(_) => { }
-    Err(_) => { out.free(alloc); return () }
-  }
-  match (out.push_str(val)) {
-    Ok(_) => { }
-    Err(_) => { out.free(alloc); return () }
-  }
-  match (out.push_byte('\n')) {
-    Ok(_) => { }
-    Err(_) => { out.free(alloc); return () }
-  }
-  c.print(out.as_string())
-  out.free(alloc)
+fn print_kv(c: Console, key: string, val: string) -> unit {
+  c.print("key: ")
+  c.println(key)
+  c.print("value: ")
+  c.println(val)
   return ()
 }
 
-fn parse_line(c: Console, alloc: Alloc, line: string) -> Result<unit, vec::VecErr> {
+fn parse_line(c: Console, line: string) -> unit {
   if (line.len() == 0) {
-    return Ok(())
+    return ()
   }
   if (line.starts_with("#")) {
-    return Ok(())
+    return ()
   }
-
-  match (line.index_of_byte('=')) {
-    Ok(eq) => {
-      let key_result = line.slice_range(0, eq)
-      match (key_result) {
-        Ok(key) => {
-          let val_result = line.slice_range(eq + 1, line.len())
-          match (val_result) {
-            Ok(val) => { print_kv(c, alloc, key, val) }
-            Err(_) => { return Err(vec::VecErr::OutOfRange) }
-          }
-        }
-        Err(_) => { return Err(vec::VecErr::OutOfRange) }
-      }
-    }
+  match (line.split_once_view('=')) {
+    Ok(parts) => { print_kv(c, parts.left, parts.right) }
     Err(_) => { }
   }
-  return Ok(())
+  return ()
 }
 
-fn parse_config(c: Console, alloc: Alloc, contents: string) -> Result<unit, vec::VecErr> {
-  let lines = contents.lines(alloc)
-  let n = lines.len()
-  for i in 0..n {
-    let line = lines[i]?
-    parse_line(c, alloc, line)?
+fn parse_config(c: Console, contents: string) -> unit {
+  let rest = contents
+  while (true) {
+    match (rest.split_once_view('\n')) {
+      Ok(parts) => {
+        parse_line(c, parts.left.trim_end_view())
+        rest = parts.right
+      }
+      Err(_) => {
+        parse_line(c, rest.trim_end_view())
+        return ()
+      }
+    }
   }
-  alloc.vec_string_free(lines)
-  return Ok(())
 }
 
 fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result<unit, FsErr> {
   let contents = fs.read_to_string(alloc, "app.conf")?
-  let result = parse_config(c, alloc, contents)
-  if (result.is_err()) {
-    return Err(fs::FsErr::IoError)
-  }
+  parse_config(c, contents)
   return Ok(())
 }
 

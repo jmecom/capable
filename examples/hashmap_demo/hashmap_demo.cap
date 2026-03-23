@@ -133,10 +133,7 @@ pub fn hashmap_new(alloc: buffer::Alloc, initial_capacity: i32) -> HashMap {
 
   // Initialize all entries as empty
   for i in 0..cap {
-    match (entries.push(empty_entry())) {
-      Ok(_) => {}
-      Err(_) => { panic() }
-    }
+    entries.push(empty_entry()).ok()
   }
 
   return HashMap {
@@ -229,10 +226,7 @@ fn hashmap_rehash(map: HashMap, new_cap: i32) -> HashMap {
   // Create new entries vector
   let new_entries = alloc.vec_new<Entry>()
   for i in 0..new_cap {
-    match (new_entries.push(empty_entry())) {
-      Ok(_) => {}
-      Err(_) => { panic() }
-    }
+    new_entries.push(empty_entry()).ok()
   }
 
   let new_size = 0
@@ -450,36 +444,36 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   let test_vals = alloc.vec_i32_new()
 
   // key -> key * 10
-  match (test_keys.push(42)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(420)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(42).ok()
+  test_vals.push(420).ok()
 
-  match (test_keys.push(17)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(170)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(17).ok()
+  test_vals.push(170).ok()
 
-  match (test_keys.push(99)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(990)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(99).ok()
+  test_vals.push(990).ok()
 
-  match (test_keys.push(1)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(10)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(1).ok()
+  test_vals.push(10).ok()
 
-  match (test_keys.push(256)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(2560)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(256).ok()
+  test_vals.push(2560).ok()
 
   // Keys that will likely collide
-  match (test_keys.push(0)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(0)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(0).ok()
+  test_vals.push(0).ok()
 
-  match (test_keys.push(16)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(160)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(16).ok()
+  test_vals.push(160).ok()
 
-  match (test_keys.push(32)) { Ok(_) => {} Err(_) => {} }
-  match (test_vals.push(320)) { Ok(_) => {} Err(_) => {} }
+  test_keys.push(32).ok()
+  test_vals.push(320).ok()
 
   // Insert all entries
   let num_entries = test_keys.len()
   for i in 0..num_entries {
-    let k = test_keys[i].unwrap_or(0)
-    let v = test_vals[i].unwrap_or(0)
+    let k = test_keys.get_or(i, 0)
+    let v = test_vals.get_or(i, 0)
     match (hashmap_insert(map, k, v)) {
       Ok(new_map) => {
         map = new_map
@@ -509,7 +503,7 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
 
   // Look up each key
   for i in 0..num_entries {
-    let k = test_keys[i].unwrap_or(0)
+    let k = test_keys.get_or(i, 0)
     c.print("  get(")
     c.print_i32(k)
     c.print(") = ")
@@ -546,13 +540,13 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   c.println("Looking up non-existent keys...")
 
   let missing = alloc.vec_i32_new()
-  match (missing.push(100)) { Ok(_) => {} Err(_) => {} }
-  match (missing.push(999)) { Ok(_) => {} Err(_) => {} }
-  match (missing.push(12345)) { Ok(_) => {} Err(_) => {} }
+  missing.push(100).ok()
+  missing.push(999).ok()
+  missing.push(12345).ok()
 
   let num_missing = missing.len()
   for i in 0..num_missing {
-    let k = missing[i].unwrap_or(0)
+    let k = missing.get_or(i, 0)
     c.print("  contains(")
     c.print_i32(k)
     c.print(") = ")

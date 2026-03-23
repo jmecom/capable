@@ -4,21 +4,10 @@ use sys::system
 use sys::console
 use sys::buffer
 
-fn count_text(c: Console, alloc: Alloc, s: string) -> i32 {
-  let buf = s.bytes()
-  let bytes = buf.len()
-  let words_vec = s.split_whitespace(alloc)
-  let words = words_vec.len()
-  alloc.vec_string_free(words_vec)
-  let i: i32 = 0
-  let lines: i32 = 0
-  while (i < bytes) {
-    let b = buf.at(i)
-    if (b == '\n') {
-      lines = lines + 1
-    }
-    i = i + 1
-  }
+fn count_text(c: Console, s: string) -> i32 {
+  let bytes = s.len()
+  let words = s.count_words_ascii()
+  let lines = s.count_newlines()
   c.assert(lines == 8 && words == 19 && bytes == 126)
   c.print_i32(lines)
   c.print(" ")
@@ -38,22 +27,15 @@ pub fn main(rc: RootCap) -> i32 {
     return 1
   }
 
-  let code = match args.at(1) {
-    Ok(path) => {
-      let alloc = rc.mint_alloc_default()
-      let rfs = rc.mint_readfs("./")
-      match rfs.read_to_string(alloc, path) {
-        Ok(s) => {
-          count_text(c, alloc, s)
-        }
-        Err(e) => {
-          c.println("read err")
-          1
-        }
-      }
+  let path = args.at(1).ok()
+  let alloc = rc.mint_alloc_default()
+  let rfs = rc.mint_readfs("./")
+  let code = match rfs.read_to_string(alloc, path) {
+    Ok(s) => {
+      count_text(c, s)
     }
     Err(e) => {
-      c.println("arg err")
+      c.println("read err")
       1
     }
   }

@@ -21,8 +21,12 @@ repository. It is based on code and tests, not older design docs.
 - Built-in types: i32, u32, u8, bool, unit, never.
 - `string` is a stdlib struct (a view over bytes), not a compiler builtin.
 - Pointers (`*T`) and borrows (`&T`) are supported in the type system.
-- Affine/linear ownership rules are enforced for non-copy values (including
-  capability and linear types).
+- Plain data is unrestricted by default.
+- `opaque struct` and `capability struct` are the main move-tracked categories.
+- Structs/enums become move-tracked by containment when they contain
+  move-tracked fields.
+- Borrows are deliberately narrow: refs cannot be stored in structs/enums or
+  returned, and ref locals must be initialized from another local.
 - Integer literals type as i32; char literals are u8.
 
 ## Standard library and runtime
@@ -41,6 +45,31 @@ repository. It is based on code and tests, not older design docs.
   - Args and stdin accessors.
   - Buffer/Alloc malloc/free/casts.
   - Math wrap helpers and byte whitespace checks.
+
+## Current capability algebra
+
+- Reusable use operations borrow the capability/resource where possible:
+  - `ReadFS.read_to_string/read_bytes/list_dir/exists`
+  - `Dir.read_to_string/read_bytes/list_dir/exists`
+  - `Stdin.read_to_string`
+  - `TcpConn.read_to_string/read/write`
+  - `TcpListener.accept`
+- Attenuation operations still consume the stronger capability:
+  - `Filesystem.root_dir`
+  - `Dir.subdir`
+- Child handles remain linear where appropriate:
+  - `FileRead`
+  - `TcpConn`
+- On move-tracked capabilities, methods that return capabilities still take
+  `self` by value under the current checker. This is why `Dir.open_read`
+  consumes `Dir`, while `TcpListener.accept` can borrow: `TcpListener` is a
+  copy capability.
+- Deliberately copyable capabilities currently include:
+  - `RootCap`
+  - `Console`
+  - `Args`
+  - `Net`
+  - `TcpListener`
 
 ## ABI and codegen
 

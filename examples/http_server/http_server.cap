@@ -5,66 +5,66 @@ module http_server
 use sys::console
 use sys::fs
 use sys::net
-use sys::args
+use sys::string
 use sys::system
 
-fn arg_or_default(args: Args, index: i32, default: string) -> string {
-  if (args.len() <= index) {
-    return default
-  }
-  return args.at(index).unwrap_or(default)
-}
-
-fn strip_query(raw_path: string, alloc: Alloc) -> string {
-  match (raw_path.index_of_byte('?')) {
-    Ok(i) => {
-      match (raw_path.slice_range(0, i)) {
-        Ok(view) => { return view }
-        Err(_) => { return raw_path }
-      }
-    }
+fn strip_query(raw_path: string) -> string {
+  match (raw_path.split_once_view('?')) {
+    Ok(parts) => { return parts.left }
     Err(_) => { return raw_path }
   }
 }
 
-fn sanitize_segment(parts: Vec<string>, i: i32, acc: string, seg: string, alloc: Alloc) -> Result<string, unit> {
-  if (seg.len() == 0) {
-    return sanitize_parts(parts, i + 1, acc, alloc)
-  }
-  if (seg == ".") {
-    return sanitize_parts(parts, i + 1, acc, alloc)
-  }
-  if (seg == "..") {
-    return Err(())
-  }
-  if (acc.len() == 0) {
-    return sanitize_parts(parts, i + 1, seg, alloc)
-  }
-  return sanitize_parts(parts, i + 1, fs::join(alloc, acc, seg), alloc)
-}
-
-fn sanitize_parts(parts: Vec<string>, i: i32, acc: string, alloc: Alloc) -> Result<string, unit> {
-  if (i >= parts.len()) {
-    return Ok(acc)
-  }
-  let seg_result = parts[i]
-  match (seg_result) {
-    Ok(seg) => { return sanitize_segment(parts, i, acc, seg, alloc) }
-    Err(_) => { return Err(()) }
-  }
-}
-
 fn sanitize_path(raw_path: string, alloc: Alloc) -> Result<string, unit> {
-  let parts = raw_path.split(alloc, '/')
-  let result = sanitize_parts(parts, 0, "", alloc)
-  alloc.vec_string_free(parts)
-  match (result) {
-    Ok(path) => {
-      if (path.len() == 0) {
-        return Ok("index.html")
+  let out = alloc.text_new()
+  let rest = raw_path
+  while (true) {
+    let seg = ""
+    let done = false
+    match (rest.split_once_view('/')) {
+      Ok(parts) => {
+        seg = parts.left
+        rest = parts.right
       }
-      return Ok(path)
+      Err(_) => {
+        seg = rest
+        done = true
+      }
     }
+    if (seg == "..") {
+      out.free(alloc)
+      return Err(())
+    }
+    if (seg.len() > 0 && seg != ".") {
+      if (!out.is_empty()) {
+        match (out.push_byte('/')) {
+          Ok(_) => { }
+          Err(_) => {
+            out.free(alloc)
+            return Err(())
+          }
+        }
+      }
+      match (out.push_str(seg)) {
+        Ok(_) => { }
+        Err(_) => {
+          out.free(alloc)
+          return Err(())
+        }
+      }
+    }
+    if (done) {
+      break
+    }
+  }
+  if (out.is_empty()) {
+    out.free(alloc)
+    return Ok("index.html")
+  }
+  let result = out.to_string()
+  out.free(alloc)
+  match (result) {
+    Ok(path) => { return Ok(path) }
     Err(_) => { return Err(()) }
   }
 }
@@ -75,43 +75,31 @@ enum ParseErr {
   BadSlice
 }
 
-fn index_or_space(s: string) -> Result<i32, ParseErr> {
-  match (s.index_of_byte(' ')) {
-    Ok(i) => { return Ok(i) }
+fn split_on_space(s: string) -> Result<string::SplitOnce, ParseErr> {
+  match (s.split_once_view(' ')) {
+    Ok(parts) => { return Ok(parts) }
     Err(_) => { return Err(ParseErr::MissingSpace) }
   }
 }
 
-fn slice_or_err(s: string, start: i32, end: i32) -> Result<string, ParseErr> {
-  match (s.slice_range(start, end)) {
-    Ok(v) => { return Ok(v) }
-    Err(_) => { return Err(ParseErr::BadSlice) }
-  }
-}
-
 fn parse_request_line(line: string, alloc: Alloc) -> Result<string, ParseErr> {
-  let trimmed = line.trim(alloc)
-  let space0 = index_or_space(trimmed)?
-  let method = slice_or_err(trimmed, 0, space0)?
-  if (method != "GET") {
+  let trimmed = line.trim_view()
+  let head = split_on_space(trimmed)?
+  if (head.left != "GET") {
     return Err(ParseErr::BadMethod)
   }
-  let rest = slice_or_err(trimmed, space0 + 1, trimmed.len())?
-  let space1 = index_or_space(rest)?
-  let path = slice_or_err(rest, 0, space1)?
-  match (sanitize_path(strip_query(path, alloc), alloc)) {
+  let rest = head.right.trim_start_view()
+  let target = split_on_space(rest)?.left
+  match (sanitize_path(strip_query(target), alloc)) {
     Ok(p) => { return Ok(p) }
     Err(_) => { return Err(ParseErr::BadSlice) }
   }
 }
 
 fn parse_request_path(req: string, alloc: Alloc) -> Result<string, ParseErr> {
-  let lines = req.lines(alloc)
-  let line_result = lines[0]
-  alloc.vec_string_free(lines)
-  match (line_result) {
-    Ok(line) => { return parse_request_line(line, alloc) }
-    Err(_) => { return Err(ParseErr::BadSlice) }
+  match (req.split_once_view('\n')) {
+    Ok(parts) => { return parse_request_line(parts.left.trim_end_view(), alloc) }
+    Err(_) => { return parse_request_line(req.trim_end_view(), alloc) }
   }
 }
 
@@ -129,7 +117,7 @@ fn respond_bad_request(conn: &TcpConn) -> Result<unit, NetErr> {
   return conn.write("HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nbad request\n")
 }
 
-fn handle_request(conn: &TcpConn, readfs: ReadFS, alloc: Alloc, req: string) -> Result<unit, NetErr> {
+fn handle_request(conn: &TcpConn, readfs: &ReadFS, alloc: Alloc, req: string) -> Result<unit, NetErr> {
   match (parse_request_path(req, alloc)) {
     Ok(path) => {
       match (readfs.read_to_string(alloc, path)) {
@@ -143,10 +131,13 @@ fn handle_request(conn: &TcpConn, readfs: ReadFS, alloc: Alloc, req: string) -> 
 
 fn serve_forever(c: Console, net: Net, rc: RootCap, alloc: Alloc, root: string, port: i32) -> Result<unit, NetErr> {
   let listener = net.listen("127.0.0.1", port)?
+  let readfs = rc.mint_readfs(root)
+  let readfs_ref: &ReadFS = readfs
   c.println("listening on 127.0.0.1")
   c.print("port: ")
   c.println_i32(port)
   defer listener.close()
+  defer readfs.close()
   while (true) {
     if let Ok(conn) = listener.accept() {
       let req_result = conn.read(alloc, 4096)
@@ -154,8 +145,7 @@ fn serve_forever(c: Console, net: Net, rc: RootCap, alloc: Alloc, root: string, 
         conn.close()
       } else {
         let req = req_result.ok()
-        let readfs = rc.mint_readfs(root)
-        let handled = handle_request(conn, readfs, alloc, req)
+        let handled = handle_request(conn, readfs_ref, alloc, req)
         conn.close()
         if (handled.is_err()) {
           // Ignore per-request write errors; keep the server alive.
@@ -174,7 +164,7 @@ pub fn main(rc: RootCap) -> i32 {
   let net = rc.mint_net()
   let args = rc.mint_args()
   let alloc = rc.mint_alloc_default()
-  let root = arg_or_default(args, 1, "examples/http_server")
+  let root = args.at(1).unwrap_or("examples/http_server")
   let port = 8090
   let result = serve_forever(c, net, rc, alloc, root, port)
   if (result.is_err()) {

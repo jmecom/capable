@@ -4,6 +4,15 @@ Capable is a small systems language built around capabilities: values that expli
 
 This is an experimental and toy project. Inspired by [Austral](https://austral-lang.org/).
 
+The intended programming model is small:
+
+- plain data: ordinary structs/enums and scalar values
+- resources: owned handles such as buffers, files, and sockets
+- capabilities: resources that also carry authority
+
+Most values are just data. The move-tracked part of the language exists so
+resource ownership and authority flow stay explicit.
+
 ```capable
 fn main(rc: RootCap) {
   // Mint a capability from the root
@@ -27,3 +36,9 @@ fn main(rc: RootCap) {
 Capabilities are explicit values that grant permission to perform privileged operations (filesystem, network, clock, etc.). This is in contrast to ambient authority: normally, any code running in your process can reach the outside world, which makes dependency behavior difficult to constrain or reason about.
 
 Capable aims to reduce supply-chain risk by making authority non-ambient: if a dependency didn’t receive a capability value, it can’t do the thing. The compiler enforces this by requiring capabilities at call sites for privileged operations, and the runtime can enforce attenuation (for example, a filesystem capability scoped to a root directory that cannot be escaped). The result is a smaller blast radius and fewer “surprising” dependency updates, because new code can’t silently acquire new powers—you have to explicitly hand them over.
+
+Capable also has a small resource model. `opaque struct` and `capability
+struct` values are the main move-tracked categories, and structs/enums that
+contain them become move-tracked by containment. The goal is not to turn all
+programming into ownership puzzles; it is to make authority and resource
+lifetime explicit where they matter.

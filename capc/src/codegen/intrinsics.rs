@@ -124,6 +124,19 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         ],
         ret: AbiType::ResultOut(Box::new(AbiType::Handle), Box::new(AbiType::I32)),
     };
+    let fs_dir_read_to_string = FnSig {
+        params: vec![AbiType::Handle, AbiType::Handle, AbiType::Ptr],
+        ret: AbiType::Result(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
+    };
+    let fs_dir_read_to_string_abi = FnSig {
+        params: vec![
+            AbiType::Handle,
+            AbiType::Handle,
+            AbiType::Ptr,
+            AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
+        ],
+        ret: AbiType::ResultOut(Box::new(AbiType::Ptr), Box::new(AbiType::I32)),
+    };
     let fs_join = FnSig {
         params: vec![AbiType::Handle, AbiType::Ptr, AbiType::Ptr],
         ret: AbiType::Ptr,
@@ -721,6 +734,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: fs_read_bytes,
             abi_sig: Some(fs_read_bytes_abi),
             symbol: "capable_rt_fs_dir_read_bytes".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.fs.Dir__read_to_string".to_string(),
+        FnInfo {
+            sig: fs_dir_read_to_string,
+            abi_sig: Some(fs_dir_read_to_string_abi),
+            symbol: "capable_rt_fs_dir_read_to_string".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

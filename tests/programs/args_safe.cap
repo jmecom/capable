@@ -11,19 +11,11 @@ pub fn main(rc: RootCap) -> i32 {
     c.println("args bad")
     return 1
   }
-  let code = match args.at(0) {
-    Ok(s) => {
-      let m = s.len()
-      c.assert(m >= 0)
-      if (m >= 0) {
-        c.println("args ok")
-      }
-      0
-    }
-    Err(e) => {
-      c.println("args err")
-      1
-    }
+  let s = args.at(0).ok()
+  let m = s.len()
+  c.assert(m >= 0)
+  if (m >= 0) {
+    c.println("args ok")
   }
-  return code
+  return 0
 }

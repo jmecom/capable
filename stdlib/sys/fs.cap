@@ -19,22 +19,22 @@ pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }
 
 impl ReadFS {
   /// Read an entire file into a string.
-  pub fn read_to_string(self, alloc: buffer::Alloc, path: string) -> Result<string, FsErr> {
+  pub fn read_to_string(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<string, FsErr> {
     return ()
   }
 
   /// Read an entire file into a byte vec.
-  pub fn read_bytes(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<u8>, FsErr> {
+  pub fn read_bytes(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// List directory contents as strings.
-  pub fn list_dir(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<string>, FsErr> {
+  pub fn list_dir(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// True if a path exists.
-  pub fn exists(self, path: string) -> bool {
+  pub fn exists(self: &ReadFS, path: string) -> bool {
     return false
   }
 
@@ -68,24 +68,23 @@ impl Dir {
   }
 
   /// Read a file into a byte vec.
-  pub fn read_bytes(self, alloc: buffer::Alloc, name: string) -> Result<vec::Vec<u8>, FsErr> {
+  pub fn read_bytes(self: &Dir, alloc: buffer::Alloc, name: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// List directory contents.
-  pub fn list_dir(self, alloc: buffer::Alloc) -> Result<vec::Vec<string>, FsErr> {
+  pub fn list_dir(self: &Dir, alloc: buffer::Alloc) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// True if a path exists.
-  pub fn exists(self, name: string) -> bool {
+  pub fn exists(self: &Dir, name: string) -> bool {
     return false
   }
 
   /// Read a file into a string.
-  pub fn read_to_string(self, alloc: buffer::Alloc, name: string) -> Result<string, FsErr> {
-    let file = self.open_read(name)
-    return file.read_to_string(alloc)
+  pub fn read_to_string(self: &Dir, alloc: buffer::Alloc, name: string) -> Result<string, FsErr> {
+    return ()
   }
 
   /// Close the capability.

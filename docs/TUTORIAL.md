@@ -11,6 +11,15 @@ This tutorial is a cohesive walk-through of the language as it exists today.
 It focuses on how to write real programs, how the capability model works, and
 how memory is managed.
 
+Capable is easiest to understand if you divide values into three groups:
+
+- plain data: numbers, bools, and ordinary structs/enums
+- resources: owned handles such as buffers, files, and sockets
+- capabilities: resources that also carry permission
+
+Most code works with plain data. The resource model exists so ownership and
+authority stay explicit where they matter.
+
 ## 1) Hello, console
 
 ```cap
@@ -101,7 +110,8 @@ impl Pair {
 
 - Structs and enums are nominal types.
 - Methods are defined in `impl` blocks and lower to `Type__method` in codegen.
-- Method receivers can be `self` (move) or `self: &T` (borrow-lite, read-only).
+- Method receivers can be `self` (value receiver) or `self: &T` (short-lived
+  read-only borrow).
 
 ## 5) Results and error flow
 
@@ -166,11 +176,25 @@ risk: it can forge or corrupt capability values, violate attenuation, or reach
 privileged operations directly. Treat unsafe dependencies as highly trusted
 code and use auditing/`--safe-only` to keep the boundary tight.
 
-Attenuation is one-way: methods that return capabilities must take `self` by
-value, so you give up the more powerful capability when you derive a narrower
-one. This is enforced by the compiler.
+In practice, capability APIs fall into three shapes:
 
-## 7) Kinds: copy, affine, linear
+- use operations: perform an effect with existing authority
+- attenuation operations: derive a narrower capability from a stronger one
+- child-handle operations: create a fresh child handle from an existing parent
+
+That distinction matters more than "everything moves." A read-only filesystem
+capability being used to read a file is different from a directory capability
+being narrowed to a subdirectory, and different again from a listener producing
+a fresh connection handle.
+
+In the current implementation, reusable use operations borrow where possible.
+That is why `ReadFS.read_to_string` and `Dir.read_to_string` can be called
+multiple times on the same capability value. By contrast, methods on
+move-tracked capabilities that return capabilities still take `self` by value
+under the current checker. That is why `Dir.subdir` and `Dir.open_read`
+consume `Dir`, while `TcpListener.accept` can borrow: `TcpListener` is copyable.
+
+## 7) Resources and kinds
 
 Types can declare how they move:
 
@@ -185,10 +209,14 @@ Kinds:
 - **Affine**: move-only, dropping is allowed.
 - **Linear**: move-only and must be consumed on all paths.
 
-## 8) Borrow-lite references: `&T`
+Most plain data does not require thinking about this section. These rules matter
+primarily for resources, capabilities, and values that contain them.
 
-Capable has a minimal borrow system for read-only access. The goal is to make
-non-consuming reads ergonomic without a full borrow checker.
+## 8) Short borrows: `&T`
+
+Capable has a narrow borrow system for read-only access. The goal is to make
+resource use ergonomic without turning the language into a full borrow-checking
+model.
 
 ```cap
 impl Thing {
@@ -212,9 +240,9 @@ This keeps the language simple without a full borrow checker. It also keeps
 lifetimes simple: a borrow is only valid within the current scope, so you never
 have to reason about aliasing across function boundaries.
 
-Borrow-lite is intentionally conservative. If you need shared ownership across
-functions, pass the value by move (and return it), or design your API to do the
-read inside the callee.
+Borrow-lite is intentionally conservative. In most public APIs, the important
+case is a short-lived borrowed parameter or receiver on a resource/capability
+type.
 
 ## 9) Memory model
 

@@ -37,6 +37,22 @@ fn typecheck_fs_read_ok() {
 }
 
 #[test]
+fn typecheck_fs_reuse_ok() {
+    let source = load_program("fs_reuse.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_fs_dir_reuse_ok() {
+    let source = load_program("fs_dir_reuse.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_fs_close_ok() {
     let source = load_program("should_pass_fs_close.cap");
     let module = parse_module(&source).expect("parse module");

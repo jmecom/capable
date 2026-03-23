@@ -10,23 +10,30 @@ pub fn main(rc: RootCap) -> i32 {
   let n = buf.len()
   let b = buf.at(0)
   let words = "a b  c".split_whitespace(alloc)
+  let word_views = "a b  c".split_whitespace_view(alloc)
   let count = words.len()
   let trimmed = "  hi \n".trim(alloc)
+  let trimmed_view = "  hi \n".trim_view()
   let trimmed_start = "  hi ".trim_start(alloc)
+  let trimmed_start_view = "  hi ".trim_start_view()
   let trimmed_end = "  hi ".trim_end(alloc)
+  let trimmed_end_view = "  hi ".trim_end_view()
   let trimmed_ascii = " \tHi\n".trim_ascii(alloc)
   let lower = "AbC".to_lower_ascii(alloc)
   let upper = "AbC".to_upper_ascii(alloc)
   let sliced = "hello".slice_range(1, 4)
   let lines = "a\nb\n".split_lines(alloc)
-  alloc.vec_string_free(words)
-  alloc.vec_string_free(lines)
+  let line_views = "a\r\nb\n".lines_view(alloc)
   c.assert(n == 3 && b == 'a' && count == 3)
+  c.assert(word_views.len() == 3)
   c.assert(trimmed.len() == 2)
+  c.assert(trimmed_view.eq("hi"))
   c.assert(trimmed.starts_with_byte('h'))
   c.assert(trimmed.ends_with_byte('i'))
   c.assert(trimmed_start.starts_with("hi"))
+  c.assert(trimmed_start_view.starts_with("hi"))
   c.assert(trimmed_end.ends_with("hi"))
+  c.assert(trimmed_end_view.ends_with("hi"))
   c.assert(trimmed_ascii.eq("Hi"))
   c.assert(lower.eq("abc"))
   c.assert(upper.eq("ABC"))
@@ -75,9 +82,18 @@ pub fn main(rc: RootCap) -> i32 {
     Err(_) => { c.assert(false) }
   }
   c.assert("abca".count_byte('a') == 2)
+  c.assert("a\nb\n".count_newlines() == 2)
+  c.assert(" a  bc \t d ".count_words_ascii() == 3)
   c.assert("abc".is_ascii())
   c.assert("abc".byte_at_checked(10).is_err())
   match ("a,b,c".split_once(alloc, ',')) {
+    Ok(parts) => {
+      c.assert(parts.left.eq("a"))
+      c.assert(parts.right.eq("b,c"))
+    }
+    Err(_) => { c.assert(false) }
+  }
+  match ("a,b,c".split_once_view(',')) {
     Ok(parts) => {
       c.assert(parts.left.eq("a"))
       c.assert(parts.right.eq("b,c"))
@@ -90,10 +106,16 @@ pub fn main(rc: RootCap) -> i32 {
   }
   let pieces = "a,b,c".split(alloc, ',')
   c.assert(pieces.len() == 3)
+  c.assert(line_views.len() == 2)
   match (pieces.join(",")) {
     Ok(joined) => { c.assert(joined.eq("a,b,c")) }
     Err(_) => { c.assert(false) }
   }
+  alloc.vec_string_free(words)
+  alloc.vec_string_free(word_views)
+  alloc.vec_string_free(lines)
+  alloc.vec_string_free(line_views)
+  alloc.vec_string_free(pieces)
   c.println("string ok")
   return 0
 }

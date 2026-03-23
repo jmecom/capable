@@ -112,6 +112,14 @@ fn take_handle<T>(
     table.remove(&handle)
 }
 
+fn clone_handle<T: Clone>(
+    table: &LazyLock<Mutex<HashMap<Handle, T>>>,
+    handle: Handle,
+    label: &'static str,
+) -> Option<T> {
+    with_table(table, label, |table| table.get(&handle).cloned())
+}
+
 fn has_handle<T>(
     table: &LazyLock<Mutex<HashMap<Handle, T>>>,
     handle: Handle,
@@ -484,7 +492,7 @@ pub extern "C" fn capable_rt_fs_exists(
     path: *const CapString,
 ) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return 0;
     };
@@ -507,7 +515,7 @@ pub extern "C" fn capable_rt_fs_read_bytes(
     out_err: *mut i32,
 ) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -536,7 +544,7 @@ pub extern "C" fn capable_rt_fs_list_dir(
     out_err: *mut i32,
 ) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -571,7 +579,7 @@ pub extern "C" fn capable_rt_fs_dir_exists(
     name: *const CapString,
 ) -> u8 {
     let name = unsafe { read_cap_string(name) };
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
     };
@@ -594,7 +602,7 @@ pub extern "C" fn capable_rt_fs_dir_read_bytes(
     out_err: *mut i32,
 ) -> u8 {
     let name = unsafe { read_cap_string(name) };
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -622,7 +630,7 @@ pub extern "C" fn capable_rt_fs_dir_list_dir(
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let Some(state) = state else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -645,6 +653,33 @@ pub extern "C" fn capable_rt_fs_dir_list_dir(
     match vec_from_strings(_alloc, names) {
         Some(handle) => write_handle_result(out_ok, out_err, Ok(handle)),
         None => write_handle_result(out_ok, out_err, Err(FsErr::IoError)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_read_to_string(
+    dir: Handle,
+    _alloc: Handle,
+    name: *const CapString,
+    out_ok: *mut CapString,
+    out_err: *mut i32,
+) -> u8 {
+    let name = unsafe { read_cap_string(name) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(name)) = (state, name) else {
+        return write_result_with_alloc(_alloc, out_ok, out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return write_result_with_alloc(_alloc, out_ok, out_err, Err(FsErr::InvalidPath));
+    };
+    let combined = state.rel.join(name_rel);
+    let full = match resolve_rooted_path(&state.root, &combined) {
+        Ok(path) => path,
+        Err(err) => return write_result_with_alloc(_alloc, out_ok, out_err, Err(err)),
+    };
+    match std::fs::read_to_string(&full) {
+        Ok(contents) => write_result_with_alloc(_alloc, out_ok, out_err, Ok(contents)),
+        Err(err) => write_result_with_alloc(_alloc, out_ok, out_err, Err(map_fs_err(err))),
     }
 }
 
@@ -819,7 +854,7 @@ pub extern "C" fn capable_rt_fs_read_to_string(
     out_err: *mut i32,
 ) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
 
     let Some(state) = state else {
         return write_result_with_alloc(_alloc, out_ok, out_err, Err(FsErr::PermissionDenied));

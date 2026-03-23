@@ -1,0 +1,27 @@
+package safe
+module fs_reuse
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let alloc = rc.mint_alloc_default()
+
+  let rfs = rc.mint_readfs("./config")
+  c.assert(rfs.exists("app.txt"))
+
+  match rfs.read_to_string(alloc, "app.txt") {
+    Ok(s) => { c.assert(s.len() > 0) }
+    Err(_) => { c.println("read_to_string failed"); return 1 }
+  }
+
+  match rfs.read_bytes(alloc, "app.txt") {
+    Ok(bytes) => {
+      c.assert(bytes.len() > 0)
+      alloc.vec_u8_free(bytes)
+    }
+    Err(_) => { c.println("read_bytes failed"); return 1 }
+  }
+
+  c.println("fs reuse ok")
+  return 0
+}

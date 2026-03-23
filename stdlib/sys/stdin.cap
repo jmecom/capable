@@ -10,7 +10,7 @@ pub capability struct Stdin
 
 impl Stdin {
   /// Read stdin into a string.
-  pub fn read_to_string(self, alloc: buffer::Alloc) -> Result<string, io::IoErr> {
+  pub fn read_to_string(self: &Stdin, alloc: buffer::Alloc) -> Result<string, io::IoErr> {
     return Err(io::IoErr::IoError)
   }
 }

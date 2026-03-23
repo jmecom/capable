@@ -6,18 +6,9 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let v = alloc.vec_i32_new()
-  match (v.push(1)) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (v.push(2)) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (v.push(1)) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
+  v.push(1).ok()
+  v.push(2).ok()
+  v.push(1).ok()
   c.assert(v.contains(2))
   c.assert(!v.contains(3))
   c.assert(v.count(1) == 2)
@@ -37,19 +28,17 @@ pub fn main(rc: RootCap) -> i32 {
     Ok(x) => { c.assert(x == 1) }
     Err(_) => { c.assert(false); return 1 }
   }
+  v.swap(0, 1).ok()
+  match (v.first()) {
+    Ok(x) => { c.assert(x == 2) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  c.assert(v.get_or(1, 99) == 1)
+  c.assert(v.get_or(99, 77) == 77)
   let bytes = alloc.vec_u8_new()
-  match (bytes.push('h')) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); alloc.vec_i32_free(v); alloc.vec_u8_free(bytes); return 1 }
-  }
-  match (bytes.push('i')) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); alloc.vec_i32_free(v); alloc.vec_u8_free(bytes); return 1 }
-  }
-  match (bytes.to_string()) {
-    Ok(s) => { c.assert(s.eq("hi")) }
-    Err(_) => { c.assert(false); alloc.vec_i32_free(v); alloc.vec_u8_free(bytes); return 1 }
-  }
+  bytes.push('h').ok()
+  bytes.push('i').ok()
+  c.assert(bytes.to_string().ok().eq("hi"))
   alloc.vec_i32_free(v)
   alloc.vec_u8_free(bytes)
   c.println("vec search ok")

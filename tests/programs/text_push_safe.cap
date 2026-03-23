@@ -7,42 +7,12 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = string::text_new(alloc)
-  match text.push_byte('\x00') {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      text.free(alloc)
-      return 1
-    }
-  }
-  match text.push_byte('\x07') {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      text.free(alloc)
-      return 1
-    }
-  }
+  text.push_byte('\x00').ok()
+  text.push_byte('\x07').ok()
   let v = alloc.vec_u8_new()
-  match v.push('\t') {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      alloc.vec_u8_free(v)
-      text.free(alloc)
-      return 1
-    }
-  }
+  v.push('\t').ok()
   let slice = v.as_slice()
-  match text.extend_slice(slice) {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      alloc.vec_u8_free(v)
-      text.free(alloc)
-      return 1
-    }
-  }
+  text.extend_slice(slice).ok()
   let len = text.len()
   c.assert(len == 3)
   c.assert(!text.is_empty())

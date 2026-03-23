@@ -19,7 +19,7 @@ pub struct Text {
   bytes: vec::Vec<u8>
 }
 
-/// Result payload for split_once.
+/// Result payload for split_once and split_once_view.
 pub struct SplitOnce {
   left: string,
   right: string
@@ -69,6 +69,19 @@ fn build_range(alloc: buffer::Alloc, s: string, start: i32, end: i32) -> string 
     i = i + 1
   }
   match (buf.to_string()) {
+    Ok(out) => { return out }
+    Err(_) => { panic() }
+  }
+}
+
+fn view_range(s: string, start: i32, end: i32) -> string {
+  if (end <= start) {
+    return ""
+  }
+  if (start == 0 && end == s.len()) {
+    return s
+  }
+  match (s.slice_range(start, end)) {
     Ok(out) => { return out }
     Err(_) => { panic() }
   }
@@ -290,6 +303,32 @@ impl string {
     return out
   }
 
+  /// Split on ASCII whitespace without copying the pieces.
+  pub fn split_whitespace_view(self, alloc: buffer::Alloc) -> Vec<string> {
+    let out = alloc.vec_string_new()
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let i = 0
+    while (i < len) {
+      while (i < len && bytes.at(i).is_whitespace()) {
+        i = i + 1
+      }
+      if (i >= len) {
+        break
+      }
+      let start = i
+      while (i < len && !bytes.at(i).is_whitespace()) {
+        i = i + 1
+      }
+      let part = view_range(self, start, i)
+      match (out.push(part)) {
+        Ok(_) => { }
+        Err(_) => { panic() }
+      }
+    }
+    return out
+  }
+
   pub fn lines(self, alloc: buffer::Alloc) -> Vec<string> {
     let out = alloc.vec_string_new()
     let bytes = self.as_slice()
@@ -317,6 +356,42 @@ impl string {
         end = end - 1
       }
       let part = build_range(alloc, self, start, end)
+      match (out.push(part)) {
+        Ok(_) => { }
+        Err(_) => { panic() }
+      }
+    }
+    return out
+  }
+
+  /// Split into line views without copying the pieces.
+  pub fn lines_view(self, alloc: buffer::Alloc) -> Vec<string> {
+    let out = alloc.vec_string_new()
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let start = 0
+    let i = 0
+    while (i < len) {
+      if (bytes.at(i) == '\n') {
+        let end = i
+        if (end > start && bytes.at(end - 1) == '\r') {
+          end = end - 1
+        }
+        let part = view_range(self, start, end)
+        match (out.push(part)) {
+          Ok(_) => { }
+          Err(_) => { panic() }
+        }
+        start = i + 1
+      }
+      i = i + 1
+    }
+    if (start < len) {
+      let end = len
+      if (end > start && bytes.at(end - 1) == '\r') {
+        end = end - 1
+      }
+      let part = view_range(self, start, end)
       match (out.push(part)) {
         Ok(_) => { }
         Err(_) => { panic() }
@@ -367,6 +442,66 @@ impl string {
       i = i + 1
     }
     return Err(())
+  }
+
+  /// Split once on the first matching delimiter without copying.
+  pub fn split_once_view(self, delim: u8) -> Result<SplitOnce, unit> {
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let i = 0
+    while (i < len) {
+      if (bytes.at(i) == delim) {
+        return Ok(SplitOnce {
+          left: view_range(self, 0, i),
+          right: view_range(self, i + 1, len)
+        })
+      }
+      i = i + 1
+    }
+    return Err(())
+  }
+
+  /// Trim ASCII whitespace from both ends without copying.
+  pub fn trim_view(self) -> string {
+    let start_trimmed = self.trim_start_view()
+    return start_trimmed.trim_end_view()
+  }
+
+  /// Trim ASCII whitespace from the start without copying.
+  pub fn trim_start_view(self) -> string {
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let i = 0
+    while (i < len) {
+      if (!bytes.at(i).is_whitespace()) {
+        break
+      }
+      i = i + 1
+    }
+    if (i == 0) {
+      return self
+    }
+    return view_range(self, i, len)
+  }
+
+  /// Trim ASCII whitespace from the end without copying.
+  pub fn trim_end_view(self) -> string {
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    if (len == 0) {
+      return self
+    }
+    let i = len
+    while (i > 0) {
+      if (!bytes.at(i - 1).is_whitespace()) {
+        break
+      }
+      i = i - 1
+    }
+    if (i == len) {
+      return self
+    }
+    return view_range(self, 0, i)
   }
 
   /// Trim ASCII whitespace from both ends.
@@ -643,6 +778,32 @@ impl string {
         count = count + 1
       }
       i = i + 1
+    }
+    return count
+  }
+
+  /// Count newline bytes.
+  pub fn count_newlines(self) -> i32 {
+    return self.count_byte('\n')
+  }
+
+  /// Count ASCII whitespace-delimited words without allocating.
+  pub fn count_words_ascii(self) -> i32 {
+    let bytes = self.as_slice()
+    let len = bytes.len()
+    let i = 0
+    let count = 0
+    while (i < len) {
+      while (i < len && bytes.at(i).is_whitespace()) {
+        i = i + 1
+      }
+      if (i >= len) {
+        break
+      }
+      count = count + 1
+      while (i < len && !bytes.at(i).is_whitespace()) {
+        i = i + 1
+      }
     }
     return count
   }

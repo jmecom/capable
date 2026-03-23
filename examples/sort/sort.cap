@@ -36,8 +36,8 @@ fn str_lt(a: string, b: string) -> bool {
 
 // Compare lines at indices i and j
 fn line_lt(lines: Vec<string>, i: i32, j: i32) -> bool {
-  let line_i = lines[i].unwrap_or("")
-  let line_j = lines[j].unwrap_or("")
+  let line_i = lines.get_or(i, "")
+  let line_j = lines.get_or(j, "")
   return str_lt(line_i, line_j)
 }
 
@@ -47,18 +47,10 @@ fn sort_indices(lines: Vec<string>, indices: Vec<i32>) -> unit {
   for i in 1..n {
     let j = i
     while (j > 0) {
-      let curr_idx = indices[j].unwrap_or(0)
-      let prev_idx = indices[j - 1].unwrap_or(0)
+      let curr_idx = indices.get_or(j, 0)
+      let prev_idx = indices.get_or(j - 1, 0)
       if (line_lt(lines, curr_idx, prev_idx)) {
-        // swap indices[j] and indices[j-1]
-        match (indices.set(j, prev_idx)) {
-          Ok(ok) => {}
-          Err(e) => {}
-        }
-        match (indices.set(j - 1, curr_idx)) {
-          Ok(ok) => {}
-          Err(e) => {}
-        }
+        indices.swap(j, j - 1).ok()
         j = j - 1
       } else {
         break
@@ -69,24 +61,21 @@ fn sort_indices(lines: Vec<string>, indices: Vec<i32>) -> unit {
 
 fn run(c: Console, alloc: Alloc, input: Stdin) -> Result<unit, io::IoErr> {
   let contents = input.read_to_string(alloc)?
-  let lines = contents.lines(alloc)
+  let lines = contents.lines_view(alloc)
   let n = lines.len()
 
   // Create index array [0, 1, 2, ...]
   let indices = alloc.vec_i32_new()
   for i in 0..n {
-    match (indices.push(i)) {
-      Ok(ok) => {}
-      Err(e) => {}
-    }
+    indices.push(i).ok()
   }
 
   sort_indices(lines, indices)
 
   // Print lines in sorted order (skip empty lines)
   for i in 0..n {
-    let idx = indices[i].unwrap_or(0)
-    let line = lines[idx].unwrap_or("")
+    let idx = indices.get_or(i, 0)
+    let line = lines.get_or(idx, "")
     if (line.len() > 0) {
       c.println(line)
     }

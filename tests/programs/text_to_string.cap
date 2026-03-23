@@ -7,18 +7,9 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = string::text_new(alloc)
-  match (text.push_byte('h')) {
-    Ok(_) => { }
-    Err(_) => { panic() }
-  }
-  match (text.push_byte('i')) {
-    Ok(_) => { }
-    Err(_) => { panic() }
-  }
-  let s = match (text.to_string()) {
-    Ok(v) => { v }
-    Err(_) => { panic() }
-  }
+  text.push_byte('h').ok()
+  text.push_byte('i').ok()
+  let s = text.to_string().ok()
   c.println(s)
   text.free(alloc)
   return 0

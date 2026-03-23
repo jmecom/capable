@@ -9,12 +9,20 @@ This is a compact policy reference for language invariants and safety boundaries
   - raw pointers (`*T`)
   - `extern` functions
 
+## Resource Model
+
+- Most values are plain data and are unrestricted by default.
+- `opaque struct` represents a resource/owner handle.
+- `capability struct` represents an authority-bearing resource.
+- Structs/enums that contain resource/capability fields become move-tracked by
+  containment.
+
 ## Borrow‑Lite Rules
 
 - `&T` is allowed in parameters and locals.
 - Reference locals must be initialized from another local value.
 - References cannot be stored in structs/enums or returned.
-- References are read‑only: they are only valid for `&T` parameters.
+- References are read‑only and intentionally short-lived.
 
 ## Move / Linear Rules
 
@@ -22,11 +30,21 @@ This is a compact policy reference for language invariants and safety boundaries
 - **Affine**: move‑only; use‑after‑move is a type error.
 - **Linear**: move‑only and must be consumed on all paths.
 - Extracting an affine/linear field consumes the whole root local.
+- In practice these rules are primarily for resources, capabilities, and values
+  that contain them.
 
 ## Capabilities
 
 - Capabilities are opaque (`capability struct`) and cannot be forged.
-- Attenuation APIs consume the stronger capability.
+- Prefer three distinct API shapes in `sys.*`:
+  - use operations
+  - attenuation operations
+  - child-handle operations
+- Reusable use operations should borrow where possible.
+- Attenuation operations consume the stronger capability.
+- Under the current checker, methods on move-tracked capabilities that return
+  capabilities still take `self` by value. This is a conservative rule that
+  keeps authority flow explicit.
 - Runtime enforces root/relative path checks.
 
 ## No‑Implicitness

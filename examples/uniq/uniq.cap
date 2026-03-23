@@ -11,18 +11,18 @@ fn should_print(lines: Vec<string>, i: i32) -> bool {
   if (i == 0) {
     return true
   }
-  let curr = lines[i].unwrap_or("")
-  let prev = lines[i - 1].unwrap_or("")
+  let curr = lines.get_or(i, "")
+  let prev = lines.get_or(i - 1, "")
   return prev != curr
 }
 
 fn run(c: Console, alloc: Alloc, input: Stdin) -> Result<unit, io::IoErr> {
   let contents = input.read_to_string(alloc)?
-  let lines = contents.lines(alloc)
+  let lines = contents.lines_view(alloc)
   let n = lines.len()
   for i in 0..n {
     if (should_print(lines, i)) {
-      let line = lines[i].unwrap_or("")
+      let line = lines.get_or(i, "")
       c.println(line)
     }
   }

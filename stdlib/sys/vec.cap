@@ -205,6 +205,14 @@ impl<T> Vec<T> {
     return self.get(len - 1)
   }
 
+  /// Get element at index, or return a fallback value.
+  pub fn get_or(self, i: i32, fallback: T) -> T {
+    match (self.get(i)) {
+      Ok(v) => { return v }
+      Err(_) => { return fallback }
+    }
+  }
+
   /// Set element at index.
   pub fn set(self, i: i32, x: T) -> Result<unit, VecErr> {
     let header = read_header<T>(self)
@@ -213,6 +221,24 @@ impl<T> Vec<T> {
     }
     let ptr = elem_ptr<T>(header.raw, header.elem_size, i)
     unsafe_ptr::ptr_write<T>(ptr, x)
+    return Ok(())
+  }
+
+  /// Swap two elements in place.
+  pub fn swap(self, i: i32, j: i32) -> Result<unit, VecErr> {
+    let header = read_header<T>(self)
+    if (i < 0 || i >= header.len || j < 0 || j >= header.len) {
+      return Err(VecErr::OutOfRange)
+    }
+    if (i == j) {
+      return Ok(())
+    }
+    let ptr_i = elem_ptr<T>(header.raw, header.elem_size, i)
+    let ptr_j = elem_ptr<T>(header.raw, header.elem_size, j)
+    let tmp = unsafe_ptr::ptr_read<T>(ptr_i)
+    let other = unsafe_ptr::ptr_read<T>(ptr_j)
+    unsafe_ptr::ptr_write<T>(ptr_i, other)
+    unsafe_ptr::ptr_write<T>(ptr_j, tmp)
     return Ok(())
   }
 

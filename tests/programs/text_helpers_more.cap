@@ -7,55 +7,20 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = alloc.text_new()
-  match (text.push_str("hi")) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (text.push_byte('\n')) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (text.push_str("ok")) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (text.slice_range(0, 2)) {
-    Ok(view) => { c.assert(view.eq("hi")) }
-    Err(_) => { c.assert(false); return 1 }
-  }
+  text.push_str("hi").ok()
+  text.push_byte('\n').ok()
+  text.push_str("ok").ok()
+  c.assert(text.slice_range(0, 2).ok().eq("hi"))
   let v = alloc.vec_u8_new()
-  match (v.push('!')) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (text.extend_vec(v)) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (text.to_string()) {
-    Ok(s) => { c.assert(s.eq("hi\nok!")) }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match (alloc.text_from("cap")) {
-    Ok(t2) => {
-      match (t2.to_string()) {
-        Ok(s) => { c.assert(s.eq("cap")) }
-        Err(_) => { c.assert(false); return 1 }
-      }
-      t2.free(alloc)
-    }
-    Err(_) => { c.assert(false); return 1 }
-  }
-  match ("owned".to_text(alloc)) {
-    Ok(t3) => {
-      match (t3.to_string()) {
-        Ok(s) => { c.assert(s.eq("owned")) }
-        Err(_) => { c.assert(false); return 1 }
-      }
-      t3.free(alloc)
-    }
-    Err(_) => { c.assert(false); return 1 }
-  }
+  v.push('!').ok()
+  text.extend_vec(v).ok()
+  c.assert(text.to_string().ok().eq("hi\nok!"))
+  let t2 = alloc.text_from("cap").ok()
+  c.assert(t2.to_string().ok().eq("cap"))
+  t2.free(alloc)
+  let t3 = "owned".to_text(alloc).ok()
+  c.assert(t3.to_string().ok().eq("owned"))
+  t3.free(alloc)
   alloc.vec_u8_free(v)
   text.free(alloc)
   c.println("text helpers ok")
