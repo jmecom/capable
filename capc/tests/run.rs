@@ -127,6 +127,20 @@ fn run_fs_dir_reuse() {
 }
 
 #[test]
+fn run_fs_open_read_reuse() {
+    let out_dir = make_out_dir("fs_open_read_reuse");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/fs_open_read_reuse.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("same"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_let_else() {
     let out_dir = make_out_dir("let_else");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
@@ -134,6 +148,16 @@ fn run_let_else() {
         run_capc(&["run", "--out-dir", out_dir, "tests/programs/let_else.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("let else ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_try_let() {
+    let out_dir = make_out_dir("try_let");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/try_let.cap"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("try let ok"), "stdout was: {stdout:?}");
 }
 
 #[test]
@@ -1098,34 +1122,6 @@ fn run_generic_and_index() {
 }
 
 #[test]
-fn run_result_is_ok_is_err() {
-    let out_dir = make_out_dir("result_is_ok_is_err");
-    let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/should_pass_result_is_ok_is_err.cap",
-    ]);
-    assert_eq!(code, 0);
-    assert!(stdout.contains("is_ok_is_err ok"), "stdout was: {stdout:?}");
-}
-
-#[test]
-fn run_result_ok_err() {
-    let out_dir = make_out_dir("result_ok_err");
-    let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/should_pass_result_ok_err.cap",
-    ]);
-    assert_eq!(code, 0);
-    assert!(stdout.contains("ok_err ok"), "stdout was: {stdout:?}");
-}
-
-#[test]
 fn run_defer() {
     let out_dir = make_out_dir("defer");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
@@ -1172,23 +1168,6 @@ fn run_defer_return() {
     assert_eq!(code, 0);
     assert!(
         stdout.contains("start\ninner\nouter\n"),
-        "stdout was: {stdout:?}"
-    );
-}
-
-#[test]
-fn run_if_let() {
-    let out_dir = make_out_dir("if_let");
-    let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/should_pass_if_let.cap",
-    ]);
-    assert_eq!(code, 0);
-    assert!(
-        stdout.contains("ok\nerr\nif_let ok\n"),
         "stdout was: {stdout:?}"
     );
 }

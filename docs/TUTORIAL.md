@@ -81,13 +81,11 @@ pub fn main(rc: RootCap) -> i32 {
 }
 ```
 
-Matches must be exhaustive; use `_` to cover the rest. `if let` is a
-single-arm match:
+Matches must be exhaustive; use `_` to cover the rest. `let ... else` is for
+general pattern matching on enums and similar values:
 
 ```cap
-if let Ok(x) = make() {
-  return x
-} else {
+let Maybe::Some(v) = from_flag(true) else {
   return 0
 }
 ```
@@ -131,12 +129,35 @@ fn use_value() -> Result<i32, i32> {
 }
 ```
 
-Other helpers:
+Common forms:
 
 ```cap
-let v = make().unwrap_or(0)
-let e = make().unwrap_err_or(0)
+fn send() -> Result<unit, i32> {
+  return Ok(())
+}
+
+fn bind_value() -> i32 {
+  try let v = parse() else {
+    return 0
+  }
+  return v
+}
+
+fn write_value() -> Result<unit, i32> {
+  try send() else err {
+    return Err(err)
+  }
+  return Ok(())
+}
 ```
+
+The intended split is:
+
+- `?` for propagation
+- `try let ... else` when a `Result` success value needs to be bound
+- `try expr else` for statement-style error flow
+- `let ... else` for non-`Result` pattern matching
+- `match` for real branching
 
 ## 6) Capabilities and attenuation
 
@@ -184,15 +205,19 @@ In practice, capability APIs fall into three shapes:
 
 That distinction matters more than "everything moves." A read-only filesystem
 capability being used to read a file is different from a directory capability
-being narrowed to a subdirectory, and different again from a listener producing
-a fresh connection handle.
+being narrowed to a subdirectory, and different again from a directory or
+listener producing a fresh linear child handle.
 
-In the current implementation, reusable use operations borrow where possible.
+The current rule is:
+
+- reusable use operations borrow
+- attenuation to a reusable capability consumes `self`
+- child-handle operations may borrow when they return a fresh linear capability
+
 That is why `ReadFS.read_to_string` and `Dir.read_to_string` can be called
-multiple times on the same capability value. By contrast, methods on
-move-tracked capabilities that return capabilities still take `self` by value
-under the current checker. That is why `Dir.subdir` and `Dir.open_read`
-consume `Dir`, while `TcpListener.accept` can borrow: `TcpListener` is copyable.
+multiple times on the same capability value, `Dir.subdir` still consumes
+`Dir`, and both `Dir.open_read` and `TcpListener.accept` can borrow while
+returning `FileRead`/`TcpConn`.
 
 ## 7) Resources and kinds
 

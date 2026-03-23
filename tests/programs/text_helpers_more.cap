@@ -7,19 +7,49 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = alloc.text_new()
-  text.push_str("hi").ok()
-  text.push_byte('\n').ok()
-  text.push_str("ok").ok()
-  c.assert(text.slice_range(0, 2).ok().eq("hi"))
+  try text.push_str("hi") else {
+    panic()
+  }
+  try text.push_byte('\n') else {
+    panic()
+  }
+  try text.push_str("ok") else {
+    panic()
+  }
+  try let prefix = text.slice_range(0, 2) else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(prefix.eq("hi"))
   let v = alloc.vec_u8_new()
-  v.push('!').ok()
-  text.extend_vec(v).ok()
-  c.assert(text.to_string().ok().eq("hi\nok!"))
-  let t2 = alloc.text_from("cap").ok()
-  c.assert(t2.to_string().ok().eq("cap"))
+  try v.push('!') else {
+    panic()
+  }
+  try text.extend_vec(v) else {
+    panic()
+  }
+  try let owned = text.to_string() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(owned.eq("hi\nok!"))
+  try let t2 = alloc.text_from("cap") else {
+    panic()
+  }
+  try let owned2 = t2.to_string() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(owned2.eq("cap"))
   t2.free(alloc)
-  let t3 = "owned".to_text(alloc).ok()
-  c.assert(t3.to_string().ok().eq("owned"))
+  try let t3 = "owned".to_text(alloc) else {
+    panic()
+  }
+  try let owned3 = t3.to_string() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(owned3.eq("owned"))
   t3.free(alloc)
   alloc.vec_u8_free(v)
   text.free(alloc)

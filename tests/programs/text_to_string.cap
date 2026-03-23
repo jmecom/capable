@@ -7,9 +7,15 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = string::text_new(alloc)
-  text.push_byte('h').ok()
-  text.push_byte('i').ok()
-  let s = text.to_string().ok()
+  try text.push_byte('h') else {
+    panic()
+  }
+  try text.push_byte('i') else {
+    panic()
+  }
+  try let s = text.to_string() else {
+    panic()
+  }
   c.println(s)
   text.free(alloc)
   return 0

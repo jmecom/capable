@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::abi::AbiType;
+use crate::ast::Span;
 use crate::error::TypeError;
 use crate::hir::*;
 use crate::typeck::Ty;
-use crate::ast::Span;
 
 const DUMMY_SPAN: Span = Span { start: 0, end: 0 };
 
@@ -169,7 +169,10 @@ impl MonoCtx {
             let key = qualify(&instance.module, &instance.base_name);
             if let Some(func) = self.functions.get(&key).cloned() {
                 let new_name = mangle_name(&instance.base_name, &instance.type_args);
-                if self.generated_functions.contains(&qualify(&instance.module, &new_name)) {
+                if self
+                    .generated_functions
+                    .contains(&qualify(&instance.module, &new_name))
+                {
                     continue;
                 }
                 let subs = build_substitution(&func.type_params, &instance.type_args, DUMMY_SPAN)?;
@@ -179,7 +182,10 @@ impl MonoCtx {
             }
             if let Some(func) = self.externs.get(&key).cloned() {
                 let new_name = mangle_name(&instance.base_name, &instance.type_args);
-                if self.generated_externs.contains(&qualify(&instance.module, &new_name)) {
+                if self
+                    .generated_externs
+                    .contains(&qualify(&instance.module, &new_name))
+                {
                     continue;
                 }
                 let subs = build_substitution(&func.type_params, &instance.type_args, DUMMY_SPAN)?;
@@ -206,12 +212,7 @@ impl MonoCtx {
                 entry = Some(module);
                 continue;
             }
-            if self
-                .program
-                .stdlib
-                .iter()
-                .any(|m| m.name == module.name)
-            {
+            if self.program.stdlib.iter().any(|m| m.name == module.name) {
                 stdlib.push(module);
             } else {
                 user_modules.push(module);
@@ -247,7 +248,8 @@ impl MonoCtx {
     fn push_struct(&mut self, module: &str, decl: HirStruct) {
         let key = qualify(module, &decl.name);
         if self.generated_structs.insert(key) {
-            self.structs.insert(qualify(module, &decl.name), decl.clone());
+            self.structs
+                .insert(qualify(module, &decl.name), decl.clone());
             if let Some(out) = self.out_modules.get_mut(module) {
                 out.structs.push(decl);
             }
@@ -547,7 +549,14 @@ impl MonoCtx {
                                 continue;
                             }
                             let mut inferred = HashMap::new();
-                            if match_type_params(&impl_info.target_ty, actual, &mut inferred, DUMMY_SPAN).is_ok() {
+                            if match_type_params(
+                                &impl_info.target_ty,
+                                actual,
+                                &mut inferred,
+                                DUMMY_SPAN,
+                            )
+                            .is_ok()
+                            {
                                 matches.push(impl_info.clone());
                             }
                         }
@@ -596,13 +605,8 @@ impl MonoCtx {
                     ResolvedCallee::Function { module, name, .. } => {
                         let key = qualify(module, name);
                         if let Some(func) = self.functions.get(&key).cloned() {
-                            let (new_name, symbol, type_args) = self.mono_callee(
-                                module,
-                                &func,
-                                &call.args,
-                                &call.type_args,
-                                subs,
-                            )?;
+                            let (new_name, symbol, type_args) =
+                                self.mono_callee(module, &func, &call.args, &call.type_args, subs)?;
                             let callee = ResolvedCallee::Function {
                                 module: module.clone(),
                                 name: new_name,
@@ -617,13 +621,8 @@ impl MonoCtx {
                             }));
                         }
                         if let Some(func) = self.externs.get(&key).cloned() {
-                            let (new_name, symbol, type_args) = self.mono_callee(
-                                module,
-                                &func,
-                                &call.args,
-                                &call.type_args,
-                                subs,
-                            )?;
+                            let (new_name, symbol, type_args) =
+                                self.mono_callee(module, &func, &call.args, &call.type_args, subs)?;
                             let callee = ResolvedCallee::Function {
                                 module: module.clone(),
                                 name: new_name,
@@ -802,10 +801,9 @@ impl MonoCtx {
         subs: &HashMap<String, Ty>,
     ) -> Result<Ty, TypeError> {
         match ty {
-            Ty::Param(name) => subs
-                .get(name)
-                .cloned()
-                .ok_or_else(|| TypeError::new(format!("unbound type parameter `{name}`"), DUMMY_SPAN)),
+            Ty::Param(name) => subs.get(name).cloned().ok_or_else(|| {
+                TypeError::new(format!("unbound type parameter `{name}`"), DUMMY_SPAN)
+            }),
             Ty::Builtin(_) => Ok(ty.clone()),
             Ty::Ptr(inner) => Ok(Ty::Ptr(Box::new(self.mono_ty(module, inner, subs)?))),
             Ty::Ref(inner) => Ok(Ty::Ref(Box::new(self.mono_ty(module, inner, subs)?))),
@@ -829,7 +827,8 @@ impl MonoCtx {
                     let qualified = name.contains('.');
                     if let Some(struct_def) = self.structs.get(&qualified_key).cloned() {
                         if !struct_def.type_params.is_empty() {
-                            let new_name = self.ensure_struct_instance(&type_module, &struct_def, &args)?;
+                            let new_name =
+                                self.ensure_struct_instance(&type_module, &struct_def, &args)?;
                             let name = if qualified {
                                 qualify(&type_module, &new_name)
                             } else {
@@ -842,7 +841,8 @@ impl MonoCtx {
                     }
                     if let Some(enum_def) = self.enums.get(&qualified_key).cloned() {
                         if !enum_def.type_params.is_empty() {
-                            let new_name = self.ensure_enum_instance(&type_module, &enum_def, &args)?;
+                            let new_name =
+                                self.ensure_enum_instance(&type_module, &enum_def, &args)?;
                             let name = if qualified {
                                 qualify(&type_module, &new_name)
                             } else {
@@ -961,7 +961,10 @@ impl MonoCtx {
                         });
                     }
                     if let Some(info) = self.enums.get(&qualified_key) {
-                        let has_payload = info.variants.iter().any(|variant| variant.payload.is_some());
+                        let has_payload = info
+                            .variants
+                            .iter()
+                            .any(|variant| variant.payload.is_some());
                         if has_payload {
                             return Ok(AbiType::Ptr);
                         }
@@ -1182,11 +1185,7 @@ fn mangle_name(base: &str, args: &[Ty]) -> String {
     if args.is_empty() {
         return base.to_string();
     }
-    let suffix = args
-        .iter()
-        .map(mangle_type)
-        .collect::<Vec<_>>()
-        .join("__");
+    let suffix = args.iter().map(mangle_type).collect::<Vec<_>>().join("__");
     format!("{base}__{suffix}")
 }
 
@@ -1210,11 +1209,7 @@ fn mangle_type(ty: &Ty) -> String {
             }
             let mut base = name.replace('.', "_");
             if !args.is_empty() {
-                let suffix = args
-                    .iter()
-                    .map(mangle_type)
-                    .collect::<Vec<_>>()
-                    .join("__");
+                let suffix = args.iter().map(mangle_type).collect::<Vec<_>>().join("__");
                 base = format!("{base}__{suffix}");
             }
             base

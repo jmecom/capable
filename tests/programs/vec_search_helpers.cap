@@ -7,9 +7,15 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let v = alloc.vec_i32_new()
-  v.push(1).ok()
-  v.push(2).ok()
-  v.push(1).ok()
+  try v.push(1) else {
+    panic()
+  }
+  try v.push(2) else {
+    panic()
+  }
+  try v.push(1) else {
+    panic()
+  }
   c.assert(v.contains(2))
   c.assert(!v.contains(3))
   c.assert(v.count(1) == 2)
@@ -29,7 +35,9 @@ pub fn main(rc: RootCap) -> i32 {
     Ok(x) => { c.assert(x == 1) }
     Err(_) => { c.assert(false); return 1 }
   }
-  v.swap(0, 1).ok()
+  try v.swap(0, 1) else {
+    panic()
+  }
   match (v.first()) {
     Ok(x) => { c.assert(x == 2) }
     Err(_) => { c.assert(false); return 1 }
@@ -37,9 +45,17 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(v.get_or(1, 99) == 1)
   c.assert(v.get_or(99, 77) == 77)
   let bytes = buffer::vec_new_default<u8>()
-  bytes.push('h').ok()
-  bytes.push('i').ok()
-  c.assert(bytes.to_string().ok().eq("hi"))
+  try bytes.push('h') else {
+    panic()
+  }
+  try bytes.push('i') else {
+    panic()
+  }
+  try let s = bytes.to_string() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(s.eq("hi"))
   alloc.vec_i32_free(v)
   bytes.free()
   c.println("vec search ok")

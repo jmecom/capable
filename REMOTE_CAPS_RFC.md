@@ -3,7 +3,7 @@
 This document describes a future initiative: delegating attenuated capabilities
 to remote workers or agents over the network.
 
-It is intentionally separate from [UPDATE_PLAN.md](./UPDATE_PLAN.md). The local
+It is intentionally separate from the current local-language docs. The local
 model should be stabilized first. Remote delegation builds on that model; it
 should not distort the scope of the local cleanup work.
 
@@ -121,7 +121,8 @@ complete hostile multi-tenant sandbox.
 
 ### Phase A: Stabilize the local model
 
-Complete the work in [UPDATE_PLAN.md](./UPDATE_PLAN.md) first.
+Complete the local cleanup and address the issues in [CURRENT_STATUS.md](./CURRENT_STATUS.md)
+and [PROBLEMS.md](./PROBLEMS.md) first.
 
 ### Phase B: Design `sys::remote`
 

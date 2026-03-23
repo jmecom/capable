@@ -310,10 +310,7 @@ pub enum ResolvedCallee {
         symbol: String,
     },
     /// A trait method call to be resolved during monomorphization.
-    TraitMethod {
-        trait_name: String,
-        method: String,
-    },
+    TraitMethod { trait_name: String, method: String },
     /// A runtime intrinsic
     Intrinsic(IntrinsicId),
 }
@@ -386,8 +383,8 @@ pub struct HirTry {
     pub span: Span,
 }
 
-/// Unconditional trap/panic. Used for unreachable code paths like
-/// calling .ok() on an Err variant.
+/// Unconditional trap/panic. Used for unreachable code paths after
+/// pattern-based control-flow desugaring.
 #[derive(Debug, Clone)]
 pub struct HirTrap {
     /// The type this expression would have produced (for type checking).

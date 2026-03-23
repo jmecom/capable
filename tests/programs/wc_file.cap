@@ -20,7 +20,7 @@ fn count_text(c: Console, s: string) -> i32 {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let args = rc.mint_args()
-  let Ok(path) = args.at(1) else {
+  try let path = args.at(1) else {
     c.println("usage: wc <path>")
     return 1
   }

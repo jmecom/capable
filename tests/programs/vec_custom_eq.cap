@@ -19,10 +19,18 @@ pub fn main(rc: RootCap) -> i32 {
 
   // Test Vec<Entry> with custom Eq
   let v = alloc.vec_new<Entry>()
-  v.push(Entry { key: 1, value: 10 }).ok()
-  v.push(Entry { key: 2, value: 20 }).ok()
-  v.push(Entry { key: 2, value: 20 }).ok()
-  v.push(Entry { key: 3, value: 30 }).ok()
+  try v.push(Entry { key: 1, value: 10 }) else {
+    panic()
+  }
+  try v.push(Entry { key: 2, value: 20 }) else {
+    panic()
+  }
+  try v.push(Entry { key: 2, value: 20 }) else {
+    panic()
+  }
+  try v.push(Entry { key: 3, value: 30 }) else {
+    panic()
+  }
 
   // Test contains_eq
   let target = Entry { key: 2, value: 20 }

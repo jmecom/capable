@@ -78,7 +78,7 @@ impl Dir {
   }
 
   /// Open a file for reading.
-  pub fn open_read(self, name: string) -> FileRead {
+  pub fn open_read(self: &Dir, name: string) -> FileRead {
     return ()
   }
 

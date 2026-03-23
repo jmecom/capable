@@ -56,10 +56,12 @@ Capability types use the same move kinds as other structs:
 - `linear capability struct` means **must be consumed** on all paths.
 - `copy capability struct` means **unrestricted** (only use this for caps you truly want to duplicate).
 
-Attenuation is enforced by method shape:
+Capability method shape distinguishes reusable attenuation from fresh child
+handles:
 
-- Any method that returns a capability must take `self` by value.
-- Any method that takes `&self` cannot return a capability.
+- Reusable use operations borrow: `&self -> data/result`.
+- Attenuation to another reusable capability consumes `self`.
+- Borrowed capability receivers may return a fresh linear capability.
 
 Quick examples:
 
@@ -68,7 +70,7 @@ capability struct Dir
 capability struct FileRead
 
 impl Dir {
-  pub fn open(self, name: string) -> FileRead { return () }
+  pub fn subdir(self, name: string) -> Dir { return () }
 }
 ```
 
@@ -77,7 +79,15 @@ capability struct Dir
 capability struct FileRead
 
 impl Dir {
-  pub fn open(self: &Dir, name: string) -> FileRead { return () } // error
+  pub fn open(self: &Dir, name: string) -> FileRead { return () } // ok
+}
+```
+
+```cap
+capability struct Dir
+
+impl Dir {
+  pub fn dup(self: &Dir) -> Dir { return () } // error
 }
 ```
 

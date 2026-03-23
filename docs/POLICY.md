@@ -42,9 +42,9 @@ This is a compact policy reference for language invariants and safety boundaries
   - child-handle operations
 - Reusable use operations should borrow where possible.
 - Attenuation operations consume the stronger capability.
-- Under the current checker, methods on move-tracked capabilities that return
-  capabilities still take `self` by value. This is a conservative rule that
-  keeps authority flow explicit.
+- Child-handle operations may borrow when they return a fresh linear
+  capability such as `FileRead` or `TcpConn`.
+- Borrowed capability receivers must not return reusable capabilities.
 - Runtime enforces root/relative path checks.
 
 ## No‑Implicitness
@@ -61,11 +61,16 @@ Keep these as invariants:
 - Division by zero traps.
 - Modular arithmetic is explicit via `sys.math` helpers.
 
-## Result Helpers
+## Result Flow
 
-- `Result.is_ok()` returns `true` if `Ok`, `false` if `Err`.
-- `Result.is_err()` returns `true` if `Err`, `false` if `Ok`.
-- `Result.ok()` returns the `Ok` value (traps if `Err`).
-- `Result.err()` returns the `Err` value (traps if `Ok`).
-- `Result.unwrap_or(default)` returns `Ok` value or the default.
-- `Result.unwrap_err_or(default)` returns `Err` value or the default.
+Use `Result<T, E>` with a small number of intended forms:
+
+- `?` to propagate an `Err` when the current function returns `Result`.
+- `try let x = expr else { ... }` when the success value needs to be bound.
+- `try expr else { ... }` or `try expr else err { ... }` for statement-style
+  `Result<unit, E>` handling.
+- `let PATTERN = expr else { ... }` for non-`Result` pattern matching.
+- `match` for real enum branching or multi-arm recovery logic.
+
+`Result` intentionally does not expose helper methods like `ok()` or
+`unwrap_or()`. Destructuring should stay visible in the source.

@@ -15,7 +15,7 @@ pub fn main(rc: RootCap) -> i32 {
   let stop = 0
 
   for i in 0..6 {
-    fail_at(i) else err {
+    try fail_at(i) else err {
       stop = err
       break
     }

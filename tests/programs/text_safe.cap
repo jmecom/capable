@@ -7,9 +7,15 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = string::text_new(alloc)
-  text.push_byte('a').ok()
-  text.push_byte('b').ok()
-  text.push_byte('c').ok()
+  try text.push_byte('a') else {
+    panic()
+  }
+  try text.push_byte('b') else {
+    panic()
+  }
+  try text.push_byte('c') else {
+    panic()
+  }
   let slice = text.as_slice()
   let len = slice.len()
   c.assert(len == 3)

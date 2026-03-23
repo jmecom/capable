@@ -30,8 +30,14 @@ pub fn main(rc: RootCap) -> i32 {
   let lines = "a\nb\n".split_lines(alloc)
   let line_views = "a\r\nb\n".lines_view(alloc)
   let t = buffer::text_new_default()
-  t.push_str("hi").ok()
-  c.assert(t.to_string().ok().eq("hi"))
+  try t.push_str("hi") else {
+    panic()
+  }
+  try let owned = t.to_string() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(owned.eq("hi"))
   t.free_default()
   c.assert(n == 3 && b == 'a' && count == 3)
   c.assert(word_views.len() == 3)
@@ -98,7 +104,10 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert("a\nb\n".count_newlines() == 2)
   c.assert(" a  bc \t d ".count_words_ascii() == 3)
   c.assert("abc".is_ascii())
-  c.assert("abc".byte_at_checked(10).is_err())
+  let Err(byte_err) = "abc".byte_at_checked(10) else {
+    c.assert(false)
+    return 1
+  }
   match ("a,b,c".split_once(alloc, ',')) {
     Ok(parts) => {
       c.assert(parts.left.eq("a"))

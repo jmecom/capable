@@ -24,6 +24,9 @@ impl Args {
 
   /// Get an argument by index, or return a fallback string.
   pub fn at_or(self, index: i32, fallback: string) -> string {
-    return self.at(index).unwrap_or(fallback)
+    try let arg = self.at(index) else {
+      return fallback
+    }
+    return arg
   }
 }

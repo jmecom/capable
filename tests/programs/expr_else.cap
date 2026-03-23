@@ -14,7 +14,7 @@ pub fn main(rc: RootCap) -> i32 {
 
   let total = 0
   for i in 0..4 {
-    write_value(i == 2) else {
+    try write_value(i == 2) else {
       continue
     }
     total = total + 1
@@ -22,13 +22,13 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(total == 1)
 
   let saw_err = false
-  write_value(false) else err {
+  try write_value(false) else err {
     c.assert(err == 7)
     saw_err = true
   }
   c.assert(saw_err)
 
-  write_value(true) else {
+  try write_value(true) else {
     return 1
   }
 

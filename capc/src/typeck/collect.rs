@@ -4,9 +4,9 @@ use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    build_type_param_bounds, build_type_params, desugar_impl_methods, lower_type, type_contains_ref,
-    type_param_names, EnumInfo, FunctionSig, StructInfo, TraitImplInfo, TraitInfo, TypeKind,
-    UseMap, StdlibIndex, RESERVED_TYPE_PARAMS, validate_type_args,
+    build_type_param_bounds, build_type_params, desugar_impl_methods, lower_type,
+    type_contains_ref, type_param_names, validate_type_args, EnumInfo, FunctionSig, StdlibIndex,
+    StructInfo, TraitImplInfo, TraitInfo, TypeKind, UseMap, RESERVED_TYPE_PARAMS,
 };
 
 /// Build the stdlib type index for name resolution.
@@ -133,16 +133,17 @@ pub(super) fn collect_traits(
                 methods.insert(method.name.item.clone(), sig);
             }
             let qualified = format!("{module_name}.{}", decl.name.item);
-            if traits.insert(
-                qualified,
-                TraitInfo {
-                    type_params: trait_param_names,
-                    methods,
-                    module: module_name.clone(),
-                    is_pub: decl.is_pub,
-                },
-            )
-            .is_some()
+            if traits
+                .insert(
+                    qualified,
+                    TraitInfo {
+                        type_params: trait_param_names,
+                        methods,
+                        module: module_name.clone(),
+                        is_pub: decl.is_pub,
+                    },
+                )
+                .is_some()
             {
                 return Err(TypeError::new(
                     format!("duplicate trait `{}`", decl.name.item),
@@ -240,7 +241,8 @@ pub(super) fn collect_functions(
                                     is_pub: bool|
              -> Result<(), TypeError> {
                 let type_param_set = build_type_params(type_params)?;
-                let type_param_bounds = build_type_param_bounds(type_params, &local_use, &module_name);
+                let type_param_bounds =
+                    build_type_param_bounds(type_params, &local_use, &module_name);
                 for param in params {
                     if param.ty.is_none() {
                         return Err(TypeError::new(
@@ -268,7 +270,10 @@ pub(super) fn collect_functions(
                     is_pub,
                 };
                 let qualified_key = format!("{module_name}.{}", name.item);
-                if functions.insert(qualified_key.clone(), sig.clone()).is_some() {
+                if functions
+                    .insert(qualified_key.clone(), sig.clone())
+                    .is_some()
+                {
                     return Err(TypeError::new(
                         format!("duplicate function `{qualified_key}`"),
                         span,
@@ -277,10 +282,7 @@ pub(super) fn collect_functions(
                 if module_name == entry_name {
                     let key = name.item.clone();
                     if functions.insert(key.clone(), sig).is_some() {
-                        return Err(TypeError::new(
-                            format!("duplicate function `{key}`"),
-                            span,
-                        ));
+                        return Err(TypeError::new(format!("duplicate function `{key}`"), span));
                     }
                 }
                 Ok(())
@@ -334,9 +336,7 @@ pub(super) fn collect_functions(
                             let key = format!("{impl_ty}::{method_name}");
                             if !impl_methods.insert(key.clone()) {
                                 return Err(TypeError::new(
-                                    format!(
-                                        "duplicate method `{method_name}` for `{impl_ty}`"
-                                    ),
+                                    format!("duplicate method `{method_name}` for `{impl_ty}`"),
                                     method.name.span,
                                 ));
                             }

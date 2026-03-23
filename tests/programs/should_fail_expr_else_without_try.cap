@@ -1,0 +1,13 @@
+package safe
+module should_fail_expr_else_without_try
+
+fn write_value() -> Result<unit, i32> {
+  return Err(7)
+}
+
+pub fn main() -> i32 {
+  write_value() else {
+    return 1
+  }
+  return 0
+}

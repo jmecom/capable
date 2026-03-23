@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::abi::AbiType;
 use crate::ast::*;
 use crate::error::TypeError;
-use crate::abi::AbiType;
 use crate::hir::{
     HirAssignStmt, HirBinary, HirBlock, HirBreakStmt, HirCall, HirContinueStmt, HirDeferStmt,
     HirEnum, HirEnumVariant, HirEnumVariantExpr, HirExpr, HirExprStmt, HirExternFunction, HirField,
@@ -87,12 +87,10 @@ impl<'a> LoweringCtx<'a> {
     }
 
     /// Push a new scope for name bindings (shadowing is not yet modeled here).
-    fn push_scope(&mut self) {
-    }
+    fn push_scope(&mut self) {}
 
     /// Pop the most recent scope (placeholder for future scope stacks).
-    fn pop_scope(&mut self) {
-    }
+    fn pop_scope(&mut self) {}
 }
 
 /// Lower a fully type-checked module into HIR.
@@ -153,7 +151,10 @@ pub(super) fn lower_module(
                     .map(|param| {
                         let Some(ty) = &param.ty else {
                             return Err(TypeError::new(
-                                format!("parameter `{}` requires a type annotation", param.name.item),
+                                format!(
+                                    "parameter `{}` requires a type annotation",
+                                    param.name.item
+                                ),
                                 param.name.span,
                             ));
                         };
@@ -330,22 +331,22 @@ fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<Vec<Hir
         }
         Stmt::Defer(defer_stmt) => lower_defer_stmt(defer_stmt, ctx, ret_ty),
         Stmt::Return(ret) => {
-            let expr = ret.expr.as_ref().map(|e| lower_expr(e, ctx, ret_ty)).transpose()?;
+            let expr = ret
+                .expr
+                .as_ref()
+                .map(|e| lower_expr(e, ctx, ret_ty))
+                .transpose()?;
             Ok(vec![HirStmt::Return(HirReturnStmt {
                 expr,
                 span: ret.span,
             })])
         }
-        Stmt::Break(break_stmt) => {
-            Ok(vec![HirStmt::Break(HirBreakStmt {
-                span: break_stmt.span,
-            })])
-        }
-        Stmt::Continue(continue_stmt) => {
-            Ok(vec![HirStmt::Continue(HirContinueStmt {
-                span: continue_stmt.span,
-            })])
-        }
+        Stmt::Break(break_stmt) => Ok(vec![HirStmt::Break(HirBreakStmt {
+            span: break_stmt.span,
+        })]),
+        Stmt::Continue(continue_stmt) => Ok(vec![HirStmt::Continue(HirContinueStmt {
+            span: continue_stmt.span,
+        })]),
         Stmt::If(if_stmt) => {
             let cond = lower_expr(&if_stmt.cond, ctx, ret_ty)?;
             let then_block = lower_block(&if_stmt.then_block, ctx, ret_ty)?;
@@ -452,7 +453,8 @@ fn lower_defer_stmt(
                 }
             }
 
-            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver)
+            {
                 ctx.local_types.contains_key(base_name)
             } else {
                 true
@@ -563,15 +565,17 @@ fn lower_defer_stmt(
             // Try type-specific method first (e.g., Slice__u8__at), fall back to base (Slice__at)
             let type_arg_suffix = super::build_type_arg_suffix(&receiver_args);
             let base_method_fn = format!("{type_name}__{}", method_call.method.item);
-            let specific_method_fn = format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
+            let specific_method_fn =
+                format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
             let qualified_specific = format!("{method_module}.{specific_method_fn}");
             let qualified_base = format!("{method_module}.{base_method_fn}");
 
-            let (method_fn, key) = if !type_arg_suffix.is_empty() && ctx.functions.contains_key(&qualified_specific) {
-                (specific_method_fn, qualified_specific)
-            } else {
-                (base_method_fn, qualified_base)
-            };
+            let (method_fn, key) =
+                if !type_arg_suffix.is_empty() && ctx.functions.contains_key(&qualified_specific) {
+                    (specific_method_fn, qualified_specific)
+                } else {
+                    (base_method_fn, qualified_base)
+                };
             let symbol = format!("capable_{}", key.replace('.', "_"));
 
             let mut args = Vec::with_capacity(method_call.args.len() + 1);
@@ -614,7 +618,6 @@ fn lower_defer_call_from_path(
     ret_ty: HirType,
     ctx: &mut LoweringCtx,
 ) -> Result<HirExpr, TypeError> {
-
     if path.segments.len() == 1 {
         let name = &path.segments[0].item;
         if name == "drop" || name == "panic" || name == "Ok" || name == "Err" {
@@ -635,7 +638,11 @@ fn lower_defer_call_from_path(
     let symbol = format!("capable_{}", key.replace('.', "_"));
 
     Ok(HirExpr::Call(HirCall {
-        callee: ResolvedCallee::Function { module, name, symbol },
+        callee: ResolvedCallee::Function {
+            module,
+            name,
+            symbol,
+        },
         type_args: lower_call_type_args(type_args, ctx)?,
         args,
         ret_ty,
@@ -668,11 +675,7 @@ fn capture_defer_expr(
 
 /// Helper to get the type of an AST expression using the existing typechecker.
 /// This ensures we have a single source of truth for types.
-fn type_of_ast_expr(
-    expr: &Expr,
-    ctx: &LoweringCtx,
-    ret_ty: &Ty,
-) -> Result<Ty, TypeError> {
+fn type_of_ast_expr(expr: &Expr, ctx: &LoweringCtx, ret_ty: &Ty) -> Result<Ty, TypeError> {
     if let Some(table) = ctx.type_table {
         if let Some(ty) = table.get(expr.span()) {
             return Ok(ty.clone());
@@ -756,9 +759,7 @@ fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeE
                     AbiType::Ptr
                 });
             }
-            if ctx
-                .enums
-                .contains_key(name)
+            if ctx.enums.contains_key(name)
                 || qualified
                     .as_ref()
                     .is_some_and(|q| ctx.enums.contains_key(q))
@@ -803,7 +804,9 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 }
             }
 
-            let variant_name = path.segments.last()
+            let variant_name = path
+                .segments
+                .last()
                 .map(|s| s.item.clone())
                 .unwrap_or_else(|| String::from("unknown"));
 
@@ -922,7 +925,8 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 }
             }
 
-            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver)
+            {
                 ctx.local_types.contains_key(base_name)
             } else {
                 true
@@ -1035,15 +1039,17 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             // Try type-specific method first (e.g., Slice__u8__at), fall back to base (Slice__at)
             let type_arg_suffix = super::build_type_arg_suffix(&receiver_args);
             let base_method_fn = format!("{type_name}__{}", method_call.method.item);
-            let specific_method_fn = format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
+            let specific_method_fn =
+                format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
             let qualified_specific = format!("{method_module}.{specific_method_fn}");
             let qualified_base = format!("{method_module}.{base_method_fn}");
 
-            let (method_fn, key) = if !type_arg_suffix.is_empty() && ctx.functions.contains_key(&qualified_specific) {
-                (specific_method_fn, qualified_specific)
-            } else {
-                (base_method_fn, qualified_base)
-            };
+            let (method_fn, key) =
+                if !type_arg_suffix.is_empty() && ctx.functions.contains_key(&qualified_specific) {
+                    (specific_method_fn, qualified_specific)
+                } else {
+                    (base_method_fn, qualified_base)
+                };
             let symbol = format!("capable_{}", key.replace('.', "_"));
 
             let mut args = Vec::with_capacity(method_call.args.len() + 1);
@@ -1095,18 +1101,21 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
                 }
             }
 
-            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
-                ctx.local_types.contains_key(base_name)
-            } else {
-                true
-            };
+            let base_is_local =
+                if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                    ctx.local_types.contains_key(base_name)
+                } else {
+                    true
+                };
 
             if !base_is_local {
                 if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
                     if let Some(enum_ty) =
                         resolve_enum_variant(&path, ctx.use_map, ctx.enums, ctx.module_name)
                     {
-                        let variant_name = path.segments.last()
+                        let variant_name = path
+                            .segments
+                            .last()
                             .map(|s| s.item.clone())
                             .unwrap_or_else(|| String::from("unknown"));
 
@@ -1215,7 +1224,9 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             let scrutinee = lower_expr(&try_expr.expr, ctx, ret_ty)?;
             let scrutinee_ty = scrutinee.ty().clone();
             let ok_ty = match &scrutinee_ty.ty {
-                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => args[0].clone(),
+                Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => {
+                    args[0].clone()
+                }
                 _ => {
                     return Err(TypeError::new(
                         "the `?` operator expects a Result value".to_string(),
@@ -1306,11 +1317,7 @@ fn lower_match_stmt(
     Ok(HirExpr::Match(HirMatch {
         expr: Box::new(scrutinee),
         arms: hir_arms,
-        result_ty: hir_type_for(
-            Ty::Builtin(super::BuiltinType::Unit),
-            ctx,
-            match_expr.span,
-        )?,
+        result_ty: hir_type_for(Ty::Builtin(super::BuiltinType::Unit), ctx, match_expr.span)?,
         span: match_expr.span,
     }))
 }
@@ -1332,8 +1339,12 @@ fn lower_pattern(
         }
 
         Pattern::Path(path) => {
-            if let Some(_enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
-                let variant_name = path.segments.last()
+            if let Some(_enum_ty) =
+                resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name)
+            {
+                let variant_name = path
+                    .segments
+                    .last()
                     .map(|s| s.item.clone())
                     .unwrap_or_else(|| "unknown".to_string());
                 Ok(HirPattern::Variant {
@@ -1348,7 +1359,11 @@ fn lower_pattern(
             }
         }
 
-        Pattern::Call { path, binding, span } => {
+        Pattern::Call {
+            path,
+            binding,
+            span,
+        } => {
             // Check for Result::Ok/Err variants (both qualified and unqualified)
             let variant_name = path.segments.last().map(|s| s.item.as_str());
             if variant_name == Some("Ok") || variant_name == Some("Err") {
@@ -1376,8 +1391,12 @@ fn lower_pattern(
                 }
             }
 
-            if let Some(_enum_ty) = resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name) {
-                let variant_name = path.segments.last()
+            if let Some(_enum_ty) =
+                resolve_enum_variant(path, ctx.use_map, ctx.enums, ctx.module_name)
+            {
+                let variant_name = path
+                    .segments
+                    .last()
                     .map(|s| s.item.clone())
                     .unwrap_or_else(|| "unknown".to_string());
 
@@ -1405,10 +1424,10 @@ fn lower_pattern(
 
 #[cfg(test)]
 mod tests {
+    use super::super::TypeKind;
     use super::*;
     use crate::ast::Span;
     use std::collections::HashMap;
-    use super::super::TypeKind;
 
     #[test]
     fn abi_type_for_resolves_module_local_structs() {

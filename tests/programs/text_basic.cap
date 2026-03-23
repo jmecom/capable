@@ -7,11 +7,19 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = string::text_new(alloc)
-  text.push_str("hi").ok()
-  text.push_byte('!').ok()
+  try text.push_str("hi") else {
+    panic()
+  }
+  try text.push_byte('!') else {
+    panic()
+  }
   let view = text.as_string()
   c.assert(view.eq("hi!"))
-  c.assert(text.to_string().ok().eq("hi!"))
+  try let owned = text.to_string() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(owned.eq("hi!"))
   text.free(alloc)
   c.println("text basic ok")
   return 0

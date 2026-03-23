@@ -12,13 +12,12 @@ fn demo_string_view(c: Console) -> unit {
   c.println("len:")
   c.println_i32(trimmed.len())
 
-  match (trimmed.split_once_view(',')) {
-    Ok(parts) => {
-      c.println(parts.left)
-      c.println(parts.right)
-    }
-    Err(_) => { c.println("comma not found") }
+  try let parts = trimmed.split_once_view(',') else {
+    c.println("comma not found")
+    return
   }
+  c.println(parts.left)
+  c.println(parts.right)
 
   let words = trimmed.split_view_default(',')
   c.println("split count:")
@@ -31,24 +30,38 @@ fn demo_string_view(c: Console) -> unit {
 fn demo_text_builder(c: Console) -> unit {
   c.println("-- Text builder --")
   let t = buffer::text_new_default()
-  t.push_str("hello") else {
+  try t.push_str("hello") else {
     panic()
   }
-  t.push_byte(' ') else {
+  try t.push_byte(' ') else {
     panic()
   }
-  t.append("text") else {
+  try t.append("text") else {
     panic()
   }
-  c.println(t.slice_range(0, 5).ok())
-  c.println(t.to_string().ok())
+  try let head = t.slice_range(0, 5) else {
+    panic()
+  }
+  c.println(head)
+  try let owned = t.to_string() else {
+    panic()
+  }
+  c.println(owned)
   t.free_default()
 
-  let t2 = buffer::text_from_default("owned").ok()
-  c.println(t2.to_string().ok())
+  try let t2 = buffer::text_from_default("owned") else {
+    panic()
+  }
+  try let owned2 = t2.to_string() else {
+    panic()
+  }
+  c.println(owned2)
   t2.free_default()
 
-  c.println("a".concat_default("b").ok())
+  try let joined = "a".concat_default("b") else {
+    panic()
+  }
+  c.println(joined)
 }
 
 pub fn main(rc: RootCap) -> i32 {

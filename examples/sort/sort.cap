@@ -50,7 +50,7 @@ fn sort_indices(lines: Vec<string>, indices: Vec<i32>) -> unit {
       let curr_idx = indices.get_or(j, 0)
       let prev_idx = indices.get_or(j - 1, 0)
       if (line_lt(lines, curr_idx, prev_idx)) {
-        indices.swap(j, j - 1) else {
+        try indices.swap(j, j - 1) else {
           panic()
         }
         j = j - 1
@@ -69,7 +69,7 @@ fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
   // Create index array [0, 1, 2, ...]
   let indices = buffer::vec_new_default<i32>()
   for i in 0..n {
-    indices.push(i) else {
+    try indices.push(i) else {
       panic()
     }
   }
@@ -93,7 +93,7 @@ fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let input = rc.mint_stdin()
-  run(c, input) else {
+  try run(c, input) else {
     c.println("error reading input")
     return 1
   }

@@ -7,12 +7,20 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
   let text = string::text_new(alloc)
-  text.push_byte('\x00').ok()
-  text.push_byte('\x07').ok()
+  try text.push_byte('\x00') else {
+    panic()
+  }
+  try text.push_byte('\x07') else {
+    panic()
+  }
   let v = alloc.vec_u8_new()
-  v.push('\t').ok()
+  try v.push('\t') else {
+    panic()
+  }
   let slice = v.as_slice()
-  text.extend_slice(slice).ok()
+  try text.extend_slice(slice) else {
+    panic()
+  }
   let len = text.len()
   c.assert(len == 3)
   c.assert(!text.is_empty())

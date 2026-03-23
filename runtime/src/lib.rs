@@ -447,7 +447,7 @@ pub extern "C" fn capable_rt_fs_subdir(dir: Handle, name: *const CapString) -> H
 #[no_mangle]
 pub extern "C" fn capable_rt_fs_open_read(dir: Handle, name: *const CapString) -> Handle {
     let name = unsafe { read_cap_string(name) };
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
     };

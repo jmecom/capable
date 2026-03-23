@@ -19,9 +19,8 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::hir::{HirModule, HirTraitImpl};
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
-    "i32", "i64", "u32", "u8", "bool", "unit", "never", "Self",
-];
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] =
+    ["i32", "i64", "u32", "u8", "bool", "unit", "never", "Self"];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,7 +222,9 @@ fn substitute_self(ty: &Ty, target: &Ty) -> Ty {
         Ty::Ref(inner) => Ty::Ref(Box::new(substitute_self(inner, target))),
         Ty::Path(name, args) => Ty::Path(
             name.clone(),
-            args.iter().map(|arg| substitute_self(arg, target)).collect(),
+            args.iter()
+                .map(|arg| substitute_self(arg, target))
+                .collect(),
         ),
         Ty::Builtin(_) | Ty::Param(_) => ty.clone(),
     }
@@ -388,19 +389,13 @@ impl Scopes {
         for scope in self.stack.iter_mut().rev() {
             if let Some(info) = scope.get_mut(name) {
                 if info.state == MoveState::Moved {
-                    return Err(TypeError::new(
-                        format!("use of moved value `{name}`"),
-                        span,
-                    ));
+                    return Err(TypeError::new(format!("use of moved value `{name}`"), span));
                 }
                 info.state = MoveState::Moved;
                 return Ok(());
             }
         }
-        Err(TypeError::new(
-            format!("unknown identifier `{name}`"),
-            span,
-        ))
+        Err(TypeError::new(format!("unknown identifier `{name}`"), span))
     }
 }
 
@@ -473,11 +468,7 @@ fn resolve_method_target(
     let (receiver_name, receiver_args) = match base_ty {
         Ty::Path(name, args) => (name.as_str(), args),
         Ty::Builtin(BuiltinType::U8) => {
-            return Ok((
-                "sys.bytes".to_string(),
-                "u8".to_string(),
-                Vec::new(),
-            ));
+            return Ok(("sys.bytes".to_string(), "u8".to_string(), Vec::new()));
         }
         _ => {
             return Err(TypeError::new(
@@ -510,9 +501,9 @@ fn resolve_method_target(
     }
 
     if receiver_name.contains('.') {
-        let (mod_part, type_part) = receiver_name.rsplit_once('.').ok_or_else(|| {
-            TypeError::new("invalid type path".to_string(), span)
-        })?;
+        let (mod_part, type_part) = receiver_name
+            .rsplit_once('.')
+            .ok_or_else(|| TypeError::new("invalid type path".to_string(), span))?;
         return Ok((
             mod_part.to_string(),
             type_part.to_string(),
@@ -521,10 +512,18 @@ fn resolve_method_target(
     }
 
     if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
-        return Ok((info.module.clone(), receiver_name.to_string(), receiver_args.clone()));
+        return Ok((
+            info.module.clone(),
+            receiver_name.to_string(),
+            receiver_args.clone(),
+        ));
     }
     if enum_map.contains_key(&format!("{module_name}.{receiver_name}")) {
-        return Ok((module_name.to_string(), receiver_name.to_string(), receiver_args.clone()));
+        return Ok((
+            module_name.to_string(),
+            receiver_name.to_string(),
+            receiver_args.clone(),
+        ));
     }
 
     Err(TypeError::new(
@@ -587,9 +586,9 @@ fn resolve_impl_target(
                     .unwrap_or(module_name);
                 (mod_part.to_string(), type_name)
             } else if target_name.contains('.') {
-                let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
-                    TypeError::new("invalid type path".to_string(), span)
-                })?;
+                let (mod_part, type_part) = target_name
+                    .rsplit_once('.')
+                    .ok_or_else(|| TypeError::new("invalid type path".to_string(), span))?;
                 let type_name = format!("{}{}", type_part, type_arg_suffix);
                 (mod_part.to_string(), type_name)
             } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
@@ -668,9 +667,7 @@ fn validate_impl_method(
         let lowered = lower_type(ty, use_map, stdlib, type_params)?;
         if lowered != expected && lowered != expected_ptr && lowered != expected_ref {
             return Err(TypeError::new(
-                format!(
-                    "first parameter must be self: {type_name} (found {lowered:?})"
-                ),
+                format!("first parameter must be self: {type_name} (found {lowered:?})"),
                 ty.span(),
             ));
         }
@@ -691,9 +688,20 @@ fn validate_impl_method(
     let ret_ty = lower_type(&method.ret, use_map, stdlib, type_params)?;
     if receiver_is_ref && type_contains_capability(&ret_ty, struct_map, enum_map) {
         let receiver_kind = type_kind(target_ty, struct_map, enum_map);
-        if receiver_kind != TypeKind::Unrestricted {
+        let receiver_is_capability = match target_ty {
+            Ty::Path(name, _) => struct_map
+                .get(name)
+                .map(|info| info.is_capability)
+                .unwrap_or(false),
+            _ => false,
+        };
+        if receiver_kind != TypeKind::Unrestricted
+            && (!receiver_is_capability
+                || type_contains_non_linear_capability(&ret_ty, struct_map, enum_map))
+        {
             return Err(TypeError::new(
-                "methods returning capabilities must take `self` by value".to_string(),
+                "borrowed capability receivers may only return linear child capabilities"
+                    .to_string(),
                 method.ret.span(),
             ));
         }
@@ -794,21 +802,16 @@ fn desugar_impl_methods(
             method.span,
         )?;
         if let Some(trait_name) = &trait_name {
-            let trait_info = trait_map
-                .get(trait_name)
-                .expect("trait already validated");
-            let trait_method = trait_info
-                .methods
-                .get(&method.name.item)
-                .ok_or_else(|| {
-                    TypeError::new(
-                        format!(
-                            "method `{}` is not declared in trait `{trait_name}`",
-                            method.name.item
-                        ),
-                        method.name.span,
-                    )
-                })?;
+            let trait_info = trait_map.get(trait_name).expect("trait already validated");
+            let trait_method = trait_info.methods.get(&method.name.item).ok_or_else(|| {
+                TypeError::new(
+                    format!(
+                        "method `{}` is not declared in trait `{trait_name}`",
+                        method.name.item
+                    ),
+                    method.name.span,
+                )
+            })?;
             let mut lowered_params = Vec::new();
             for param in &params {
                 let Some(ty) = &param.ty else {
@@ -878,9 +881,7 @@ fn desugar_impl_methods(
         }
     }
     if let Some(trait_name) = &trait_name {
-        let trait_info = trait_map
-            .get(trait_name)
-            .expect("trait already validated");
+        let trait_info = trait_map.get(trait_name).expect("trait already validated");
         for name in trait_info.methods.keys() {
             if !method_names.contains(name) {
                 return Err(TypeError::new(
@@ -924,7 +925,10 @@ fn lower_type(
                 if type_params.contains(path_segments[0]) {
                     if !args.is_empty() {
                         return Err(TypeError::new(
-                            format!("type parameter `{}` cannot take arguments", path_segments[0]),
+                            format!(
+                                "type parameter `{}` cannot take arguments",
+                                path_segments[0]
+                            ),
                             path.span,
                         ));
                     }
@@ -1076,9 +1080,9 @@ fn type_contains_capability_inner(
         Ty::Param(_) => true,
         Ty::Path(name, args) => {
             if name == "sys.result.Result" {
-                return args
-                    .iter()
-                    .any(|arg| type_contains_capability_inner(arg, struct_map, enum_map, visiting));
+                return args.iter().any(|arg| {
+                    type_contains_capability_inner(arg, struct_map, enum_map, visiting)
+                });
             }
             if args
                 .iter()
@@ -1106,6 +1110,69 @@ fn type_contains_capability_inner(
                 let contains = info.payloads.values().any(|payload| {
                     if let Some(payload_ty) = payload {
                         type_contains_capability_inner(payload_ty, struct_map, enum_map, visiting)
+                    } else {
+                        false
+                    }
+                });
+                visiting.remove(name);
+                return contains;
+            }
+            false
+        }
+    }
+}
+
+fn type_contains_non_linear_capability(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+) -> bool {
+    let mut visiting = HashSet::new();
+    type_contains_non_linear_capability_inner(ty, struct_map, enum_map, &mut visiting)
+}
+
+fn type_contains_non_linear_capability_inner(
+    ty: &Ty,
+    struct_map: &HashMap<String, StructInfo>,
+    enum_map: &HashMap<String, EnumInfo>,
+    visiting: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => false,
+        Ty::Param(_) => true,
+        Ty::Path(name, args) => {
+            if name == "sys.result.Result" {
+                return args.iter().any(|arg| {
+                    type_contains_non_linear_capability_inner(arg, struct_map, enum_map, visiting)
+                });
+            }
+            if args.iter().any(|arg| {
+                type_contains_non_linear_capability_inner(arg, struct_map, enum_map, visiting)
+            }) {
+                return true;
+            }
+            if let Some(info) = struct_map.get(name) {
+                if info.is_capability {
+                    return info.kind != TypeKind::Linear;
+                }
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let contains = info.fields.values().any(|field| {
+                    type_contains_non_linear_capability_inner(field, struct_map, enum_map, visiting)
+                });
+                visiting.remove(name);
+                return contains;
+            }
+            if let Some(info) = enum_map.get(name) {
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let contains = info.payloads.values().any(|payload| {
+                    if let Some(payload_ty) = payload {
+                        type_contains_non_linear_capability_inner(
+                            payload_ty, struct_map, enum_map, visiting,
+                        )
                     } else {
                         false
                     }
@@ -1167,21 +1234,33 @@ fn type_kind_inner(
             }
             if let Some(info) = struct_map.get(name) {
                 visiting.insert(name.clone());
-                let fields_kind = info.fields.values().fold(TypeKind::Unrestricted, |acc, field| {
-                    combine_kind(acc, type_kind_inner(field, struct_map, enum_map, visiting))
-                });
+                let fields_kind =
+                    info.fields
+                        .values()
+                        .fold(TypeKind::Unrestricted, |acc, field| {
+                            combine_kind(
+                                acc,
+                                type_kind_inner(field, struct_map, enum_map, visiting),
+                            )
+                        });
                 visiting.remove(name);
                 return combine_kind(info.kind, fields_kind);
             }
             if let Some(info) = enum_map.get(name) {
                 visiting.insert(name.clone());
-                let payload_kind = info.payloads.values().fold(TypeKind::Unrestricted, |acc, payload| {
-                    if let Some(payload_ty) = payload {
-                        combine_kind(acc, type_kind_inner(payload_ty, struct_map, enum_map, visiting))
-                    } else {
-                        acc
-                    }
-                });
+                let payload_kind =
+                    info.payloads
+                        .values()
+                        .fold(TypeKind::Unrestricted, |acc, payload| {
+                            if let Some(payload_ty) = payload {
+                                combine_kind(
+                                    acc,
+                                    type_kind_inner(payload_ty, struct_map, enum_map, visiting),
+                                )
+                            } else {
+                                acc
+                            }
+                        });
                 visiting.remove(name);
                 return payload_kind;
             }
@@ -1244,10 +1323,7 @@ pub fn type_check_program(
     user_modules: &[Module],
 ) -> Result<crate::hir::HirProgram, TypeError> {
     let use_map = UseMap::new(module);
-    let stdlib_names: HashSet<String> = stdlib
-        .iter()
-        .map(|m| path_to_string(&m.name))
-        .collect();
+    let stdlib_names: HashSet<String> = stdlib.iter().map(|m| path_to_string(&m.name)).collect();
     let mut package_map: HashMap<String, PackageSafety> = HashMap::new();
     for m in stdlib {
         package_map.insert(path_to_string(&m.name), m.package);
@@ -1270,23 +1346,15 @@ pub fn type_check_program(
     for user_module in user_modules {
         check::validate_package_safety(user_module, false)
             .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
-        check::validate_import_safety(
-            user_module,
-            &package_map,
-            &stdlib_names,
-        )
-        .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
+        check::validate_import_safety(user_module, &package_map, &stdlib_names)
+            .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
     }
     for stdlib_module in stdlib {
         check::validate_package_safety(stdlib_module, true)
             .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
         if stdlib_module.package == PackageSafety::Safe {
-            check::validate_import_safety(
-                stdlib_module,
-                &package_map,
-                &stdlib_names,
-            )
-            .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
+            check::validate_import_safety(stdlib_module, &package_map, &stdlib_names)
+                .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
         }
     }
     let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)
@@ -1295,14 +1363,9 @@ pub fn type_check_program(
         .map_err(|err| err.with_context("while collecting enums"))?;
     let trait_map = collect::collect_traits(&modules, &stdlib_index)
         .map_err(|err| err.with_context("while collecting traits"))?;
-    let trait_impls = collect::collect_trait_impls(
-        &modules,
-        &stdlib_index,
-        &struct_map,
-        &enum_map,
-        &trait_map,
-    )
-    .map_err(|err| err.with_context("while collecting trait impls"))?;
+    let trait_impls =
+        collect::collect_trait_impls(&modules, &stdlib_index, &struct_map, &enum_map, &trait_map)
+            .map_err(|err| err.with_context("while collecting trait impls"))?;
     collect::validate_type_defs(&modules, &stdlib_index, &struct_map, &enum_map)
         .map_err(|err| err.with_context("while validating type arguments"))?;
     collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)
@@ -1315,7 +1378,7 @@ pub fn type_check_program(
         &enum_map,
         &trait_map,
     )
-        .map_err(|err| err.with_context("while collecting functions"))?;
+    .map_err(|err| err.with_context("while collecting functions"))?;
 
     let mut type_tables: FunctionTypeTables = HashMap::new();
 

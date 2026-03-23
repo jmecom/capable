@@ -20,7 +20,7 @@ fn parse_line(c: Console, line: string) -> unit {
   if (trimmed.starts_with("#")) {
     return ()
   }
-  let Ok(parts) = trimmed.split_once_view('=') else {
+  try let parts = trimmed.split_once_view('=') else {
     return ()
   }
   print_kv(c, parts.left, parts.right)
@@ -52,7 +52,7 @@ fn run(c: Console, fs: ReadFS) -> Result<unit, FsErr> {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let fs = rc.mint_readfs("examples/config_loader")
-  run(c, fs) else {
+  try run(c, fs) else {
     c.println("config read failed")
     return 1
   }

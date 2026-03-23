@@ -558,6 +558,7 @@ impl Parser {
             Some(TokenKind::Break) => Ok(Stmt::Break(self.parse_break()?)),
             Some(TokenKind::Continue) => Ok(Stmt::Continue(self.parse_continue()?)),
             Some(TokenKind::Defer) => Ok(Stmt::Defer(self.parse_defer()?)),
+            Some(TokenKind::Try) => self.parse_try_stmt(),
             Some(TokenKind::If) => self.parse_if_stmt(),
             Some(TokenKind::While) => Ok(Stmt::While(self.parse_while()?)),
             Some(TokenKind::For) => self.parse_for_stmt(),
@@ -643,6 +644,74 @@ impl Parser {
         })
     }
 
+    fn parse_try_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let try_token = self.expect(TokenKind::Try)?;
+        let start = try_token.span.start;
+
+        if self.peek_kind() == Some(TokenKind::Let) {
+            self.bump();
+            if !(self.peek_kind() == Some(TokenKind::Ident)
+                && self
+                    .peek_token(1)
+                    .is_some_and(|t| matches!(t.kind, TokenKind::Colon | TokenKind::Eq)))
+            {
+                return Err(self.error_at(
+                    try_token.span,
+                    "`try let` requires a plain binding name".to_string(),
+                ));
+            }
+
+            let name = self.expect_ident()?;
+            let ty = if self.maybe_consume(TokenKind::Colon).is_some() {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            self.expect(TokenKind::Eq)?;
+            let expr = self.parse_expr()?;
+            self.expect(TokenKind::Else)?;
+            let err_binding = if self.peek_kind() == Some(TokenKind::Ident)
+                && self
+                    .peek_token(1)
+                    .is_some_and(|t| t.kind == TokenKind::LBrace)
+            {
+                Some(self.expect_ident()?)
+            } else {
+                None
+            };
+            let else_block = self.parse_block()?;
+            let mut stmt =
+                self.desugar_try_let(try_token.span, name, ty, expr, err_binding, else_block);
+            let end = self
+                .maybe_consume(TokenKind::Semi)
+                .map_or(stmt.span.end, |t| t.span.end);
+            stmt.span = Span::new(start, end);
+            return Ok(Stmt::Let(stmt));
+        }
+
+        let expr = self.parse_expr()?;
+        self.expect(TokenKind::Else)?;
+        let err_binding = if self.peek_kind() == Some(TokenKind::Ident)
+            && self
+                .peek_token(1)
+                .is_some_and(|t| t.kind == TokenKind::LBrace)
+        {
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
+        let else_block = self.parse_block()?;
+        let expr = self.desugar_expr_else(expr, err_binding, else_block);
+        let expr_span = expr.span();
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(expr_span.end, |t| t.span.end);
+        Ok(Stmt::Expr(ExprStmt {
+            expr,
+            span: Span::new(start, end),
+        }))
+    }
+
     fn parse_break(&mut self) -> Result<BreakStmt, ParseError> {
         let token = self.expect(TokenKind::Break)?;
         let end = self
@@ -678,57 +747,6 @@ impl Parser {
     fn parse_if_stmt(&mut self) -> Result<Stmt, ParseError> {
         let if_token = self.expect(TokenKind::If)?;
         let start = if_token.span.start;
-        if self.peek_kind() == Some(TokenKind::Let) {
-            self.bump();
-            let pattern = self.parse_pattern()?;
-            self.expect(TokenKind::Eq)?;
-            let expr = self.parse_expr_no_struct()?;
-            let then_block = self.parse_block()?;
-            let else_block = if self.peek_kind() == Some(TokenKind::Else) {
-                self.bump();
-                if self.peek_kind() == Some(TokenKind::If) {
-                    let else_if = self.parse_if_stmt()?;
-                    let span = else_if.span();
-                    Some(Block {
-                        stmts: vec![else_if],
-                        span,
-                    })
-                } else {
-                    Some(self.parse_block()?)
-                }
-            } else {
-                None
-            };
-            let end = else_block
-                .as_ref()
-                .map_or(then_block.span.end, |b| b.span.end);
-            let else_body = else_block.unwrap_or(Block {
-                stmts: Vec::new(),
-                span: Span::new(end, end),
-            });
-            let match_expr = MatchExpr {
-                expr: Box::new(expr),
-                arms: vec![
-                    MatchArm {
-                        pattern,
-                        body: then_block,
-                        span: Span::new(start, end),
-                    },
-                    MatchArm {
-                        pattern: Pattern::Wildcard(Span::new(end, end)),
-                        body: else_body,
-                        span: Span::new(start, end),
-                    },
-                ],
-                span: Span::new(start, end),
-                match_span: if_token.span,
-            };
-            return Ok(Stmt::Expr(ExprStmt {
-                expr: Expr::Match(match_expr),
-                span: Span::new(start, end),
-            }));
-        }
-
         // Use parse_expr_no_struct because `{` after condition starts the then-block, not a struct literal
         let cond = self.parse_expr_no_struct()?;
         let then_block = self.parse_block()?;
@@ -861,22 +879,9 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self) -> Result<ExprStmt, ParseError> {
         let expr = self.parse_expr()?;
-        let expr = if self.peek_kind() == Some(TokenKind::Else) {
-            self.bump();
-            let err_binding = if self.peek_kind() == Some(TokenKind::Ident)
-                && self
-                    .peek_token(1)
-                    .is_some_and(|t| t.kind == TokenKind::LBrace)
-            {
-                Some(self.expect_ident()?)
-            } else {
-                None
-            };
-            let else_block = self.parse_block()?;
-            self.desugar_expr_else(expr, err_binding, else_block)
-        } else {
-            expr
-        };
+        if self.peek_kind() == Some(TokenKind::Else) {
+            return Err(self.error_current("`expr else` now requires a leading `try`".to_string()));
+        }
         let expr_span = expr.span();
         let end = self
             .maybe_consume(TokenKind::Semi)
@@ -1448,6 +1453,91 @@ impl Parser {
             expr: match_expr,
             span: match_span,
         })
+    }
+
+    fn desugar_try_let(
+        &self,
+        try_span: Span,
+        binding: Ident,
+        ty: Option<Type>,
+        expr: Expr,
+        err_binding: Option<Ident>,
+        else_block: Block,
+    ) -> LetStmt {
+        let binding_expr = Expr::Path(Path {
+            segments: vec![binding.clone()],
+            span: binding.span,
+        });
+        let ok_body = Block {
+            stmts: vec![Stmt::Expr(ExprStmt {
+                expr: binding_expr,
+                span: binding.span,
+            })],
+            span: binding.span,
+        };
+
+        let panic_ident = Spanned::new("panic".to_string(), else_block.span);
+        let panic_expr = Expr::Call(CallExpr {
+            callee: Box::new(Expr::Path(Path {
+                segments: vec![panic_ident],
+                span: else_block.span,
+            })),
+            type_args: Vec::new(),
+            args: Vec::new(),
+            span: else_block.span,
+        });
+        let mut else_stmts = else_block.stmts;
+        else_stmts.push(Stmt::Expr(ExprStmt {
+            expr: panic_expr,
+            span: else_block.span,
+        }));
+        let else_body = Block {
+            stmts: else_stmts,
+            span: else_block.span,
+        };
+
+        let expr_span = expr.span();
+        let ok_ident = Spanned::new("Ok".to_string(), expr_span);
+        let err_ident = Spanned::new("Err".to_string(), else_block.span);
+        let match_span = Span::new(try_span.start, else_block.span.end);
+        let match_expr = Expr::Match(MatchExpr {
+            expr: Box::new(expr),
+            arms: vec![
+                MatchArm {
+                    pattern: Pattern::Call {
+                        path: Path {
+                            segments: vec![ok_ident],
+                            span: expr_span,
+                        },
+                        binding: Some(binding.clone()),
+                        span: expr_span,
+                    },
+                    body: ok_body,
+                    span: match_span,
+                },
+                MatchArm {
+                    pattern: Pattern::Call {
+                        path: Path {
+                            segments: vec![err_ident],
+                            span: else_block.span,
+                        },
+                        binding: err_binding,
+                        span: else_block.span,
+                    },
+                    body: else_body,
+                    span: match_span,
+                },
+            ],
+            span: match_span,
+            match_span: try_span,
+        });
+
+        LetStmt {
+            name: binding,
+            ty,
+            expr: match_expr,
+            span: match_span,
+        }
     }
 
     fn pattern_binding_ident(&self, pattern: &Pattern) -> Option<Ident> {
