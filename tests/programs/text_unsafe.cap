@@ -5,19 +5,18 @@ use sys::string
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let text = string::text_new(alloc)
+  let text = string::text_new()
   match (text.push_byte('a')) {
     Ok(_) => { }
-    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+    Err(_) => { c.assert(false); text.free(); return 1 }
   }
   match (text.push_byte('b')) {
     Ok(_) => { }
-    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+    Err(_) => { c.assert(false); text.free(); return 1 }
   }
   match (text.push_byte('c')) {
     Ok(_) => { }
-    Err(_) => { c.assert(false); text.free(alloc); return 1 }
+    Err(_) => { c.assert(false); text.free(); return 1 }
   }
   let len = text.len()
   c.assert(len == 3)
@@ -34,6 +33,6 @@ pub fn main(rc: RootCap) -> i32 {
   } else {
     c.println("slice bad")
   }
-  text.free(alloc)
+  text.free()
   return 0
 }

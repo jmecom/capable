@@ -178,8 +178,7 @@ use sys::fs
 
 pub fn main(rc: RootCap) -> i32 {
   let fs = rc.mint_readfs("./config")
-  let alloc = rc.mint_alloc_default()
-  match fs.read_to_string(alloc, "app.txt") {
+  match fs.read_to_string("app.txt") {
     Ok(s) => { rc.mint_console().println(s); return 0 }
     Err(_) => { return 1 }
   }
@@ -303,13 +302,13 @@ Use `defer` to simplify cleanup.
 `string` is a view. `Text` is owned.
 
 ```cap
-fn build_greeting(alloc: Alloc) -> Result<string, buffer::AllocErr> {
+fn build_greeting() -> Result<string, buffer::AllocErr> {
   let s = "hello"
   let _bytes = s.as_slice()
   let _sub = s.slice_range(0, 5)?
 
-  let t = alloc.text_new()
-  defer t.free(alloc)
+  let t = string::text_new()
+  defer t.free()
   t.push_str("hello")?
   t.push_byte(' ')?
   t.append("text")?
@@ -320,7 +319,7 @@ fn build_greeting(alloc: Alloc) -> Result<string, buffer::AllocErr> {
 
 Helpers:
 - `string.split`, `split_once`, `trim_*`, `contains`, `index_of_*`.
-- `string.concat(alloc, other)` creates a new owned string view.
+- `string.concat(other)` creates a new owned string view.
 - `Text.slice_range` returns a `string` view into its buffer.
 
 ## 11) Slices and indexing
@@ -392,8 +391,8 @@ fn parse_key_value(line: string, alloc: Alloc) -> Result<string, ParseErr> {
     Err(_) => { return Err(ParseErr::OutOfRange) }
   }
 
-  let t = alloc.text_new()
-  defer t.free(alloc)
+  let t = string::text_new()
+  defer t.free()
   match (t.push_str(key)) {
     Ok(_) => { }
     Err(_) => { return Err(ParseErr::Oom) }

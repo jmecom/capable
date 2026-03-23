@@ -1,35 +1,31 @@
 package safe
 module string_helpers
 use sys::system
-use sys::buffer
+use sys::string
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
   let s = "abc"
   let buf = s.bytes()
   let n = buf.len()
   let b = buf.at(0)
-  let words = "a b  c".split_whitespace(alloc)
-  let word_views = "a b  c".split_whitespace_view(alloc)
-  let split_views = "a,b,c".split_view_default(',')
+  let words = "a b  c".split_whitespace()
+  let word_views = "a b  c".split_whitespace_view()
+  let split_views = "a,b,c".split_view(',')
   let count = words.len()
-  let trimmed = "  hi \n".trim(alloc)
+  let trimmed = "  hi \n".trim()
   let trimmed_view = "  hi \n".trim_view()
-  let trimmed_start = "  hi ".trim_start(alloc)
+  let trimmed_start = "  hi ".trim_start()
   let trimmed_start_view = "  hi ".trim_start_view()
-  let trimmed_end = "  hi ".trim_end(alloc)
+  let trimmed_end = "  hi ".trim_end()
   let trimmed_end_view = "  hi ".trim_end_view()
-  let trimmed_ascii = " \tHi\n".trim_ascii(alloc)
-  let trimmed_ascii_default = " \tHi\n".trim_ascii_default()
-  let lower = "AbC".to_lower_ascii(alloc)
-  let lower_default = "AbC".to_lower_ascii_default()
-  let upper = "AbC".to_upper_ascii(alloc)
-  let upper_default = "AbC".to_upper_ascii_default()
+  let trimmed_ascii = " \tHi\n".trim_ascii()
+  let lower = "AbC".to_lower_ascii()
+  let upper = "AbC".to_upper_ascii()
   let sliced = "hello".slice_range(1, 4)
-  let lines = "a\nb\n".split_lines(alloc)
-  let line_views = "a\r\nb\n".lines_view(alloc)
-  let t = buffer::text_new_default()
+  let lines = "a\nb\n".split_lines()
+  let line_views = "a\r\nb\n".lines_view()
+  let t = string::text_new()
   try t.push_str("hi") else {
     panic()
   }
@@ -38,7 +34,7 @@ pub fn main(rc: RootCap) -> i32 {
     return 1
   }
   c.assert(owned.eq("hi"))
-  t.free_default()
+  t.free()
   c.assert(n == 3 && b == 'a' && count == 3)
   c.assert(word_views.len() == 3)
   c.assert(split_views.len() == 3)
@@ -51,11 +47,8 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(trimmed_end.ends_with("hi"))
   c.assert(trimmed_end_view.ends_with("hi"))
   c.assert(trimmed_ascii.eq("Hi"))
-  c.assert(trimmed_ascii_default.eq("Hi"))
   c.assert(lower.eq("abc"))
-  c.assert(lower_default.eq("abc"))
   c.assert(upper.eq("ABC"))
-  c.assert(upper_default.eq("ABC"))
   c.assert("abc".starts_with_byte('a'))
   c.assert("abc".ends_with_byte('c'))
   c.assert("".is_empty())
@@ -108,7 +101,7 @@ pub fn main(rc: RootCap) -> i32 {
     c.assert(false)
     return 1
   }
-  match ("a,b,c".split_once(alloc, ',')) {
+  match ("a,b,c".split_once(',')) {
     Ok(parts) => {
       c.assert(parts.left.eq("a"))
       c.assert(parts.right.eq("b,c"))
@@ -122,23 +115,23 @@ pub fn main(rc: RootCap) -> i32 {
     }
     Err(_) => { c.assert(false) }
   }
-  match ("ab".concat(alloc, "cd")) {
+  match ("ab".concat("cd")) {
     Ok(joined) => { c.assert(joined.eq("abcd")) }
     Err(_) => { c.assert(false) }
   }
-  let pieces = "a,b,c".split(alloc, ',')
+  let pieces = "a,b,c".split(',')
   c.assert(pieces.len() == 3)
   c.assert(line_views.len() == 2)
   match (pieces.join(",")) {
     Ok(joined) => { c.assert(joined.eq("a,b,c")) }
     Err(_) => { c.assert(false) }
   }
-  alloc.vec_string_free(words)
-  alloc.vec_string_free(word_views)
+  words.free()
+  word_views.free()
   split_views.free()
-  alloc.vec_string_free(lines)
-  alloc.vec_string_free(line_views)
-  alloc.vec_string_free(pieces)
+  lines.free()
+  line_views.free()
+  pieces.free()
   c.println("string ok")
   return 0
 }

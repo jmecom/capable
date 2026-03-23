@@ -4,29 +4,28 @@ use sys::system
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
   let fs = rc.mint_filesystem("./config")
   let dir = fs.root_dir()
 
   c.assert(dir.exists("app.txt"))
 
-  match dir.read_to_string(alloc, "app.txt") {
+  match dir.read_to_string("app.txt") {
     Ok(s) => { c.assert(s.len() > 0) }
     Err(_) => { c.println("dir read_to_string failed"); return 1 }
   }
 
-  match dir.read_bytes(alloc, "app.txt") {
+  match dir.read_bytes("app.txt") {
     Ok(bytes) => {
       c.assert(bytes.len() > 0)
-      alloc.vec_u8_free(bytes)
+      bytes.free()
     }
     Err(_) => { c.println("dir read_bytes failed"); return 1 }
   }
 
-  match dir.list_dir(alloc) {
+  match dir.list_dir() {
     Ok(entries) => {
       c.assert(entries.len() > 0)
-      alloc.vec_string_free(entries)
+      entries.free()
     }
     Err(_) => { c.println("dir list_dir failed"); return 1 }
   }

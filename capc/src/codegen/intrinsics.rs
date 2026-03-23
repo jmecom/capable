@@ -385,7 +385,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     );
     // === Stdin ===
     map.insert(
-        "sys.stdin.Stdin__read_to_string".to_string(),
+        "sys.stdin.Stdin__read_to_string_with_alloc".to_string(),
         FnInfo {
             sig: FnSig {
                 params: vec![AbiType::Handle, AbiType::Handle],
@@ -446,7 +446,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.net.TcpConn__read_to_string".to_string(),
+        "sys.net.TcpConn__read_to_string_with_alloc".to_string(),
         FnInfo {
             sig: net_read_to_string,
             abi_sig: Some(net_read_to_string_abi),
@@ -456,7 +456,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.net.TcpConn__read".to_string(),
+        "sys.net.TcpConn__read_with_alloc".to_string(),
         FnInfo {
             sig: net_read,
             abi_sig: Some(net_read_abi),
@@ -653,7 +653,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
     );
     // === Filesystem ===
     map.insert(
-        "sys.fs.ReadFS__read_to_string".to_string(),
+        "sys.fs.ReadFS__read_to_string_with_alloc".to_string(),
         FnInfo {
             sig: fs_read_to_string,
             abi_sig: Some(fs_read_to_string_abi),
@@ -663,7 +663,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.fs.ReadFS__read_bytes".to_string(),
+        "sys.fs.ReadFS__read_bytes_with_alloc".to_string(),
         FnInfo {
             sig: fs_read_bytes.clone(),
             abi_sig: Some(fs_read_bytes_abi.clone()),
@@ -673,7 +673,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.fs.ReadFS__list_dir".to_string(),
+        "sys.fs.ReadFS__list_dir_with_alloc".to_string(),
         FnInfo {
             sig: fs_list_dir,
             abi_sig: Some(fs_list_dir_abi),
@@ -743,7 +743,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.fs.Dir__read_bytes".to_string(),
+        "sys.fs.Dir__read_bytes_with_alloc".to_string(),
         FnInfo {
             sig: fs_read_bytes,
             abi_sig: Some(fs_read_bytes_abi),
@@ -753,7 +753,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.fs.Dir__read_to_string".to_string(),
+        "sys.fs.Dir__read_to_string_with_alloc".to_string(),
         FnInfo {
             sig: fs_dir_read_to_string,
             abi_sig: Some(fs_dir_read_to_string_abi),
@@ -763,7 +763,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.fs.Dir__list_dir".to_string(),
+        "sys.fs.Dir__list_dir_with_alloc".to_string(),
         FnInfo {
             sig: fs_dir_list_dir,
             abi_sig: Some(fs_dir_list_dir_abi),
@@ -793,7 +793,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.fs.FileRead__read_to_string".to_string(),
+        "sys.fs.FileRead__read_to_string_with_alloc".to_string(),
         FnInfo {
             sig: fs_file_read_to_string,
             abi_sig: Some(fs_file_read_to_string_abi),
@@ -813,7 +813,7 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         },
     );
     map.insert(
-        "sys.fs.join".to_string(),
+        "sys.fs.join_with_alloc".to_string(),
         FnInfo {
             sig: fs_join,
             abi_sig: Some(fs_join_abi),

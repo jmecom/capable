@@ -44,7 +44,7 @@ fn parse_config(c: Console, contents: string) -> unit {
 }
 
 fn run(c: Console, fs: ReadFS) -> Result<unit, FsErr> {
-  let contents = fs.read_to_string_default("app.conf")?
+  let contents = fs.read_to_string("app.conf")?
   parse_config(c, contents)
   return Ok(())
 }

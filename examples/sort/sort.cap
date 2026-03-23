@@ -1,7 +1,6 @@
 package safe
 module sort
 use sys::system
-use sys::buffer
 use sys::console
 use sys::stdin
 use sys::io
@@ -62,12 +61,12 @@ fn sort_indices(lines: Vec<string>, indices: Vec<i32>) -> unit {
 }
 
 fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
-  let contents = input.read_to_string_default()?
-  let lines = contents.lines_view_default()
+  let contents = input.read_to_string()?
+  let lines = contents.lines_view()
   let n = lines.len()
 
   // Create index array [0, 1, 2, ...]
-  let indices = buffer::vec_new_default<i32>()
+  let indices = vec::new<i32>()
   for i in 0..n {
     try indices.push(i) else {
       panic()

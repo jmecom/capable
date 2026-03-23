@@ -52,26 +52,6 @@ pub fn default_alloc() -> Alloc {
   return ()
 }
 
-/// Create a new Vec<T> with the process default allocator.
-pub fn vec_new_default<T>() -> vec::Vec<T> {
-  return vec::new_with<T>(default_alloc())
-}
-
-/// Create a Vec<T> with capacity using the process default allocator.
-pub fn vec_with_capacity_default<T>(capacity: i32) -> Result<vec::Vec<T>, AllocErr> {
-  return vec::with_capacity<T>(default_alloc(), capacity)
-}
-
-/// Allocate a new empty Text using the process default allocator.
-pub fn text_new_default() -> string::Text {
-  return string::text_new(default_alloc())
-}
-
-/// Copy a string view into a new Text using the process default allocator.
-pub fn text_from_default(s: string) -> Result<string::Text, AllocErr> {
-  return string::text_from(default_alloc(), s)
-}
-
 impl Alloc {
   /// Allocate raw bytes.
   pub fn malloc(self, size: i32) -> *u8 {
@@ -105,12 +85,12 @@ impl Alloc {
 
   /// Create a Vec<u8> with this Alloc (heap-backed).
   pub fn vec_u8_new(self) -> vec::Vec<u8> {
-    return vec::new_with<u8>(self)
+    return vec::new_with_alloc<u8>(self)
   }
 
   /// Create a Vec<u8> with capacity using this Alloc.
   pub fn vec_u8_with_capacity(self, capacity: i32) -> Result<vec::Vec<u8>, AllocErr> {
-    return vec::with_capacity<u8>(self, capacity)
+    return vec::with_capacity_with_alloc<u8>(self, capacity)
   }
 
   /// Free a Vec<u8> created with this Alloc.
@@ -121,12 +101,12 @@ impl Alloc {
 
   /// Create a Vec<i32> with this Alloc (heap-backed).
   pub fn vec_i32_new(self) -> vec::Vec<i32> {
-    return vec::new_with<i32>(self)
+    return vec::new_with_alloc<i32>(self)
   }
 
   /// Create a Vec<i32> with capacity using this Alloc.
   pub fn vec_i32_with_capacity(self, capacity: i32) -> Result<vec::Vec<i32>, AllocErr> {
-    return vec::with_capacity<i32>(self, capacity)
+    return vec::with_capacity_with_alloc<i32>(self, capacity)
   }
 
   /// Free a Vec<i32> created with this Alloc.
@@ -137,12 +117,12 @@ impl Alloc {
 
   /// Create a Vec<string> with this Alloc (heap-backed).
   pub fn vec_string_new(self) -> vec::Vec<string> {
-    return vec::new_with<string>(self)
+    return vec::new_with_alloc<string>(self)
   }
 
   /// Create a Vec<string> with capacity using this Alloc.
   pub fn vec_string_with_capacity(self, capacity: i32) -> Result<vec::Vec<string>, AllocErr> {
-    return vec::with_capacity<string>(self, capacity)
+    return vec::with_capacity_with_alloc<string>(self, capacity)
   }
 
   /// Free a Vec<string> created with this Alloc.
@@ -153,27 +133,27 @@ impl Alloc {
 
   /// Allocate a new empty Text.
   pub fn text_new(self) -> string::Text {
-    return string::text_new(self)
+    return string::text_new_with_alloc(self)
   }
 
   /// Allocate a new empty Text with capacity.
   pub fn text_with_capacity(self, capacity: i32) -> Result<string::Text, AllocErr> {
-    return string::text_with_capacity(self, capacity)
+    return string::text_with_capacity_with_alloc(self, capacity)
   }
 
   /// Copy a string view into a new Text.
   pub fn text_from(self, s: string) -> Result<string::Text, AllocErr> {
-    return string::text_from(self, s)
+    return string::text_from_with_alloc(self, s)
   }
 
   /// Create a Vec<T> with this Alloc (heap-backed).
   pub fn vec_new<T>(self) -> vec::Vec<T> {
-    return vec::new_with<T>(self)
+    return vec::new_with_alloc<T>(self)
   }
 
   /// Create a Vec<T> with capacity using this Alloc.
   pub fn vec_with_capacity<T>(self, capacity: i32) -> Result<vec::Vec<T>, AllocErr> {
-    return vec::with_capacity<T>(self, capacity)
+    return vec::with_capacity_with_alloc<T>(self, capacity)
   }
 
   /// Free a Vec<T> created with this Alloc.

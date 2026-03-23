@@ -15,7 +15,7 @@ pub fn main(rc: RootCap) -> i32 {
   }
 
   let rfs2 = rc.mint_readfs("./config")
-  match rfs2.read_bytes_default("app.txt") {
+  match rfs2.read_bytes("app.txt") {
     Ok(bytes) => {
       c.assert(bytes.len() > 0)
       bytes.free()
@@ -27,7 +27,7 @@ pub fn main(rc: RootCap) -> i32 {
   }
 
   let rfs3 = rc.mint_readfs("./config")
-  match rfs3.list_dir_default(".") {
+  match rfs3.list_dir(".") {
     Ok(entries) => {
       c.assert(entries.len() > 0)
       entries.free()

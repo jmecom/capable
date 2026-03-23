@@ -37,20 +37,35 @@ pub fn from_bytes_copy(alloc: buffer::Alloc, bytes: Slice<u8>) -> Result<string,
   return Ok(string { bytes: owned })
 }
 
+/// Allocate a new empty Text using the process default allocator.
+pub fn text_new() -> Text {
+  return text_new_with_alloc(buffer::default_alloc())
+}
+
 /// Allocate a new empty Text using the provided allocator.
-pub fn text_new(alloc: buffer::Alloc) -> Text {
+pub fn text_new_with_alloc(alloc: buffer::Alloc) -> Text {
   return Text { bytes: alloc.vec_u8_new() }
 }
 
+/// Allocate a new empty Text with capacity using the process default allocator.
+pub fn text_with_capacity(capacity: i32) -> Result<Text, buffer::AllocErr> {
+  return text_with_capacity_with_alloc(buffer::default_alloc(), capacity)
+}
+
 /// Allocate a new empty Text with capacity using the provided allocator.
-pub fn text_with_capacity(alloc: buffer::Alloc, capacity: i32) -> Result<Text, buffer::AllocErr> {
+pub fn text_with_capacity_with_alloc(alloc: buffer::Alloc, capacity: i32) -> Result<Text, buffer::AllocErr> {
   let bytes = alloc.vec_u8_with_capacity(capacity)?
   return Ok(Text { bytes: bytes })
 }
 
+/// Copy a string view into a new Text using the process default allocator.
+pub fn text_from(s: string) -> Result<Text, buffer::AllocErr> {
+  return text_from_with_alloc(buffer::default_alloc(), s)
+}
+
 /// Copy a string view into a new Text using the provided allocator.
-pub fn text_from(alloc: buffer::Alloc, s: string) -> Result<Text, buffer::AllocErr> {
-  let out = text_new(alloc)
+pub fn text_from_with_alloc(alloc: buffer::Alloc, s: string) -> Result<Text, buffer::AllocErr> {
+  let out = text_new_with_alloc(alloc)
   out.push_str(s)?
   return Ok(out)
 }
@@ -59,7 +74,7 @@ fn build_range(alloc: buffer::Alloc, s: string, start: i32, end: i32) -> string 
   if (end <= start) {
     return ""
   }
-  let buf = text_new(alloc)
+  let buf = text_new_with_alloc(alloc)
   let i = start
   while (i < end) {
     match (buf.push_byte(s.byte_at(i))) {
@@ -215,16 +230,17 @@ impl Text {
     return from_bytes(owned)
   }
 
-  /// Free the underlying Vec<u8>.
+  /// Free the underlying Vec<u8> using the allocator stored in its backing Vec.
   /// All derived views become invalid after this call.
-  pub fn free(self, alloc: buffer::Alloc) -> unit {
-    alloc.vec_u8_free(self.bytes)
+  pub fn free(self) -> unit {
+    self.bytes.free()
     return ()
   }
 
-  /// Free this Text using the allocator stored in its backing Vec.
-  pub fn free_default(self) -> unit {
-    self.bytes.free()
+  /// Free the underlying Vec<u8> with an explicit allocator.
+  /// All derived views become invalid after this call.
+  pub fn free_with_alloc(self, alloc: buffer::Alloc) -> unit {
+    alloc.vec_u8_free(self.bytes)
     return ()
   }
 
@@ -256,26 +272,26 @@ impl string {
   }
 
   /// Copy this string view into a new owned Text with the provided allocator.
-  pub fn to_text(self, alloc: buffer::Alloc) -> Result<Text, buffer::AllocErr> {
-    return text_from(alloc, self)
+  pub fn to_text(self) -> Result<Text, buffer::AllocErr> {
+    return text_from(self)
   }
 
-  /// Copy this string view into a new owned Text using the process default allocator.
-  pub fn to_text_default(self) -> Result<Text, buffer::AllocErr> {
-    return text_from(buffer::default_alloc(), self)
+  /// Copy this string view into a new owned Text using the provided allocator.
+  pub fn to_text_with_alloc(self, alloc: buffer::Alloc) -> Result<Text, buffer::AllocErr> {
+    return text_from_with_alloc(alloc, self)
   }
 
-  /// Concatenate another string into a new owned string view.
-  pub fn concat(self, alloc: buffer::Alloc, other: string) -> Result<string, buffer::AllocErr> {
-    let out = text_new(alloc)
+  /// Concatenate another string into a new owned string view using the process default allocator.
+  pub fn concat(self, other: string) -> Result<string, buffer::AllocErr> {
+    return self.concat_with_alloc(buffer::default_alloc(), other)
+  }
+
+  /// Concatenate another string into a new owned string view using the provided allocator.
+  pub fn concat_with_alloc(self, alloc: buffer::Alloc, other: string) -> Result<string, buffer::AllocErr> {
+    let out = text_new_with_alloc(alloc)
     out.push_str(self)?
     out.push_str(other)?
     return out.to_string()
-  }
-
-  /// Concatenate another string using the process default allocator.
-  pub fn concat_default(self, other: string) -> Result<string, buffer::AllocErr> {
-    return self.concat(buffer::default_alloc(), other)
   }
 
   /// Index into the string by byte.
@@ -293,8 +309,13 @@ impl string {
     return self.as_slice()
   }
 
-  /// Split on ASCII whitespace.
-  pub fn split_whitespace(self, alloc: buffer::Alloc) -> Vec<string> {
+  /// Split on ASCII whitespace using the process default allocator.
+  pub fn split_whitespace(self) -> Vec<string> {
+    return self.split_whitespace_with_alloc(buffer::default_alloc())
+  }
+
+  /// Split on ASCII whitespace using the provided allocator.
+  pub fn split_whitespace_with_alloc(self, alloc: buffer::Alloc) -> Vec<string> {
     let out = alloc.vec_string_new()
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -319,13 +340,13 @@ impl string {
     return out
   }
 
-  /// Split on ASCII whitespace using the process default allocator.
-  pub fn split_whitespace_default(self) -> Vec<string> {
-    return self.split_whitespace(buffer::default_alloc())
+  /// Split on ASCII whitespace into views using the process default allocator.
+  pub fn split_whitespace_view(self) -> Vec<string> {
+    return self.split_whitespace_view_with_alloc(buffer::default_alloc())
   }
 
-  /// Split on ASCII whitespace without copying the pieces.
-  pub fn split_whitespace_view(self, alloc: buffer::Alloc) -> Vec<string> {
+  /// Split on ASCII whitespace without copying the pieces using the provided allocator.
+  pub fn split_whitespace_view_with_alloc(self, alloc: buffer::Alloc) -> Vec<string> {
     let out = alloc.vec_string_new()
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -350,12 +371,11 @@ impl string {
     return out
   }
 
-  /// Split on ASCII whitespace into views using the process default allocator.
-  pub fn split_whitespace_view_default(self) -> Vec<string> {
-    return self.split_whitespace_view(buffer::default_alloc())
+  pub fn lines(self) -> Vec<string> {
+    return self.lines_with_alloc(buffer::default_alloc())
   }
 
-  pub fn lines(self, alloc: buffer::Alloc) -> Vec<string> {
+  pub fn lines_with_alloc(self, alloc: buffer::Alloc) -> Vec<string> {
     let out = alloc.vec_string_new()
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -390,13 +410,13 @@ impl string {
     return out
   }
 
-  /// Split into lines using the process default allocator.
-  pub fn lines_default(self) -> Vec<string> {
-    return self.lines(buffer::default_alloc())
+  /// Split into line views without copying the pieces using the process default allocator.
+  pub fn lines_view(self) -> Vec<string> {
+    return self.lines_view_with_alloc(buffer::default_alloc())
   }
 
-  /// Split into line views without copying the pieces.
-  pub fn lines_view(self, alloc: buffer::Alloc) -> Vec<string> {
+  /// Split into line views without copying the pieces using the provided allocator.
+  pub fn lines_view_with_alloc(self, alloc: buffer::Alloc) -> Vec<string> {
     let out = alloc.vec_string_new()
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -431,12 +451,11 @@ impl string {
     return out
   }
 
-  /// Split into line views using the process default allocator.
-  pub fn lines_view_default(self) -> Vec<string> {
-    return self.lines_view(buffer::default_alloc())
+  pub fn split(self, delim: u8) -> Vec<string> {
+    return self.split_with_alloc(buffer::default_alloc(), delim)
   }
 
-  pub fn split(self, alloc: buffer::Alloc, delim: u8) -> Vec<string> {
+  pub fn split_with_alloc(self, alloc: buffer::Alloc, delim: u8) -> Vec<string> {
     let out = alloc.vec_string_new()
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -461,13 +480,13 @@ impl string {
     return out
   }
 
-  /// Split on a delimiter using the process default allocator.
-  pub fn split_default(self, delim: u8) -> Vec<string> {
-    return self.split(buffer::default_alloc(), delim)
+  /// Split on a delimiter into views using the process default allocator.
+  pub fn split_view(self, delim: u8) -> Vec<string> {
+    return self.split_view_with_alloc(buffer::default_alloc(), delim)
   }
 
-  /// Split on a delimiter without copying the pieces.
-  pub fn split_view(self, alloc: buffer::Alloc, delim: u8) -> Vec<string> {
+  /// Split on a delimiter without copying the pieces using the provided allocator.
+  pub fn split_view_with_alloc(self, alloc: buffer::Alloc, delim: u8) -> Vec<string> {
     let out = alloc.vec_string_new()
     let bytes = self.as_slice()
     let len = bytes.len()
@@ -492,13 +511,13 @@ impl string {
     return out
   }
 
-  /// Split on a delimiter into views using the process default allocator.
-  pub fn split_view_default(self, delim: u8) -> Vec<string> {
-    return self.split_view(buffer::default_alloc(), delim)
+  /// Split once on the first matching delimiter using the process default allocator.
+  pub fn split_once(self, delim: u8) -> Result<SplitOnce, unit> {
+    return self.split_once_with_alloc(buffer::default_alloc(), delim)
   }
 
-  /// Split once on the first matching delimiter.
-  pub fn split_once(self, alloc: buffer::Alloc, delim: u8) -> Result<SplitOnce, unit> {
+  /// Split once on the first matching delimiter using the provided allocator.
+  pub fn split_once_with_alloc(self, alloc: buffer::Alloc, delim: u8) -> Result<SplitOnce, unit> {
     let bytes = self.as_slice()
     let len = bytes.len()
     let i = 0
@@ -514,11 +533,6 @@ impl string {
       i = i + 1
     }
     return Err(())
-  }
-
-  /// Split once on the first matching delimiter using the process default allocator.
-  pub fn split_once_default(self, delim: u8) -> Result<SplitOnce, unit> {
-    return self.split_once(buffer::default_alloc(), delim)
   }
 
   /// Split once on the first matching delimiter without copying.
@@ -581,19 +595,24 @@ impl string {
     return view_range(self, 0, i)
   }
 
-  /// Trim ASCII whitespace from both ends.
-  pub fn trim(self, alloc: buffer::Alloc) -> string {
-    let start_trimmed = self.trim_start(alloc)
-    return start_trimmed.trim_end(alloc)
-  }
-
   /// Trim ASCII whitespace from both ends using the process default allocator.
-  pub fn trim_default(self) -> string {
-    return self.trim(buffer::default_alloc())
+  pub fn trim(self) -> string {
+    return self.trim_with_alloc(buffer::default_alloc())
   }
 
-  /// Trim ASCII whitespace from the start.
-  pub fn trim_start(self, alloc: buffer::Alloc) -> string {
+  /// Trim ASCII whitespace from both ends using the provided allocator.
+  pub fn trim_with_alloc(self, alloc: buffer::Alloc) -> string {
+    let start_trimmed = self.trim_start_with_alloc(alloc)
+    return start_trimmed.trim_end_with_alloc(alloc)
+  }
+
+  /// Trim ASCII whitespace from the start using the process default allocator.
+  pub fn trim_start(self) -> string {
+    return self.trim_start_with_alloc(buffer::default_alloc())
+  }
+
+  /// Trim ASCII whitespace from the start using the provided allocator.
+  pub fn trim_start_with_alloc(self, alloc: buffer::Alloc) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
     let i = 0
@@ -609,13 +628,13 @@ impl string {
     return build_range(alloc, self, i, len)
   }
 
-  /// Trim ASCII whitespace from the start using the process default allocator.
-  pub fn trim_start_default(self) -> string {
-    return self.trim_start(buffer::default_alloc())
+  /// Trim ASCII whitespace from the end using the process default allocator.
+  pub fn trim_end(self) -> string {
+    return self.trim_end_with_alloc(buffer::default_alloc())
   }
 
-  /// Trim ASCII whitespace from the end.
-  pub fn trim_end(self, alloc: buffer::Alloc) -> string {
+  /// Trim ASCII whitespace from the end using the provided allocator.
+  pub fn trim_end_with_alloc(self, alloc: buffer::Alloc) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
     if (len == 0) {
@@ -637,45 +656,40 @@ impl string {
     return build_range(alloc, self, 0, i)
   }
 
-  /// Trim ASCII whitespace from the end using the process default allocator.
-  pub fn trim_end_default(self) -> string {
-    return self.trim_end(buffer::default_alloc())
+  /// Remove a leading prefix if present using the process default allocator.
+  pub fn trim_prefix(self, prefix: string) -> string {
+    return self.trim_prefix_with_alloc(buffer::default_alloc(), prefix)
   }
 
-  /// Remove a leading prefix if present.
-  pub fn trim_prefix(self, alloc: buffer::Alloc, prefix: string) -> string {
+  /// Remove a leading prefix if present using the provided allocator.
+  pub fn trim_prefix_with_alloc(self, alloc: buffer::Alloc, prefix: string) -> string {
     if (self.starts_with(prefix)) {
       return build_range(alloc, self, prefix.len(), self.len())
     }
     return self
   }
 
-  /// Remove a leading prefix using the process default allocator.
-  pub fn trim_prefix_default(self, prefix: string) -> string {
-    return self.trim_prefix(buffer::default_alloc(), prefix)
+  /// Remove a trailing suffix if present using the process default allocator.
+  pub fn trim_suffix(self, suffix: string) -> string {
+    return self.trim_suffix_with_alloc(buffer::default_alloc(), suffix)
   }
 
-  /// Remove a trailing suffix if present.
-  pub fn trim_suffix(self, alloc: buffer::Alloc, suffix: string) -> string {
+  /// Remove a trailing suffix if present using the provided allocator.
+  pub fn trim_suffix_with_alloc(self, alloc: buffer::Alloc, suffix: string) -> string {
     if (self.ends_with(suffix)) {
       return build_range(alloc, self, 0, self.len() - suffix.len())
     }
     return self
   }
 
-  /// Remove a trailing suffix using the process default allocator.
-  pub fn trim_suffix_default(self, suffix: string) -> string {
-    return self.trim_suffix(buffer::default_alloc(), suffix)
-  }
-
   /// split_lines() is an alias for lines().
-  pub fn split_lines(self, alloc: buffer::Alloc) -> Vec<string> {
-    return self.lines(alloc)
+  pub fn split_lines(self) -> Vec<string> {
+    return self.lines()
   }
 
-  /// split_lines() using the process default allocator.
-  pub fn split_lines_default(self) -> Vec<string> {
-    return self.split_lines(buffer::default_alloc())
+  /// split_lines() using the provided allocator.
+  pub fn split_lines_with_alloc(self, alloc: buffer::Alloc) -> Vec<string> {
+    return self.lines_with_alloc(alloc)
   }
 
   /// True if the string starts with the prefix.
@@ -929,11 +943,16 @@ impl string {
     return true
   }
 
-  /// Lowercase ASCII letters.
-  pub fn to_lower_ascii(self, alloc: buffer::Alloc) -> string {
+  /// Lowercase ASCII letters using the process default allocator.
+  pub fn to_lower_ascii(self) -> string {
+    return self.to_lower_ascii_with_alloc(buffer::default_alloc())
+  }
+
+  /// Lowercase ASCII letters using the provided allocator.
+  pub fn to_lower_ascii_with_alloc(self, alloc: buffer::Alloc) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
-    let buf = text_new(alloc)
+    let buf = text_new_with_alloc(alloc)
     let i = 0
     while (i < len) {
       let b = bytes.at(i)
@@ -950,16 +969,16 @@ impl string {
     }
   }
 
-  /// Lowercase ASCII letters using the process default allocator.
-  pub fn to_lower_ascii_default(self) -> string {
-    return self.to_lower_ascii(buffer::default_alloc())
+  /// Uppercase ASCII letters using the process default allocator.
+  pub fn to_upper_ascii(self) -> string {
+    return self.to_upper_ascii_with_alloc(buffer::default_alloc())
   }
 
-  /// Uppercase ASCII letters.
-  pub fn to_upper_ascii(self, alloc: buffer::Alloc) -> string {
+  /// Uppercase ASCII letters using the provided allocator.
+  pub fn to_upper_ascii_with_alloc(self, alloc: buffer::Alloc) -> string {
     let bytes = self.as_slice()
     let len = bytes.len()
-    let buf = text_new(alloc)
+    let buf = text_new_with_alloc(alloc)
     let i = 0
     while (i < len) {
       let b = bytes.at(i)
@@ -976,19 +995,14 @@ impl string {
     }
   }
 
-  /// Uppercase ASCII letters using the process default allocator.
-  pub fn to_upper_ascii_default(self) -> string {
-    return self.to_upper_ascii(buffer::default_alloc())
-  }
-
   /// Trim ASCII whitespace (alias of trim()).
-  pub fn trim_ascii(self, alloc: buffer::Alloc) -> string {
-    return self.trim(alloc)
+  pub fn trim_ascii(self) -> string {
+    return self.trim()
   }
 
-  /// Trim ASCII whitespace using the process default allocator.
-  pub fn trim_ascii_default(self) -> string {
-    return self.trim_ascii(buffer::default_alloc())
+  /// Trim ASCII whitespace using the provided allocator.
+  pub fn trim_ascii_with_alloc(self, alloc: buffer::Alloc) -> string {
+    return self.trim_with_alloc(alloc)
   }
 
   /// Alias for index_of_byte.

@@ -1,7 +1,7 @@
 package safe
 module vec_search_helpers
 use sys::system
-use sys::buffer
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
@@ -44,7 +44,7 @@ pub fn main(rc: RootCap) -> i32 {
   }
   c.assert(v.get_or(1, 99) == 1)
   c.assert(v.get_or(99, 77) == 77)
-  let bytes = buffer::vec_new_default<u8>()
+  let bytes = vec::new<u8>()
   try bytes.push('h') else {
     panic()
   }

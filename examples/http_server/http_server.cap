@@ -68,7 +68,7 @@ fn handle_request(conn: &TcpConn, readfs: &ReadFS, req: string) -> Result<unit, 
   try let path = parse_request_path(req) else {
     return respond_bad_request(conn)
   }
-  try let body = readfs.read_to_string_default(path) else {
+  try let body = readfs.read_to_string(path) else {
     return respond_not_found(conn)
   }
   return respond_ok(conn, body)
@@ -88,7 +88,7 @@ fn serve_forever(c: Console, net: Net, rc: RootCap, root: string, port: i32) -> 
     try let conn = listener.accept() else {
       continue
     }
-    try let req = conn.read_default(4096) else {
+    try let req = conn.read(4096) else {
       conn.close()
       continue
     }

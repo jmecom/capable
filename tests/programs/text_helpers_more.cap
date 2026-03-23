@@ -6,7 +6,7 @@ use sys::string
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let alloc = rc.mint_alloc_default()
-  let text = alloc.text_new()
+  let text = string::text_new()
   try text.push_str("hi") else {
     panic()
   }
@@ -33,7 +33,7 @@ pub fn main(rc: RootCap) -> i32 {
     return 1
   }
   c.assert(owned.eq("hi\nok!"))
-  try let t2 = alloc.text_from("cap") else {
+  try let t2 = string::text_from("cap") else {
     panic()
   }
   try let owned2 = t2.to_string() else {
@@ -41,8 +41,8 @@ pub fn main(rc: RootCap) -> i32 {
     return 1
   }
   c.assert(owned2.eq("cap"))
-  t2.free(alloc)
-  try let t3 = "owned".to_text(alloc) else {
+  t2.free()
+  try let t3 = "owned".to_text() else {
     panic()
   }
   try let owned3 = t3.to_string() else {
@@ -50,9 +50,9 @@ pub fn main(rc: RootCap) -> i32 {
     return 1
   }
   c.assert(owned3.eq("owned"))
-  t3.free(alloc)
+  t3.free()
   alloc.vec_u8_free(v)
-  text.free(alloc)
+  text.free()
   c.println("text helpers ok")
   return 0
 }
