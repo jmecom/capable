@@ -5,7 +5,7 @@ module http_server
 use sys::console
 use sys::fs
 use sys::net
-use sys::string
+use sys::path
 use sys::system
 
 fn strip_query(raw_path: string) -> string {
@@ -15,91 +15,34 @@ fn strip_query(raw_path: string) -> string {
   }
 }
 
-fn sanitize_path(raw_path: string, alloc: Alloc) -> Result<string, unit> {
-  let out = alloc.text_new()
-  let rest = raw_path
-  while (true) {
-    let seg = ""
-    let done = false
-    match (rest.split_once_view('/')) {
-      Ok(parts) => {
-        seg = parts.left
-        rest = parts.right
-      }
-      Err(_) => {
-        seg = rest
-        done = true
-      }
-    }
-    if (seg == "..") {
-      out.free(alloc)
-      return Err(())
-    }
-    if (seg.len() > 0 && seg != ".") {
-      if (!out.is_empty()) {
-        match (out.push_byte('/')) {
-          Ok(_) => { }
-          Err(_) => {
-            out.free(alloc)
-            return Err(())
-          }
-        }
-      }
-      match (out.push_str(seg)) {
-        Ok(_) => { }
-        Err(_) => {
-          out.free(alloc)
-          return Err(())
-        }
-      }
-    }
-    if (done) {
-      break
-    }
-  }
-  if (out.is_empty()) {
-    out.free(alloc)
-    return Ok("index.html")
-  }
-  let result = out.to_string()
-  out.free(alloc)
-  match (result) {
-    Ok(path) => { return Ok(path) }
-    Err(_) => { return Err(()) }
-  }
-}
-
 enum ParseErr {
   MissingSpace,
   BadMethod,
   BadSlice
 }
 
-fn split_on_space(s: string) -> Result<string::SplitOnce, ParseErr> {
-  match (s.split_once_view(' ')) {
-    Ok(parts) => { return Ok(parts) }
-    Err(_) => { return Err(ParseErr::MissingSpace) }
-  }
-}
-
-fn parse_request_line(line: string, alloc: Alloc) -> Result<string, ParseErr> {
+fn parse_request_line(line: string) -> Result<string, ParseErr> {
   let trimmed = line.trim_view()
-  let head = split_on_space(trimmed)?
+  let Ok(head) = trimmed.split_once_view(' ') else {
+    return Err(ParseErr::MissingSpace)
+  }
   if (head.left != "GET") {
     return Err(ParseErr::BadMethod)
   }
   let rest = head.right.trim_start_view()
-  let target = split_on_space(rest)?.left
-  match (sanitize_path(strip_query(target), alloc)) {
+  let Ok(target) = rest.split_once_view(' ') else {
+    return Err(ParseErr::MissingSpace)
+  }
+  match (path::clean_relative(strip_query(target.left))) {
     Ok(p) => { return Ok(p) }
     Err(_) => { return Err(ParseErr::BadSlice) }
   }
 }
 
-fn parse_request_path(req: string, alloc: Alloc) -> Result<string, ParseErr> {
+fn parse_request_path(req: string) -> Result<string, ParseErr> {
   match (req.split_once_view('\n')) {
-    Ok(parts) => { return parse_request_line(parts.left.trim_end_view(), alloc) }
-    Err(_) => { return parse_request_line(req.trim_end_view(), alloc) }
+    Ok(parts) => { return parse_request_line(parts.left.trim_end_view()) }
+    Err(_) => { return parse_request_line(req.trim_end_view()) }
   }
 }
 
@@ -117,10 +60,10 @@ fn respond_bad_request(conn: &TcpConn) -> Result<unit, NetErr> {
   return conn.write("HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nbad request\n")
 }
 
-fn handle_request(conn: &TcpConn, readfs: &ReadFS, alloc: Alloc, req: string) -> Result<unit, NetErr> {
-  match (parse_request_path(req, alloc)) {
+fn handle_request(conn: &TcpConn, readfs: &ReadFS, req: string) -> Result<unit, NetErr> {
+  match (parse_request_path(req)) {
     Ok(path) => {
-      match (readfs.read_to_string(alloc, path)) {
+      match (readfs.read_to_string_default(path)) {
         Ok(body) => { return respond_ok(conn, body) }
         Err(_) => { return respond_not_found(conn) }
       }
@@ -129,7 +72,7 @@ fn handle_request(conn: &TcpConn, readfs: &ReadFS, alloc: Alloc, req: string) ->
   }
 }
 
-fn serve_forever(c: Console, net: Net, rc: RootCap, alloc: Alloc, root: string, port: i32) -> Result<unit, NetErr> {
+fn serve_forever(c: Console, net: Net, rc: RootCap, root: string, port: i32) -> Result<unit, NetErr> {
   let listener = net.listen("127.0.0.1", port)?
   let readfs = rc.mint_readfs(root)
   let readfs_ref: &ReadFS = readfs
@@ -140,15 +83,16 @@ fn serve_forever(c: Console, net: Net, rc: RootCap, alloc: Alloc, root: string, 
   defer readfs.close()
   while (true) {
     if let Ok(conn) = listener.accept() {
-      let req_result = conn.read(alloc, 4096)
-      if (req_result.is_err()) {
-        conn.close()
-      } else {
-        let req = req_result.ok()
-        let handled = handle_request(conn, readfs_ref, alloc, req)
-        conn.close()
-        if (handled.is_err()) {
-          // Ignore per-request write errors; keep the server alive.
+      match (conn.read_default(4096)) {
+        Ok(req) => {
+          let handled = handle_request(conn, readfs_ref, req)
+          conn.close()
+          if (handled.is_err()) {
+            // Ignore per-request write errors; keep the server alive.
+          }
+        }
+        Err(_) => {
+          conn.close()
         }
       }
     } else {
@@ -163,10 +107,9 @@ pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let net = rc.mint_net()
   let args = rc.mint_args()
-  let alloc = rc.mint_alloc_default()
-  let root = args.at(1).unwrap_or("examples/http_server")
+  let root = args.at_or(1, "examples/http_server")
   let port = 8090
-  let result = serve_forever(c, net, rc, alloc, root, port)
+  let result = serve_forever(c, net, rc, root, port)
   if (result.is_err()) {
     c.println("server error (is the port in use?)")
   }

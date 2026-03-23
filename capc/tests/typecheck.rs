@@ -53,6 +53,22 @@ fn typecheck_fs_dir_reuse_ok() {
 }
 
 #[test]
+fn typecheck_let_else_ok() {
+    let source = load_program("let_else.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_path_helpers_ok() {
+    let source = load_program("path_helpers.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_fs_close_ok() {
     let source = load_program("should_pass_fs_close.cap");
     let module = parse_module(&source).expect("parse module");
@@ -270,7 +286,9 @@ fn typecheck_alloc_as_console_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("unknown method `sys.buffer.Alloc__println`"));
+    assert!(err
+        .to_string()
+        .contains("unknown method `sys.buffer.Alloc__println`"));
 }
 
 #[test]
@@ -340,9 +358,7 @@ fn typecheck_try_question_err_mismatch_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err
-        .to_string()
-        .contains("mismatched error type for `?`"));
+    assert!(err.to_string().contains("mismatched error type for `?`"));
 }
 
 #[test]
@@ -681,7 +697,9 @@ fn typecheck_affine_loop_move_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("move-only value `c` moved inside loop"));
+    assert!(err
+        .to_string()
+        .contains("move-only value `c` moved inside loop"));
 }
 
 #[test]
@@ -709,7 +727,9 @@ fn typecheck_extern_requires_unsafe_package() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("extern declarations require `package unsafe`"));
+    assert!(err
+        .to_string()
+        .contains("extern declarations require `package unsafe`"));
 }
 
 #[test]
@@ -734,7 +754,9 @@ fn typecheck_pointer_requires_unsafe_package() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("raw pointer types require `package unsafe`"));
+    assert!(err
+        .to_string()
+        .contains("raw pointer types require `package unsafe`"));
 }
 
 #[test]
@@ -1009,7 +1031,9 @@ fn typecheck_continue_outside_loop_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("continue statement outside of loop"));
+    assert!(err
+        .to_string()
+        .contains("continue statement outside of loop"));
 }
 
 #[test]

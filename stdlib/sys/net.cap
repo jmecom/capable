@@ -50,9 +50,19 @@ impl TcpConn {
     return Err(NetErr::IoError)
   }
 
+  /// Read all available data using the process default allocator.
+  pub fn read_to_string_default(self: &TcpConn) -> Result<string, NetErr> {
+    return self.read_to_string(buffer::default_alloc())
+  }
+
   /// Read up to max_size bytes into a string.
   pub fn read(self: &TcpConn, alloc: buffer::Alloc, max_size: i32) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
+  }
+
+  /// Read up to max_size bytes using the process default allocator.
+  pub fn read_default(self: &TcpConn, max_size: i32) -> Result<string, NetErr> {
+    return self.read(buffer::default_alloc(), max_size)
   }
 
   /// Write a string to the connection.

@@ -1,0 +1,51 @@
+package safe
+module let_else
+use sys::system
+
+enum Maybe {
+  Some(i32),
+  None
+}
+
+fn from_flag(flag: bool) -> Maybe {
+  if (flag) {
+    return Maybe::Some(7)
+  }
+  return Maybe::None
+}
+
+fn parse(flag: bool) -> Result<i32, string> {
+  if (flag) {
+    return Ok(11)
+  }
+  return Err("bad")
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  let Ok(n) = parse(true) else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(n == 11)
+
+  let Maybe::Some(v) = from_flag(true) else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(v == 7)
+
+  let fallback = match parse(false) {
+    Ok(found) => { found }
+    Err(_) => {
+      let Ok(found) = parse(true) else {
+        return 2
+      }
+      found
+    }
+  }
+  c.assert(fallback == 11)
+  c.println("let else ok")
+  return 0
+}

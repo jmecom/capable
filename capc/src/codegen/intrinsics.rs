@@ -188,6 +188,10 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
     };
+    let mem_default_alloc = FnSig {
+        params: vec![],
+        ret: AbiType::Handle,
+    };
     let system_mint_args = FnSig {
         params: vec![AbiType::Handle],
         ret: AbiType::Handle,
@@ -488,6 +492,16 @@ pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
             sig: mem_alloc_default,
             abi_sig: None,
             symbol: "capable_rt_alloc_default".to_string(),
+            runtime_symbol: None,
+            is_runtime: true,
+        },
+    );
+    map.insert(
+        "sys.buffer.default_alloc".to_string(),
+        FnInfo {
+            sig: mem_default_alloc,
+            abi_sig: None,
+            symbol: "capable_rt_default_alloc".to_string(),
             runtime_symbol: None,
             is_runtime: true,
         },

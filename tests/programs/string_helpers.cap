@@ -1,6 +1,7 @@
 package safe
 module string_helpers
 use sys::system
+use sys::buffer
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
@@ -11,6 +12,7 @@ pub fn main(rc: RootCap) -> i32 {
   let b = buf.at(0)
   let words = "a b  c".split_whitespace(alloc)
   let word_views = "a b  c".split_whitespace_view(alloc)
+  let split_views = "a,b,c".split_view_default(',')
   let count = words.len()
   let trimmed = "  hi \n".trim(alloc)
   let trimmed_view = "  hi \n".trim_view()
@@ -19,13 +21,21 @@ pub fn main(rc: RootCap) -> i32 {
   let trimmed_end = "  hi ".trim_end(alloc)
   let trimmed_end_view = "  hi ".trim_end_view()
   let trimmed_ascii = " \tHi\n".trim_ascii(alloc)
+  let trimmed_ascii_default = " \tHi\n".trim_ascii_default()
   let lower = "AbC".to_lower_ascii(alloc)
+  let lower_default = "AbC".to_lower_ascii_default()
   let upper = "AbC".to_upper_ascii(alloc)
+  let upper_default = "AbC".to_upper_ascii_default()
   let sliced = "hello".slice_range(1, 4)
   let lines = "a\nb\n".split_lines(alloc)
   let line_views = "a\r\nb\n".lines_view(alloc)
+  let t = buffer::text_new_default()
+  t.push_str("hi").ok()
+  c.assert(t.to_string().ok().eq("hi"))
+  t.free_default()
   c.assert(n == 3 && b == 'a' && count == 3)
   c.assert(word_views.len() == 3)
+  c.assert(split_views.len() == 3)
   c.assert(trimmed.len() == 2)
   c.assert(trimmed_view.eq("hi"))
   c.assert(trimmed.starts_with_byte('h'))
@@ -35,8 +45,11 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(trimmed_end.ends_with("hi"))
   c.assert(trimmed_end_view.ends_with("hi"))
   c.assert(trimmed_ascii.eq("Hi"))
+  c.assert(trimmed_ascii_default.eq("Hi"))
   c.assert(lower.eq("abc"))
+  c.assert(lower_default.eq("abc"))
   c.assert(upper.eq("ABC"))
+  c.assert(upper_default.eq("ABC"))
   c.assert("abc".starts_with_byte('a'))
   c.assert("abc".ends_with_byte('c'))
   c.assert("".is_empty())
@@ -113,6 +126,7 @@ pub fn main(rc: RootCap) -> i32 {
   }
   alloc.vec_string_free(words)
   alloc.vec_string_free(word_views)
+  split_views.free()
   alloc.vec_string_free(lines)
   alloc.vec_string_free(line_views)
   alloc.vec_string_free(pieces)

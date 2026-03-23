@@ -122,45 +122,37 @@ impl Parser {
             match self.peek_kind() {
                 Some(TokenKind::Pub) => {
                     if is_pub {
-                        return Err(self.error_current(
-                            "duplicate `pub` modifier".to_string(),
-                        ));
+                        return Err(self.error_current("duplicate `pub` modifier".to_string()));
                     }
                     self.bump();
                     is_pub = true;
                 }
                 Some(TokenKind::Linear) => {
                     if is_linear {
-                        return Err(self.error_current(
-                            "duplicate `linear` modifier".to_string(),
-                        ));
+                        return Err(self.error_current("duplicate `linear` modifier".to_string()));
                     }
                     self.bump();
                     is_linear = true;
                 }
                 Some(TokenKind::Copy) => {
                     if is_copy {
-                        return Err(self.error_current(
-                            "duplicate `copy` modifier".to_string(),
-                        ));
+                        return Err(self.error_current("duplicate `copy` modifier".to_string()));
                     }
                     self.bump();
                     is_copy = true;
                 }
                 Some(TokenKind::Opaque) => {
                     if is_opaque {
-                        return Err(self.error_current(
-                            "duplicate `opaque` modifier".to_string(),
-                        ));
+                        return Err(self.error_current("duplicate `opaque` modifier".to_string()));
                     }
                     self.bump();
                     is_opaque = true;
                 }
                 Some(TokenKind::Capability) => {
                     if is_capability {
-                        return Err(self.error_current(
-                            "duplicate `capability` modifier".to_string(),
-                        ));
+                        return Err(
+                            self.error_current("duplicate `capability` modifier".to_string())
+                        );
                     }
                     self.bump();
                     is_capability = true;
@@ -169,9 +161,9 @@ impl Parser {
             }
         }
         if is_linear && is_copy {
-            return Err(self.error_current(
-                "cannot combine `linear` and `copy` modifiers".to_string(),
-            ));
+            return Err(
+                self.error_current("cannot combine `linear` and `copy` modifiers".to_string())
+            );
         }
         if self.peek_kind() == Some(TokenKind::Extern) {
             if is_opaque || is_linear || is_copy || is_capability {
@@ -179,7 +171,9 @@ impl Parser {
                     "linear/copy/opaque/capability applies only to struct declarations".to_string(),
                 ));
             }
-            return Ok(Item::ExternFunction(self.parse_extern_function(is_pub, doc)?));
+            return Ok(Item::ExternFunction(
+                self.parse_extern_function(is_pub, doc)?,
+            ));
         }
         match self.peek_kind() {
             Some(TokenKind::Fn) => {
@@ -219,9 +213,7 @@ impl Parser {
             }
             Some(TokenKind::Impl) => {
                 if is_pub {
-                    return Err(self.error_current(
-                        "impl blocks cannot be marked pub".to_string(),
-                    ));
+                    return Err(self.error_current("impl blocks cannot be marked pub".to_string()));
                 }
                 if is_opaque || is_linear || is_copy || is_capability {
                     return Err(self.error_current(
@@ -231,9 +223,7 @@ impl Parser {
                 }
                 Ok(Item::Impl(self.parse_impl_block(doc)?))
             }
-            Some(other) => Err(self.error_current(format!(
-                "expected item, found {other:?}"
-            ))),
+            Some(other) => Err(self.error_current(format!("expected item, found {other:?}"))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
     }
@@ -252,11 +242,7 @@ impl Parser {
                     }
                     path
                 }
-                _ => {
-                    return Err(self.error_current(
-                        "trait impls require a trait name".to_string(),
-                    ))
-                }
+                _ => return Err(self.error_current("trait impls require a trait name".to_string())),
             };
             let target = self.parse_type()?;
             (Some(trait_path), target)
@@ -269,9 +255,9 @@ impl Parser {
             let doc = self.take_doc_comments();
             let is_pub = self.maybe_consume(TokenKind::Pub).is_some();
             if self.peek_kind() != Some(TokenKind::Fn) {
-                return Err(self.error_current(
-                    "expected method declaration in impl block".to_string(),
-                ));
+                return Err(
+                    self.error_current("expected method declaration in impl block".to_string())
+                );
             }
             methods.push(self.parse_function(is_pub, doc)?);
         }
@@ -286,7 +272,11 @@ impl Parser {
         })
     }
 
-    fn parse_extern_function(&mut self, is_pub: bool, doc: Option<String>) -> Result<ExternFunction, ParseError> {
+    fn parse_extern_function(
+        &mut self,
+        is_pub: bool,
+        doc: Option<String>,
+    ) -> Result<ExternFunction, ParseError> {
         let start = self.expect(TokenKind::Extern)?.span.start;
         self.expect(TokenKind::Fn)?;
         let name = self.expect_ident()?;
@@ -328,7 +318,11 @@ impl Parser {
         })
     }
 
-    fn parse_function(&mut self, is_pub: bool, doc: Option<String>) -> Result<Function, ParseError> {
+    fn parse_function(
+        &mut self,
+        is_pub: bool,
+        doc: Option<String>,
+    ) -> Result<Function, ParseError> {
         let start = self.expect(TokenKind::Fn)?.span.start;
         let name = self.expect_ident()?;
         let type_params = self.parse_type_params()?;
@@ -342,9 +336,7 @@ impl Parser {
                 } else if param_name.item == "self" {
                     None
                 } else {
-                    return Err(self.error_current(
-                        "expected ':' after parameter name".to_string(),
-                    ));
+                    return Err(self.error_current("expected ':' after parameter name".to_string()));
                 };
                 params.push(Param {
                     name: param_name,
@@ -384,9 +376,7 @@ impl Parser {
         while self.peek_kind() != Some(TokenKind::RBrace) {
             let doc = self.take_doc_comments();
             if self.maybe_consume(TokenKind::Pub).is_some() {
-                return Err(self.error_current(
-                    "trait methods cannot be marked pub".to_string(),
-                ));
+                return Err(self.error_current("trait methods cannot be marked pub".to_string()));
             }
             methods.push(self.parse_trait_method(doc)?);
         }
@@ -415,9 +405,7 @@ impl Parser {
                 } else if param_name.item == "self" {
                     None
                 } else {
-                    return Err(self.error_current(
-                        "expected ':' after parameter name".to_string(),
-                    ));
+                    return Err(self.error_current("expected ':' after parameter name".to_string()));
                 };
                 params.push(Param {
                     name: param_name,
@@ -585,22 +573,43 @@ impl Parser {
     }
 
     fn parse_let(&mut self) -> Result<LetStmt, ParseError> {
-        let start = self.expect(TokenKind::Let)?.span.start;
-        let name = self.expect_ident()?;
-        let ty = if self.maybe_consume(TokenKind::Colon).is_some() {
-            Some(self.parse_type()?)
-        } else {
-            None
-        };
+        let let_token = self.expect(TokenKind::Let)?;
+        let start = let_token.span.start;
+        if self.peek_kind() == Some(TokenKind::Ident)
+            && self
+                .peek_token(1)
+                .is_some_and(|t| matches!(t.kind, TokenKind::Colon | TokenKind::Eq))
+        {
+            let name = self.expect_ident()?;
+            let ty = if self.maybe_consume(TokenKind::Colon).is_some() {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            self.expect(TokenKind::Eq)?;
+            let expr = self.parse_expr()?;
+            let end = self
+                .maybe_consume(TokenKind::Semi)
+                .map_or(expr.span().end, |t| t.span.end);
+            return Ok(LetStmt {
+                name,
+                ty,
+                expr,
+                span: Span::new(start, end),
+            });
+        }
+
+        let pattern = self.parse_pattern()?;
         self.expect(TokenKind::Eq)?;
         let expr = self.parse_expr()?;
-        let end = self.maybe_consume(TokenKind::Semi).map_or(expr.span().end, |t| t.span.end);
-        Ok(LetStmt {
-            name,
-            ty,
-            expr,
-            span: Span::new(start, end),
-        })
+        self.expect(TokenKind::Else)?;
+        let else_block = self.parse_block()?;
+        let mut stmt = self.desugar_let_else(let_token.span, pattern, expr, else_block)?;
+        let end = self
+            .maybe_consume(TokenKind::Semi)
+            .map_or(stmt.span.end, |t| t.span.end);
+        stmt.span = Span::new(start, end);
+        Ok(stmt)
     }
 
     fn parse_assign(&mut self) -> Result<AssignStmt, ParseError> {
@@ -906,7 +915,11 @@ impl Parser {
         false
     }
 
-    fn parse_expr_bp(&mut self, min_bp: u8, allow_struct_literal: bool) -> Result<Expr, ParseError> {
+    fn parse_expr_bp(
+        &mut self,
+        min_bp: u8,
+        allow_struct_literal: bool,
+    ) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_prefix(allow_struct_literal)?;
 
         loop {
@@ -937,10 +950,17 @@ impl Parser {
                                         // Convert FieldAccess chain to Path
                                         self.field_access_to_path(fa)?
                                     }
-                                    _ => return Err(self.error_current("expected path before struct literal".to_string())),
+                                    _ => {
+                                        return Err(self.error_current(
+                                            "expected path before struct literal".to_string(),
+                                        ))
+                                    }
                                 };
                                 path.segments.push(field);
-                                path.span = Span::new(path.span.start, path.segments.last().unwrap().span.end);
+                                path.span = Span::new(
+                                    path.span.start,
+                                    path.segments.last().unwrap().span.end,
+                                );
                                 lhs = self.parse_struct_literal(path, type_args)?;
                                 continue;
                             }
@@ -1232,9 +1252,9 @@ impl Parser {
                     Ok(Expr::Path(path))
                 }
             }
-            Some(other) => Err(self.error_current(format!(
-                "unexpected token in expression: {other:?}"
-            ))),
+            Some(other) => {
+                Err(self.error_current(format!("unexpected token in expression: {other:?}")))
+            }
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
     }
@@ -1319,7 +1339,12 @@ impl Parser {
                     // Single segment - could be binding or enum variant
                     // If lowercase, it's a binding; if uppercase, it's an enum variant
                     let name = &path.segments[0].item;
-                    if name.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) {
+                    if name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_lowercase())
+                        .unwrap_or(false)
+                    {
                         Ok(Pattern::Binding(path.segments.into_iter().next().unwrap()))
                     } else {
                         Ok(Pattern::Path(path))
@@ -1333,6 +1358,90 @@ impl Parser {
                 Ok(Pattern::Wildcard(span))
             }
             _ => Err(self.error_current("unexpected token in pattern".to_string())),
+        }
+    }
+
+    fn desugar_let_else(
+        &self,
+        let_span: Span,
+        pattern: Pattern,
+        expr: Expr,
+        else_block: Block,
+    ) -> Result<LetStmt, ParseError> {
+        let binding = self.pattern_binding_ident(&pattern).ok_or_else(|| {
+            self.error_at(
+                let_span,
+                "`let ... else` requires a binding pattern".to_string(),
+            )
+        })?;
+
+        let binding_expr = Expr::Path(Path {
+            segments: vec![binding.clone()],
+            span: binding.span,
+        });
+        let ok_body = Block {
+            stmts: vec![Stmt::Expr(ExprStmt {
+                expr: binding_expr,
+                span: binding.span,
+            })],
+            span: binding.span,
+        };
+
+        let panic_ident = Spanned::new("panic".to_string(), else_block.span);
+        let panic_expr = Expr::Call(CallExpr {
+            callee: Box::new(Expr::Path(Path {
+                segments: vec![panic_ident],
+                span: else_block.span,
+            })),
+            type_args: Vec::new(),
+            args: Vec::new(),
+            span: else_block.span,
+        });
+        let mut else_stmts = else_block.stmts;
+        else_stmts.push(Stmt::Expr(ExprStmt {
+            expr: panic_expr,
+            span: else_block.span,
+        }));
+        let else_body = Block {
+            stmts: else_stmts,
+            span: else_block.span,
+        };
+
+        let match_span = Span::new(let_span.start, else_block.span.end);
+        let match_expr = Expr::Match(MatchExpr {
+            expr: Box::new(expr),
+            arms: vec![
+                MatchArm {
+                    pattern,
+                    body: ok_body,
+                    span: match_span,
+                },
+                MatchArm {
+                    pattern: Pattern::Wildcard(else_block.span),
+                    body: else_body,
+                    span: match_span,
+                },
+            ],
+            span: match_span,
+            match_span: let_span,
+        });
+
+        Ok(LetStmt {
+            name: binding,
+            ty: None,
+            expr: match_expr,
+            span: match_span,
+        })
+    }
+
+    fn pattern_binding_ident(&self, pattern: &Pattern) -> Option<Ident> {
+        match pattern {
+            Pattern::Binding(ident) => Some(ident.clone()),
+            Pattern::Call {
+                binding: Some(ident),
+                ..
+            } => Some(ident.clone()),
+            _ => None,
         }
     }
 
@@ -1371,12 +1480,22 @@ impl Parser {
             }
         }
 
-        collect_segments(&field_access.object, &mut segments)
-            .ok_or_else(|| self.error_at(field_access.span, "expected path or field access".to_string()))?;
+        collect_segments(&field_access.object, &mut segments).ok_or_else(|| {
+            self.error_at(
+                field_access.span,
+                "expected path or field access".to_string(),
+            )
+        })?;
         segments.push(field_access.field.clone());
 
-        let start = segments.first().map(|s| s.span.start).unwrap_or(field_access.span.start);
-        let end = segments.last().map(|s| s.span.end).unwrap_or(field_access.span.end);
+        let start = segments
+            .first()
+            .map(|s| s.span.start)
+            .unwrap_or(field_access.span.start);
+        let end = segments
+            .last()
+            .map(|s| s.span.end)
+            .unwrap_or(field_access.span.end);
 
         Ok(Path {
             segments,
@@ -1423,7 +1542,11 @@ impl Parser {
         Ok(Type::Path { path, args, span })
     }
 
-    fn parse_struct_literal(&mut self, path: Path, type_args: Vec<Type>) -> Result<Expr, ParseError> {
+    fn parse_struct_literal(
+        &mut self,
+        path: Path,
+        type_args: Vec<Type>,
+    ) -> Result<Expr, ParseError> {
         let start = path.span.start;
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
@@ -1527,9 +1650,7 @@ impl Parser {
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         match self.peek_kind() {
             Some(k) if k == kind => Ok(self.bump().unwrap()),
-            Some(other) => Err(self.error_current(format!(
-                "expected {kind:?}, found {other:?}"
-            ))),
+            Some(other) => Err(self.error_current(format!("expected {kind:?}, found {other:?}"))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
     }
@@ -1537,9 +1658,7 @@ impl Parser {
     fn expect_ident(&mut self) -> Result<Ident, ParseError> {
         match self.peek_kind() {
             Some(TokenKind::Ident) => Ok(to_ident(&self.bump().unwrap())),
-            Some(other) => Err(self.error_current(format!(
-                "expected identifier, found {other:?}"
-            ))),
+            Some(other) => Err(self.error_current(format!("expected identifier, found {other:?}"))),
             None => Err(self.error_current("unexpected end of input".to_string())),
         }
     }
@@ -1665,8 +1784,12 @@ fn unescape_char(text: &str) -> Result<u8, String> {
             '\\' => b'\\',
             '\'' => b'\'',
             'x' => {
-                let hi = chars.next().ok_or_else(|| "invalid hex escape".to_string())?;
-                let lo = chars.next().ok_or_else(|| "invalid hex escape".to_string())?;
+                let hi = chars
+                    .next()
+                    .ok_or_else(|| "invalid hex escape".to_string())?;
+                let lo = chars
+                    .next()
+                    .ok_or_else(|| "invalid hex escape".to_string())?;
                 let hex = format!("{hi}{lo}");
                 u8::from_str_radix(&hex, 16).map_err(|_| "invalid hex escape".to_string())?
             }

@@ -47,6 +47,31 @@ pub fn copy_slice(alloc: Alloc, data: Slice<u8>) -> Result<Slice<u8>, AllocErr> 
   return Ok(alloc.slice_from_ptr(raw, len))
 }
 
+/// Obtain the process default allocator.
+pub fn default_alloc() -> Alloc {
+  return ()
+}
+
+/// Create a new Vec<T> with the process default allocator.
+pub fn vec_new_default<T>() -> vec::Vec<T> {
+  return vec::new_with<T>(default_alloc())
+}
+
+/// Create a Vec<T> with capacity using the process default allocator.
+pub fn vec_with_capacity_default<T>(capacity: i32) -> Result<vec::Vec<T>, AllocErr> {
+  return vec::with_capacity<T>(default_alloc(), capacity)
+}
+
+/// Allocate a new empty Text using the process default allocator.
+pub fn text_new_default() -> string::Text {
+  return string::text_new(default_alloc())
+}
+
+/// Copy a string view into a new Text using the process default allocator.
+pub fn text_from_default(s: string) -> Result<string::Text, AllocErr> {
+  return string::text_from(default_alloc(), s)
+}
+
 impl Alloc {
   /// Allocate raw bytes.
   pub fn malloc(self, size: i32) -> *u8 {

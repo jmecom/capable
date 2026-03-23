@@ -1,0 +1,136 @@
+/// Path helpers for ordinary string manipulation.
+package safe
+module sys::path
+
+use sys::buffer
+use sys::fs
+use sys::vec
+
+fn trim_trailing_slashes(raw_path: string) -> string {
+  let end = raw_path.len()
+  while (end > 0 && raw_path.byte_at(end - 1) == '/') {
+    end = end - 1
+  }
+  if (end == raw_path.len()) {
+    return raw_path
+  }
+  match (raw_path.slice_range(0, end)) {
+    Ok(out) => { return out }
+    Err(_) => { panic() }
+  }
+}
+
+/// Clean a user-supplied relative path and reject traversal.
+/// Empty paths become `index.html`.
+pub fn clean_relative_with(alloc: buffer::Alloc, raw_path: string) -> Result<string, unit> {
+  let out = alloc.text_new()
+  let rest = raw_path
+  while (true) {
+    let seg = ""
+    let done = false
+    match (rest.split_once_view('/')) {
+      Ok(parts) => {
+        seg = parts.left
+        rest = parts.right
+      }
+      Err(_) => {
+        seg = rest
+        done = true
+      }
+    }
+    if (seg == "..") {
+      out.free(alloc)
+      return Err(())
+    }
+    if (seg.len() > 0 && seg != ".") {
+      if (!out.is_empty()) {
+        match (out.push_byte('/')) {
+          Ok(_) => { }
+          Err(_) => {
+            out.free(alloc)
+            return Err(())
+          }
+        }
+      }
+      match (out.push_str(seg)) {
+        Ok(_) => { }
+        Err(_) => {
+          out.free(alloc)
+          return Err(())
+        }
+      }
+    }
+    if (done) {
+      break
+    }
+  }
+  if (out.is_empty()) {
+    out.free(alloc)
+    return Ok("index.html")
+  }
+  let result = out.to_string()
+  out.free(alloc)
+  match (result) {
+    Ok(path) => { return Ok(path) }
+    Err(_) => { return Err(()) }
+  }
+}
+
+/// Clean a user-supplied relative path with the process default allocator.
+pub fn clean_relative(raw_path: string) -> Result<string, unit> {
+  return clean_relative_with(buffer::default_alloc(), raw_path)
+}
+
+/// Split a path into slash-delimited segments without copying.
+pub fn segments_view_with(alloc: buffer::Alloc, raw_path: string) -> vec::Vec<string> {
+  return raw_path.split_view(alloc, '/')
+}
+
+/// Split a path into slash-delimited segments without copying.
+pub fn segments_view(raw_path: string) -> vec::Vec<string> {
+  return raw_path.split_view_default('/')
+}
+
+/// Return the basename of a path as a view.
+pub fn basename_view(raw_path: string) -> string {
+  let path = trim_trailing_slashes(raw_path)
+  if (path.is_empty()) {
+    return path
+  }
+  match (path.last_index_of_byte('/')) {
+    Ok(i) => {
+      match (path.slice_range(i + 1, path.len())) {
+        Ok(out) => { return out }
+        Err(_) => { panic() }
+      }
+    }
+    Err(_) => { return path }
+  }
+}
+
+/// Return the dirname of a path as a view.
+pub fn dirname_view(raw_path: string) -> string {
+  let path = trim_trailing_slashes(raw_path)
+  match (path.last_index_of_byte('/')) {
+    Ok(i) => {
+      if (i == 0) {
+        return ""
+      }
+      match (path.slice_range(0, i)) {
+        Ok(out) => { return out }
+        Err(_) => { panic() }
+      }
+    }
+    Err(_) => { return "" }
+  }
+}
+
+/// Join two path segments using the process default allocator.
+pub fn join(a: string, b: string) -> string {
+  return fs::join_default(a, b)
+}
+
+/// Join two path segments using an explicit allocator.
+pub fn join_with(alloc: buffer::Alloc, a: string, b: string) -> string {
+  return fs::join(alloc, a, b)
+}

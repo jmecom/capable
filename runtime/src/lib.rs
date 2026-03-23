@@ -28,8 +28,7 @@ static STDIN_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static NET_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-static ALLOCS: LazyLock<Mutex<HashMap<Handle, ()>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static ALLOCS: LazyLock<Mutex<HashMap<Handle, ()>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static TCP_LISTENERS: LazyLock<Mutex<HashMap<Handle, TcpListener>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static TCP_CONNS: LazyLock<Mutex<HashMap<Handle, TcpStream>>> =
@@ -78,7 +77,6 @@ struct VecHeader {
     elem_size: i32,
     alloc: Handle,
 }
-
 
 fn new_handle() -> Handle {
     let mut buf = [0u8; 8];
@@ -186,8 +184,7 @@ fn make_vec_header(
     elem_size: i32,
     alloc: Handle,
 ) -> Option<Handle> {
-    let header =
-        alloc_malloc(alloc, std::mem::size_of::<VecHeader>())? as *mut VecHeader;
+    let header = alloc_malloc(alloc, std::mem::size_of::<VecHeader>())? as *mut VecHeader;
     if header.is_null() {
         return None;
     }
@@ -351,10 +348,7 @@ pub extern "C" fn capable_rt_mint_net(_sys: Handle) -> Handle {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_mint_readfs(
-    _sys: Handle,
-    root: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_mint_readfs(_sys: Handle, root: *const CapString) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
         return 0;
     }
@@ -367,15 +361,17 @@ pub extern "C" fn capable_rt_mint_readfs(
         return 0;
     };
     let handle = new_handle();
-    insert_handle(&READ_FS, handle, ReadFsState { root: root_path }, "readfs table");
+    insert_handle(
+        &READ_FS,
+        handle,
+        ReadFsState { root: root_path },
+        "readfs table",
+    );
     handle
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_mint_filesystem(
-    _sys: Handle,
-    root: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_mint_filesystem(_sys: Handle, root: *const CapString) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
         return 0;
     }
@@ -422,10 +418,7 @@ pub extern "C" fn capable_rt_fs_filesystem_close(fs: Handle) {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_subdir(
-    dir: Handle,
-    name: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_fs_subdir(dir: Handle, name: *const CapString) -> Handle {
     let name = unsafe { read_cap_string(name) };
     let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
@@ -452,10 +445,7 @@ pub extern "C" fn capable_rt_fs_subdir(
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_open_read(
-    dir: Handle,
-    name: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_fs_open_read(dir: Handle, name: *const CapString) -> Handle {
     let name = unsafe { read_cap_string(name) };
     let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
@@ -487,10 +477,7 @@ pub extern "C" fn capable_rt_fs_dir_close(dir: Handle) {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_exists(
-    fs: Handle,
-    path: *const CapString,
-) -> u8 {
+pub extern "C" fn capable_rt_fs_exists(fs: Handle, path: *const CapString) -> u8 {
     let path = unsafe { read_cap_string(path) };
     let state = clone_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
@@ -574,10 +561,7 @@ pub extern "C" fn capable_rt_fs_list_dir(
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_dir_exists(
-    dir: Handle,
-    name: *const CapString,
-) -> u8 {
+pub extern "C" fn capable_rt_fs_dir_exists(dir: Handle, name: *const CapString) -> u8 {
     let name = unsafe { read_cap_string(name) };
     let state = clone_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
@@ -1134,6 +1118,13 @@ pub extern "C" fn capable_rt_alloc_default(_sys: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_default_alloc() -> Handle {
+    let handle = new_handle();
+    insert_handle(&ALLOCS, handle, (), "alloc table");
+    handle
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_args_len(_sys: Handle) -> i32 {
     if !has_handle(&ARGS_CAPS, _sys, "args table") {
         return 0;
@@ -1212,10 +1203,7 @@ pub extern "C" fn capable_rt_read_stdin_to_string(
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_string_eq(
-    left: *const CapString,
-    right: *const CapString,
-) -> i8 {
+pub extern "C" fn capable_rt_string_eq(left: *const CapString, right: *const CapString) -> i8 {
     let left_slice = unsafe {
         if left.is_null() {
             CapSlice {

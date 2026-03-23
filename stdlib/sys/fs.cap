@@ -23,14 +23,29 @@ impl ReadFS {
     return ()
   }
 
+  /// Read an entire file into a string using the process default allocator.
+  pub fn read_to_string_default(self: &ReadFS, path: string) -> Result<string, FsErr> {
+    return self.read_to_string(buffer::default_alloc(), path)
+  }
+
   /// Read an entire file into a byte vec.
   pub fn read_bytes(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
+  /// Read an entire file into a byte vec using the process default allocator.
+  pub fn read_bytes_default(self: &ReadFS, path: string) -> Result<vec::Vec<u8>, FsErr> {
+    return self.read_bytes(buffer::default_alloc(), path)
+  }
+
   /// List directory contents as strings.
   pub fn list_dir(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
+  }
+
+  /// List directory contents using the process default allocator.
+  pub fn list_dir_default(self: &ReadFS, path: string) -> Result<vec::Vec<string>, FsErr> {
+    return self.list_dir(buffer::default_alloc(), path)
   }
 
   /// True if a path exists.
@@ -72,9 +87,19 @@ impl Dir {
     return Err(FsErr::IoError)
   }
 
+  /// Read a file into a byte vec using the process default allocator.
+  pub fn read_bytes_default(self: &Dir, name: string) -> Result<vec::Vec<u8>, FsErr> {
+    return self.read_bytes(buffer::default_alloc(), name)
+  }
+
   /// List directory contents.
   pub fn list_dir(self: &Dir, alloc: buffer::Alloc) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
+  }
+
+  /// List directory contents using the process default allocator.
+  pub fn list_dir_default(self: &Dir) -> Result<vec::Vec<string>, FsErr> {
+    return self.list_dir(buffer::default_alloc())
   }
 
   /// True if a path exists.
@@ -85,6 +110,11 @@ impl Dir {
   /// Read a file into a string.
   pub fn read_to_string(self: &Dir, alloc: buffer::Alloc, name: string) -> Result<string, FsErr> {
     return ()
+  }
+
+  /// Read a file into a string using the process default allocator.
+  pub fn read_to_string_default(self: &Dir, name: string) -> Result<string, FsErr> {
+    return self.read_to_string(buffer::default_alloc(), name)
   }
 
   /// Close the capability.
@@ -99,6 +129,11 @@ impl FileRead {
     return ()
   }
 
+  /// Read the file into a string using the process default allocator.
+  pub fn read_to_string_default(self) -> Result<string, FsErr> {
+    return self.read_to_string(buffer::default_alloc())
+  }
+
   /// Close the file.
   pub fn close(self) -> unit {
     return ()
@@ -108,4 +143,9 @@ impl FileRead {
 /// Join two path segments with a platform separator.
 pub fn join(alloc: buffer::Alloc, a: string, b: string) -> string {
   return ""
+}
+
+/// Join two path segments using the process default allocator.
+pub fn join_default(a: string, b: string) -> string {
+  return join(buffer::default_alloc(), a, b)
 }

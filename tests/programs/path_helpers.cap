@@ -1,0 +1,31 @@
+package safe
+module path_helpers
+
+use sys::system
+use sys::path
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  match (path::clean_relative("/site/./docs//index.html")) {
+    Ok(clean) => { c.assert(clean.eq("site/docs/index.html")) }
+    Err(_) => { c.assert(false); return 1 }
+  }
+  c.assert(path::clean_relative("../etc/passwd").is_err())
+
+  let parts = path::segments_view("site/docs/index.html")
+  c.assert(parts.len() == 3)
+  c.assert(parts.get_or(0, "").eq("site"))
+  c.assert(parts.get_or(1, "").eq("docs"))
+  c.assert(parts.get_or(2, "").eq("index.html"))
+  parts.free()
+
+  c.assert(path::basename_view("site/docs/index.html").eq("index.html"))
+  c.assert(path::dirname_view("site/docs/index.html").eq("site/docs"))
+
+  let joined = path::join("site/docs", "index.html")
+  c.assert(joined.eq("site/docs/index.html"))
+
+  c.println("path ok")
+  return 0
+}

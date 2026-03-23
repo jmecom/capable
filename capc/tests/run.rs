@@ -96,12 +96,8 @@ fn run_fs_attenuation() {
 fn run_fs_helpers() {
     let out_dir = make_out_dir("fs_helpers");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/fs_helpers.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/fs_helpers.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("fs helpers ok"), "stdout was: {stdout:?}");
 }
@@ -110,12 +106,8 @@ fn run_fs_helpers() {
 fn run_fs_reuse() {
     let out_dir = make_out_dir("fs_reuse");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/fs_reuse.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/fs_reuse.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("fs reuse ok"), "stdout was: {stdout:?}");
 }
@@ -135,15 +127,35 @@ fn run_fs_dir_reuse() {
 }
 
 #[test]
-fn run_match_expr() {
-    let out_dir = make_out_dir("match_expr");
+fn run_let_else() {
+    let out_dir = make_out_dir("let_else");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/let_else.cap"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("let else ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_path_helpers() {
+    let out_dir = make_out_dir("path_helpers");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
     let (code, stdout, _stderr) = run_capc(&[
         "run",
         "--out-dir",
         out_dir,
-        "tests/programs/match_expr.cap",
+        "tests/programs/path_helpers.cap",
     ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("path ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_match_expr() {
+    let out_dir = make_out_dir("match_expr");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/match_expr.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("yes"), "stdout was: {stdout:?}");
 }
@@ -166,12 +178,8 @@ fn run_struct_field_access() {
 fn run_math_wrap() {
     let out_dir = make_out_dir("math_wrap");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/math_wrap.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/math_wrap.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("wrap ok"), "stdout was: {stdout:?}");
 }
@@ -187,7 +195,10 @@ fn run_unsigned_compare() {
         "tests/programs/unsigned_compare.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("unsigned compare ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("unsigned compare ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -320,12 +331,8 @@ fn run_overflow_add_traps() {
 fn run_div_zero_traps() {
     let out_dir = make_out_dir("div_zero");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, _stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/div_zero.cap",
-    ]);
+    let (code, _stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/div_zero.cap"]);
     assert_ne!(code, 0);
 }
 
@@ -376,12 +383,8 @@ fn run_text_unsafe() {
 fn run_text_safe() {
     let out_dir = make_out_dir("text_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/text_safe.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/text_safe.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("text ok"), "stdout was: {stdout:?}");
 }
@@ -411,22 +414,15 @@ fn run_text_helpers_more() {
         "tests/programs/text_helpers_more.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(
-        stdout.contains("text helpers ok"),
-        "stdout was: {stdout:?}"
-    );
+    assert!(stdout.contains("text helpers ok"), "stdout was: {stdout:?}");
 }
 
 #[test]
 fn run_text_basic() {
     let out_dir = make_out_dir("text_basic");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/text_basic.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/text_basic.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("text basic ok"), "stdout was: {stdout:?}");
 }
@@ -521,12 +517,8 @@ fn run_slice_safe_read() {
 fn run_args_safe() {
     let out_dir = make_out_dir("args_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/args_safe.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/args_safe.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("args ok"), "stdout was: {stdout:?}");
 }
@@ -535,12 +527,8 @@ fn run_args_safe() {
 fn run_stdin_safe() {
     let out_dir = make_out_dir("stdin_safe");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/stdin_safe.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/stdin_safe.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("stdin ok"), "stdout was: {stdout:?}");
 }
@@ -563,12 +551,8 @@ fn run_string_helpers() {
 fn run_wc_stdin() {
     let out_dir = make_out_dir("wc_stdin");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/wc_stdin.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/wc_stdin.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("0 0 0"), "stdout was: {stdout:?}");
 }
@@ -671,7 +655,10 @@ fn run_vec_custom_eq() {
         "tests/programs/vec_custom_eq.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("vec custom eq ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("vec custom eq ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -741,7 +728,10 @@ fn run_unit_match_arm() {
         "tests/programs/unit_match_arm.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("unit match arm ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("unit match arm ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -755,7 +745,10 @@ fn run_unit_match_multi() {
         "tests/programs/unit_match_multi.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("unit match multi ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("unit match multi ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -769,7 +762,10 @@ fn run_result_unit_ok() {
         "tests/programs/result_unit_ok.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("result unit ok - got Ok(unit)"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("result unit ok - got Ok(unit)"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -783,7 +779,10 @@ fn run_unit_match_bind() {
         "tests/programs/unit_match_bind.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("unit match bind ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("unit match bind ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -797,8 +796,14 @@ fn run_early_return_block() {
         "tests/programs/early_return_block.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("early return test ok"), "stdout was: {stdout:?}");
-    assert!(!stdout.contains("SHOULD NOT PRINT"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("early return test ok"),
+        "stdout was: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("SHOULD NOT PRINT"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -812,8 +817,14 @@ fn run_early_return_while() {
         "tests/programs/early_return_while.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("early return while test ok"), "stdout was: {stdout:?}");
-    assert!(!stdout.contains("SHOULD NOT PRINT"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("early return while test ok"),
+        "stdout was: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("SHOULD NOT PRINT"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -827,7 +838,10 @@ fn run_scoping_let_block() {
         "tests/programs/scoping_let_block.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("scoping let block test ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("scoping let block test ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -841,7 +855,10 @@ fn run_scoping_assign() {
         "tests/programs/scoping_assign.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("scoping assign test ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("scoping assign test ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -904,12 +921,8 @@ fn run_nested_match() {
 fn run_for_basic() {
     let out_dir = make_out_dir("for_basic");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/for_basic.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/for_basic.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("for_basic ok"), "stdout was: {stdout:?}");
 }
@@ -918,12 +931,8 @@ fn run_for_basic() {
 fn run_for_break() {
     let out_dir = make_out_dir("for_break");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/for_break.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/for_break.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("for_break ok"), "stdout was: {stdout:?}");
 }
@@ -946,12 +955,8 @@ fn run_for_continue() {
 fn run_for_nested() {
     let out_dir = make_out_dir("for_nested");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/for_nested.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/for_nested.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("for_nested ok"), "stdout was: {stdout:?}");
 }
@@ -960,12 +965,8 @@ fn run_for_nested() {
 fn run_for_sum() {
     let out_dir = make_out_dir("for_sum");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
-    let (code, stdout, _stderr) = run_capc(&[
-        "run",
-        "--out-dir",
-        out_dir,
-        "tests/programs/for_sum.cap",
-    ]);
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/for_sum.cap"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("for_sum ok"), "stdout was: {stdout:?}");
 }
@@ -981,7 +982,10 @@ fn run_for_empty_range() {
         "tests/programs/for_empty_range.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("for_empty_range ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("for_empty_range ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -995,7 +999,10 @@ fn run_for_break_nested() {
         "tests/programs/for_break_nested.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("for_break_nested ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("for_break_nested ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1009,7 +1016,10 @@ fn run_for_continue_nested() {
         "tests/programs/for_continue_nested.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("for_continue_nested ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("for_continue_nested ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1023,7 +1033,10 @@ fn run_string_compare() {
         "tests/programs/string_compare.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("string_compare ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("string_compare ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1051,7 +1064,10 @@ fn run_generic_and_index() {
         "tests/programs/generic_and_index.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("generic_and_index ok"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("generic_and_index ok"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1127,7 +1143,10 @@ fn run_defer_return() {
         "tests/programs/should_pass_defer_return.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("start\ninner\nouter\n"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("start\ninner\nouter\n"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1141,7 +1160,10 @@ fn run_if_let() {
         "tests/programs/should_pass_if_let.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("ok\nerr\nif_let ok\n"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("ok\nerr\nif_let ok\n"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1155,7 +1177,10 @@ fn run_for_forever() {
         "tests/programs/should_pass_for_forever.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("0\n1\n2\nfor_forever ok\n"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("0\n1\n2\nfor_forever ok\n"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1182,7 +1207,10 @@ fn run_trait_eq_hash() {
         "tests/programs/trait_eq_hash.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("Eq and Hash traits work correctly!"), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("Eq and Hash traits work correctly!"),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]
@@ -1196,7 +1224,10 @@ fn run_hashmap_demo() {
         "examples/hashmap_demo/hashmap_demo.cap",
     ]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("=== Demo Complete ==="), "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("=== Demo Complete ==="),
+        "stdout was: {stdout:?}"
+    );
 }
 
 #[test]

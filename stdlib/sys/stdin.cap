@@ -13,4 +13,9 @@ impl Stdin {
   pub fn read_to_string(self: &Stdin, alloc: buffer::Alloc) -> Result<string, io::IoErr> {
     return Err(io::IoErr::IoError)
   }
+
+  /// Read stdin into a string using the process default allocator.
+  pub fn read_to_string_default(self: &Stdin) -> Result<string, io::IoErr> {
+    return self.read_to_string(buffer::default_alloc())
+  }
 }

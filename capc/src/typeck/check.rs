@@ -28,11 +28,7 @@ impl<'a> TypeRecorder<'a> {
     }
 }
 
-fn record_expr_type(
-    recorder: &mut TypeRecorder,
-    expr: &Expr,
-    ty: Ty,
-) -> Result<Ty, TypeError> {
+fn record_expr_type(recorder: &mut TypeRecorder, expr: &Expr, ty: Ty) -> Result<Ty, TypeError> {
     recorder.record(expr, &ty);
     Ok(ty)
 }
@@ -50,10 +46,16 @@ fn infer_enum_args(template: &Ty, actual: &Ty, inferred: &mut HashMap<String, Ty
             }
         },
         Ty::Builtin(b) => matches!(actual, Ty::Builtin(other) if other == b),
-        Ty::Ptr(inner) => matches!(actual, Ty::Ptr(other) if infer_enum_args(inner, other, inferred)),
-        Ty::Ref(inner) => matches!(actual, Ty::Ref(other) if infer_enum_args(inner, other, inferred)),
+        Ty::Ptr(inner) => {
+            matches!(actual, Ty::Ptr(other) if infer_enum_args(inner, other, inferred))
+        }
+        Ty::Ref(inner) => {
+            matches!(actual, Ty::Ref(other) if infer_enum_args(inner, other, inferred))
+        }
         Ty::Path(name, args) => match actual {
-            Ty::Path(other_name, other_args) if other_name == name && args.len() == other_args.len() => {
+            Ty::Path(other_name, other_args)
+                if other_name == name && args.len() == other_args.len() =>
+            {
                 args.iter()
                     .zip(other_args.iter())
                     .all(|(a, b)| infer_enum_args(a, b, inferred))
@@ -102,8 +104,16 @@ fn apply_enum_type_args(ty: &Ty, type_params: &[String], type_args: &[Ty]) -> Ty
             ty.clone()
         }
         Ty::Builtin(_) => ty.clone(),
-        Ty::Ptr(inner) => Ty::Ptr(Box::new(apply_enum_type_args(inner, type_params, type_args))),
-        Ty::Ref(inner) => Ty::Ref(Box::new(apply_enum_type_args(inner, type_params, type_args))),
+        Ty::Ptr(inner) => Ty::Ptr(Box::new(apply_enum_type_args(
+            inner,
+            type_params,
+            type_args,
+        ))),
+        Ty::Ref(inner) => Ty::Ref(Box::new(apply_enum_type_args(
+            inner,
+            type_params,
+            type_args,
+        ))),
         Ty::Path(name, args) => Ty::Path(
             name.clone(),
             args.iter()
@@ -113,7 +123,12 @@ fn apply_enum_type_args(ty: &Ty, type_params: &[String], type_args: &[Ty]) -> Ty
     }
 }
 
-fn enum_payload_matches(payload: &Ty, arg_ty: &Ty, type_params: &[String], type_args: &[Ty]) -> bool {
+fn enum_payload_matches(
+    payload: &Ty,
+    arg_ty: &Ty,
+    type_params: &[String],
+    type_args: &[Ty],
+) -> bool {
     let expected = apply_enum_type_args(payload, type_params, type_args);
     ty_equivalent_for_params(&expected, arg_ty, type_params)
 }
@@ -237,10 +252,7 @@ fn enforce_vec_method_constraints(
 }
 
 /// Safe packages cannot mention externs or raw pointer types anywhere.
-pub(super) fn validate_package_safety(
-    module: &Module,
-    is_stdlib: bool,
-) -> Result<(), TypeError> {
+pub(super) fn validate_package_safety(module: &Module, is_stdlib: bool) -> Result<(), TypeError> {
     if module.package != PackageSafety::Safe {
         return Ok(());
     }
@@ -479,11 +491,7 @@ fn block_contains_ptr(block: &Block) -> Option<Span> {
                 if let Some(span) = block_contains_ptr(&if_stmt.then_block) {
                     return Some(span);
                 }
-                if let Some(span) = if_stmt
-                    .else_block
-                    .as_ref()
-                    .and_then(block_contains_ptr)
-                {
+                if let Some(span) = if_stmt.else_block.as_ref().and_then(block_contains_ptr) {
                     return Some(span);
                 }
             }
@@ -543,7 +551,11 @@ fn block_ends_with_return(block: &Block) -> bool {
 
 /// Check if a match expression is syntactically total (all arms end with return).
 fn match_is_total(match_expr: &MatchExpr) -> bool {
-    !match_expr.arms.is_empty() && match_expr.arms.iter().all(|arm| block_ends_with_return(&arm.body))
+    !match_expr.arms.is_empty()
+        && match_expr
+            .arms
+            .iter()
+            .all(|arm| block_ends_with_return(&arm.body))
 }
 
 /// Type-check a function body, including move/linear rules.
@@ -676,7 +688,10 @@ fn check_stmt(
         Stmt::Let(let_stmt) => {
             if scopes.contains(&let_stmt.name.item) {
                 return Err(TypeError::new(
-                    format!("variable shadowing is not allowed: `{}`", let_stmt.name.item),
+                    format!(
+                        "variable shadowing is not allowed: `{}`",
+                        let_stmt.name.item
+                    ),
                     let_stmt.name.span,
                 ));
             }
@@ -727,7 +742,7 @@ fn check_stmt(
                     }
                 }
                 let annot_ty = lower_type(annot, use_map, stdlib, type_params)?;
-                validate_type_args( &annot_ty, struct_map, enum_map, annot.span())?;
+                validate_type_args(&annot_ty, struct_map, enum_map, annot.span())?;
                 let matches_ref = if let Ty::Ref(inner) = &annot_ty {
                     &expr_ty == inner.as_ref() || &expr_ty == &annot_ty
                 } else {
@@ -809,9 +824,7 @@ fn check_stmt(
             )?;
             if expr_ty != existing && !matches!(expr_ty, Ty::Builtin(BuiltinType::Never)) {
                 return Err(TypeError::new(
-                    format!(
-                        "assignment type mismatch: expected {existing:?}, found {expr_ty:?}"
-                    ),
+                    format!("assignment type mismatch: expected {existing:?}, found {expr_ty:?}"),
                     assign.span,
                 ));
             }
@@ -887,9 +900,18 @@ fn check_stmt(
                 ));
             }
             let depth = scopes.current_loop_depth().ok_or_else(|| {
-                TypeError::new("break statement outside of loop".to_string(), break_stmt.span)
+                TypeError::new(
+                    "break statement outside of loop".to_string(),
+                    break_stmt.span,
+                )
             })?;
-            ensure_linear_scopes_consumed_from(scopes, depth, struct_map, enum_map, break_stmt.span)?;
+            ensure_linear_scopes_consumed_from(
+                scopes,
+                depth,
+                struct_map,
+                enum_map,
+                break_stmt.span,
+            )?;
         }
         Stmt::Continue(continue_stmt) => {
             if !in_loop {
@@ -899,7 +921,10 @@ fn check_stmt(
                 ));
             }
             let depth = scopes.current_loop_depth().ok_or_else(|| {
-                TypeError::new("continue statement outside of loop".to_string(), continue_stmt.span)
+                TypeError::new(
+                    "continue statement outside of loop".to_string(),
+                    continue_stmt.span,
+                )
             })?;
             ensure_linear_scopes_consumed_from(
                 scopes,
@@ -1086,10 +1111,7 @@ fn check_stmt(
             // Create body scope with loop variable bound
             let mut body_scopes = scopes.clone();
             body_scopes.push_scope();
-            body_scopes.insert_local(
-                for_stmt.var.item.clone(),
-                Ty::Builtin(BuiltinType::I32),
-            );
+            body_scopes.insert_local(for_stmt.var.item.clone(), Ty::Builtin(BuiltinType::I32));
 
             body_scopes.push_loop();
             check_block(
@@ -1114,13 +1136,7 @@ fn check_stmt(
             // Pop the loop variable scope before checking affine states
             body_scopes.pop_scope();
 
-            ensure_affine_states_match(
-                scopes,
-                &body_scopes,
-                struct_map,
-                enum_map,
-                for_stmt.span,
-            )?;
+            ensure_affine_states_match(scopes, &body_scopes, struct_map, enum_map, for_stmt.span)?;
         }
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
@@ -1225,12 +1241,12 @@ fn merge_branch_states(
         .zip(left.stack.iter().zip(&right.stack))
     {
         for (name, info) in base_scope.iter_mut() {
-            let left_info = left_scope.get(name).ok_or_else(|| {
-                TypeError::new(format!("unknown identifier `{name}`"), span)
-            })?;
-            let right_info = right_scope.get(name).ok_or_else(|| {
-                TypeError::new(format!("unknown identifier `{name}`"), span)
-            })?;
+            let left_info = left_scope
+                .get(name)
+                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
+            let right_info = right_scope
+                .get(name)
+                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
             match type_kind(&info.ty, struct_map, enum_map) {
                 TypeKind::Affine => {
                     info.state = if left_info.state == MoveState::Moved
@@ -1267,9 +1283,9 @@ fn ensure_affine_states_match(
 ) -> Result<(), TypeError> {
     for (base_scope, other_scope) in base.stack.iter().zip(&other.stack) {
         for (name, info) in base_scope {
-            let other_info = other_scope.get(name).ok_or_else(|| {
-                TypeError::new(format!("unknown identifier `{name}`"), span)
-            })?;
+            let other_info = other_scope
+                .get(name)
+                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
             if type_kind(&info.ty, struct_map, enum_map) != TypeKind::Unrestricted
                 && info.state != other_info.state
             {
@@ -1361,12 +1377,11 @@ fn merge_match_states(
     let Some((first, rest)) = arms.split_first() else {
         return Ok(());
     };
-    for (depth, (base_scope, first_scope)) in base.stack.iter_mut().zip(&first.stack).enumerate()
-    {
+    for (depth, (base_scope, first_scope)) in base.stack.iter_mut().zip(&first.stack).enumerate() {
         for (name, info) in base_scope.iter_mut() {
-            let first_info = first_scope.get(name).ok_or_else(|| {
-                TypeError::new(format!("unknown identifier `{name}`"), span)
-            })?;
+            let first_info = first_scope
+                .get(name)
+                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
             match type_kind(&info.ty, struct_map, enum_map) {
                 TypeKind::Affine => {
                     let mut moved = first_info.state == MoveState::Moved;
@@ -1479,10 +1494,7 @@ pub(super) fn check_expr(
                     return record_expr_type(recorder, expr, ty);
                 }
             }
-            Err(TypeError::new(
-                format!("unknown value `{path}`"),
-                path.span,
-            ))
+            Err(TypeError::new(format!("unknown value `{path}`"), path.span))
         }
         Expr::Call(call) => {
             let path = call.callee.to_path().ok_or_else(|| {
@@ -1642,16 +1654,17 @@ pub(super) fn check_expr(
                     None
                 };
 
-                let type_args = resolve_enum_type_args(
-                    &enum_name,
-                    &info.type_params,
-                    &inferred,
-                    ret_ty,
-                );
+                let type_args =
+                    resolve_enum_type_args(&enum_name, &info.type_params, &inferred, ret_ty);
 
                 if let Some(payload_ty) = payload {
                     if let Some(arg_ty) = arg_ty {
-                        if !enum_payload_matches(&payload_ty, &arg_ty, &info.type_params, &type_args) {
+                        if !enum_payload_matches(
+                            &payload_ty,
+                            &arg_ty,
+                            &info.type_params,
+                            &type_args,
+                        ) {
                             return Err(TypeError::new(
                                 "variant argument type mismatch".to_string(),
                                 call.args[0].span(),
@@ -1670,11 +1683,14 @@ pub(super) fn check_expr(
                 sig
             } else if resolved.len() == 1 {
                 let qualified = format!("{}.{}", module_name, key);
-                functions.get(&qualified).ok_or_else(|| {
-                    TypeError::new(format!("unknown function `{key}`"), path.span)
-                })?
+                functions
+                    .get(&qualified)
+                    .ok_or_else(|| TypeError::new(format!("unknown function `{key}`"), path.span))?
             } else {
-                return Err(TypeError::new(format!("unknown function `{key}`"), path.span));
+                return Err(TypeError::new(
+                    format!("unknown function `{key}`"),
+                    path.span,
+                ));
             };
             if sig.module != module_name && !sig.is_pub {
                 return Err(TypeError::new(
@@ -1690,7 +1706,8 @@ pub(super) fn check_expr(
                 enum_map,
                 type_params,
             )?;
-            let subs = build_call_substitution(sig, &explicit_type_args, HashMap::new(), call.span)?;
+            let subs =
+                build_call_substitution(sig, &explicit_type_args, HashMap::new(), call.span)?;
             enforce_type_param_bounds(sig, &subs, trait_impls, call.span)?;
             let instantiated_params: Vec<Ty> = sig
                 .params
@@ -1757,15 +1774,14 @@ pub(super) fn check_expr(
         Expr::MethodCall(method_call) => {
             fn get_leftmost_segment(expr: &Expr) -> Option<&str> {
                 match expr {
-                    Expr::Path(path) if path.segments.len() == 1 => {
-                        Some(&path.segments[0].item)
-                    }
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
                     Expr::FieldAccess(fa) => get_leftmost_segment(&fa.object),
                     _ => None,
                 }
             }
 
-            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver) {
+            let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver)
+            {
                 scopes.contains(base_name)
             } else {
                 true
@@ -1806,8 +1822,12 @@ pub(super) fn check_expr(
                     enum_map,
                     type_params,
                 )?;
-                let subs =
-                    build_call_substitution(sig, &explicit_type_args, HashMap::new(), method_call.span)?;
+                let subs = build_call_substitution(
+                    sig,
+                    &explicit_type_args,
+                    HashMap::new(),
+                    method_call.span,
+                )?;
                 enforce_type_param_bounds(sig, &subs, trait_impls, method_call.span)?;
                 let instantiated_params: Vec<Ty> = sig
                     .params
@@ -2062,17 +2082,22 @@ pub(super) fn check_expr(
             let type_arg_suffix = super::build_type_arg_suffix(&receiver_args);
 
             let base_method_fn = format!("{type_name}__{}", method_call.method.item);
-            let specific_method_fn = format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
+            let specific_method_fn =
+                format!("{type_name}{type_arg_suffix}__{}", method_call.method.item);
 
             // Try type-specific method first (e.g., Vec__u8__map_add), then generic (Vec__map_add)
             let qualified_specific = format!("{method_module}.{specific_method_fn}");
             let qualified_base = format!("{method_module}.{base_method_fn}");
 
-            let key = if !type_arg_suffix.is_empty() && functions.contains_key(&qualified_specific) {
+            let key = if !type_arg_suffix.is_empty() && functions.contains_key(&qualified_specific)
+            {
                 qualified_specific
             } else if functions.contains_key(&qualified_base) {
                 qualified_base
-            } else if method_module == module_name && !type_arg_suffix.is_empty() && functions.contains_key(&specific_method_fn) {
+            } else if method_module == module_name
+                && !type_arg_suffix.is_empty()
+                && functions.contains_key(&specific_method_fn)
+            {
                 specific_method_fn.clone()
             } else if method_module == module_name && functions.contains_key(&base_method_fn) {
                 base_method_fn.clone()
@@ -2082,9 +2107,9 @@ pub(super) fn check_expr(
                     method_call.span,
                 ));
             };
-            let sig = functions
-                .get(&key)
-                .ok_or_else(|| TypeError::new(format!("unknown method `{key}`"), method_call.span))?;
+            let sig = functions.get(&key).ok_or_else(|| {
+                TypeError::new(format!("unknown method `{key}`"), method_call.span)
+            })?;
             if sig.module != module_name && !sig.is_pub {
                 return Err(TypeError::new(
                     format!("method `{key}` is private"),
@@ -2126,7 +2151,8 @@ pub(super) fn check_expr(
                 enum_map,
                 type_params,
             )?;
-            let subs = build_call_substitution(sig, &explicit_type_args, inferred, method_call.span)?;
+            let subs =
+                build_call_substitution(sig, &explicit_type_args, inferred, method_call.span)?;
             enforce_type_param_bounds(sig, &subs, trait_impls, method_call.span)?;
             let instantiated_params: Vec<Ty> = sig
                 .params
@@ -2200,7 +2226,9 @@ pub(super) fn check_expr(
                     method_call.receiver.span(),
                 ));
             }
-            if instantiated_params[0] != receiver_ref && instantiated_params[0] != receiver_ref_unqualified {
+            if instantiated_params[0] != receiver_ref
+                && instantiated_params[0] != receiver_ref_unqualified
+            {
                 let _ = check_expr(
                     &method_call.receiver,
                     functions,
@@ -2370,13 +2398,10 @@ pub(super) fn check_expr(
                 type_param_bounds,
             )?;
             match binary.op {
-                BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::Mod => {
-                    if left == right && (left == Ty::Builtin(BuiltinType::I32)
-                        || left == Ty::Builtin(BuiltinType::I64))
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                    if left == right
+                        && (left == Ty::Builtin(BuiltinType::I32)
+                            || left == Ty::Builtin(BuiltinType::I64))
                     {
                         Ok(left)
                     } else if left == right
@@ -2542,7 +2567,8 @@ pub(super) fn check_expr(
                 Ty::Path(name, args) if name == "sys.result.Result" && args.len() == 2 => &args[1],
                 _ => {
                     return Err(TypeError::new(
-                        "the `?` operator can only be used in functions returning Result".to_string(),
+                        "the `?` operator can only be used in functions returning Result"
+                            .to_string(),
                         try_expr.span,
                     ))
                 }
@@ -2579,19 +2605,18 @@ pub(super) fn check_expr(
         Expr::FieldAccess(field_access) => {
             fn get_leftmost_path_segment(expr: &Expr) -> Option<&str> {
                 match expr {
-                    Expr::Path(path) if path.segments.len() == 1 => {
-                        Some(&path.segments[0].item)
-                    }
+                    Expr::Path(path) if path.segments.len() == 1 => Some(&path.segments[0].item),
                     Expr::FieldAccess(fa) => get_leftmost_path_segment(&fa.object),
                     _ => None,
                 }
             }
 
-            let base_is_local = if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
-                scopes.contains(base_name)
-            } else {
-                true
-            };
+            let base_is_local =
+                if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
+                    scopes.contains(base_name)
+                } else {
+                    true
+                };
 
             if !base_is_local {
                 if let Some(path) = Expr::FieldAccess(field_access.clone()).to_path() {
@@ -2653,7 +2678,8 @@ pub(super) fn check_expr(
                     field_access.field.span,
                 )
             })?;
-            let substitutions = build_type_substitution(&info.type_params, &struct_args, field_access.span)?;
+            let substitutions =
+                build_type_substitution(&info.type_params, &struct_args, field_access.span)?;
             let field_ty = substitute_type(field_ty, &substitutions);
             if is_affine_type(&field_ty, struct_map, enum_map) {
                 match use_mode {
@@ -2831,7 +2857,14 @@ fn check_match_stmt(
     for arm in &match_expr.arms {
         let mut arm_scope = scopes.clone();
         arm_scope.push_scope();
-        bind_pattern(&arm.pattern, &match_ty, &mut arm_scope, use_map, enum_map, module_name)?;
+        bind_pattern(
+            &arm.pattern,
+            &match_ty,
+            &mut arm_scope,
+            use_map,
+            enum_map,
+            module_name,
+        )?;
         check_block(
             &arm.body,
             ret_ty,
@@ -2905,7 +2938,14 @@ fn check_match_expr_value(
     for arm in &match_expr.arms {
         let mut arm_scope = scopes.clone();
         arm_scope.push_scope();
-        bind_pattern(&arm.pattern, &match_ty, &mut arm_scope, use_map, enum_map, module_name)?;
+        bind_pattern(
+            &arm.pattern,
+            &match_ty,
+            &mut arm_scope,
+            use_map,
+            enum_map,
+            module_name,
+        )?;
         let arm_ty = check_match_arm_value(
             &arm.body,
             functions,
@@ -2977,12 +3017,6 @@ fn check_match_arm_value(
         ));
     };
     for stmt in prefix {
-        if matches!(stmt, Stmt::Return(_)) {
-            return Err(TypeError::new(
-                "match arm cannot return in expression context".to_string(),
-                block.span,
-            ));
-        }
         check_stmt(
             stmt,
             ret_ty,
@@ -3065,7 +3099,10 @@ fn check_match_exhaustive(
                 missing.push("false");
             }
             return Err(TypeError::new(
-                format!("non-exhaustive match on bool, missing: {}", missing.join(", ")),
+                format!(
+                    "non-exhaustive match on bool, missing: {}",
+                    missing.join(", ")
+                ),
                 span,
             ));
         }
@@ -3095,7 +3132,10 @@ fn check_match_exhaustive(
                 missing.push("Err");
             }
             return Err(TypeError::new(
-                format!("non-exhaustive match on Result, missing: {}", missing.join(", ")),
+                format!(
+                    "non-exhaustive match on Result, missing: {}",
+                    missing.join(", ")
+                ),
                 span,
             ));
         }
@@ -3137,7 +3177,10 @@ fn check_match_exhaustive(
                 .cloned()
                 .collect();
             return Err(TypeError::new(
-                format!("non-exhaustive match, missing variants: {}", missing.join(", ")),
+                format!(
+                    "non-exhaustive match, missing variants: {}",
+                    missing.join(", ")
+                ),
                 span,
             ));
         }
@@ -3197,9 +3240,9 @@ fn check_struct_literal(
             } else {
                 key.clone()
             };
-            let info = struct_map.get(&qualified).ok_or_else(|| {
-                TypeError::new(format!("unknown struct `{}`", key), lit.span)
-            })?;
+            let info = struct_map
+                .get(&qualified)
+                .ok_or_else(|| TypeError::new(format!("unknown struct `{}`", key), lit.span))?;
             (qualified, info)
         }
     };
@@ -3235,10 +3278,7 @@ fn check_struct_literal(
     let mut remaining = info.fields.clone();
     for field in &lit.fields {
         let expected = remaining.remove(&field.name.item).ok_or_else(|| {
-            TypeError::new(
-                format!("unknown field `{}`", field.name.item),
-                field.span,
-            )
+            TypeError::new(format!("unknown field `{}`", field.name.item), field.span)
         })?;
         let expected = substitute_type(&expected, &substitutions);
         let actual = check_expr(
@@ -3260,7 +3300,10 @@ fn check_struct_literal(
         )?;
         if actual != expected {
             return Err(TypeError::new(
-                format!("field `{}` expects {expected:?}, found {actual:?}", field.name.item),
+                format!(
+                    "field `{}` expects {expected:?}, found {actual:?}",
+                    field.name.item
+                ),
                 field.span,
             ));
         }
@@ -3516,19 +3559,26 @@ fn bind_pattern(
             {
                 let Ty::Path(match_name, match_args) = match_ty else {
                     return Err(TypeError::new(
-                        format!("pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"),
+                        format!(
+                            "pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"
+                        ),
                         path.span,
                     ));
                 };
                 if match_name != &enum_name {
                     return Err(TypeError::new(
-                        format!("pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"),
+                        format!(
+                            "pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"
+                        ),
                         path.span,
                     ));
                 }
                 if let Some(binding) = binding {
                     let Some(info) = enum_map.get(&enum_name) else {
-                        return Err(TypeError::new("unknown enum variant".to_string(), path.span));
+                        return Err(TypeError::new(
+                            "unknown enum variant".to_string(),
+                            path.span,
+                        ));
                     };
                     let variant = path
                         .segments

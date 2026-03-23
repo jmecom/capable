@@ -2,7 +2,6 @@ package safe
 module wc_file
 use sys::system
 use sys::console
-use sys::buffer
 
 fn count_text(c: Console, s: string) -> i32 {
   let bytes = s.len()
@@ -21,16 +20,12 @@ fn count_text(c: Console, s: string) -> i32 {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let args = rc.mint_args()
-
-  if (args.len() < 2) {
+  let Ok(path) = args.at(1) else {
     c.println("usage: wc <path>")
     return 1
   }
-
-  let path = args.at(1).ok()
-  let alloc = rc.mint_alloc_default()
   let rfs = rc.mint_readfs("./")
-  let code = match rfs.read_to_string(alloc, path) {
+  let code = match rfs.read_to_string_default(path) {
     Ok(s) => {
       count_text(c, s)
     }

@@ -13,16 +13,17 @@ fn print_kv(c: Console, key: string, val: string) -> unit {
 }
 
 fn parse_line(c: Console, line: string) -> unit {
-  if (line.len() == 0) {
+  let trimmed = line.trim_view()
+  if (trimmed.len() == 0) {
     return ()
   }
-  if (line.starts_with("#")) {
+  if (trimmed.starts_with("#")) {
     return ()
   }
-  match (line.split_once_view('=')) {
-    Ok(parts) => { print_kv(c, parts.left, parts.right) }
-    Err(_) => { }
+  let Ok(parts) = trimmed.split_once_view('=') else {
+    return ()
   }
+  print_kv(c, parts.left, parts.right)
   return ()
 }
 
@@ -42,8 +43,8 @@ fn parse_config(c: Console, contents: string) -> unit {
   }
 }
 
-fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result<unit, FsErr> {
-  let contents = fs.read_to_string(alloc, "app.conf")?
+fn run(c: Console, fs: ReadFS) -> Result<unit, FsErr> {
+  let contents = fs.read_to_string_default("app.conf")?
   parse_config(c, contents)
   return Ok(())
 }
@@ -51,8 +52,7 @@ fn run(c: Console, alloc: Alloc, fs: ReadFS) -> Result<unit, FsErr> {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let fs = rc.mint_readfs("examples/config_loader")
-  let alloc = rc.mint_alloc_default()
-  let result = run(c, alloc, fs)
+  let result = run(c, fs)
   if (result.is_ok()) {
     c.println("config ok")
     return 0
