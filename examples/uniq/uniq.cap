@@ -32,8 +32,7 @@ fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let input = rc.mint_stdin()
-  let result = run(c, input)
-  if (result.is_err()) {
+  run(c, input) else {
     c.println("error reading input")
     return 1
   }

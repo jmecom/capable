@@ -1,0 +1,29 @@
+package safe
+module expr_else_break
+use sys::system
+
+fn fail_at(i: i32) -> Result<unit, i32> {
+  if (i < 3) {
+    return Ok(())
+  }
+  return Err(i)
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let count = 0
+  let stop = 0
+
+  for i in 0..6 {
+    fail_at(i) else err {
+      stop = err
+      break
+    }
+    count = count + 1
+  }
+
+  c.assert(count == 3)
+  c.assert(stop == 3)
+  c.println("expr else break ok")
+  return 0
+}

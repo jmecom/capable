@@ -52,11 +52,10 @@ fn run(c: Console, fs: ReadFS) -> Result<unit, FsErr> {
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let fs = rc.mint_readfs("examples/config_loader")
-  let result = run(c, fs)
-  if (result.is_ok()) {
-    c.println("config ok")
-    return 0
+  run(c, fs) else {
+    c.println("config read failed")
+    return 1
   }
-  c.println("config read failed")
-  return 1
+  c.println("config ok")
+  return 0
 }

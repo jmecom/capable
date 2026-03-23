@@ -61,6 +61,22 @@ fn typecheck_let_else_ok() {
 }
 
 #[test]
+fn typecheck_expr_else_ok() {
+    let source = load_program("expr_else.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_expr_else_break_ok() {
+    let source = load_program("expr_else_break.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_path_helpers_ok() {
     let source = load_program("path_helpers.cap");
     let module = parse_module(&source).expect("parse module");

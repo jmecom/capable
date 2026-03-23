@@ -861,6 +861,22 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self) -> Result<ExprStmt, ParseError> {
         let expr = self.parse_expr()?;
+        let expr = if self.peek_kind() == Some(TokenKind::Else) {
+            self.bump();
+            let err_binding = if self.peek_kind() == Some(TokenKind::Ident)
+                && self
+                    .peek_token(1)
+                    .is_some_and(|t| t.kind == TokenKind::LBrace)
+            {
+                Some(self.expect_ident()?)
+            } else {
+                None
+            };
+            let else_block = self.parse_block()?;
+            self.desugar_expr_else(expr, err_binding, else_block)
+        } else {
+            expr
+        };
         let expr_span = expr.span();
         let end = self
             .maybe_consume(TokenKind::Semi)
@@ -1443,6 +1459,48 @@ impl Parser {
             } => Some(ident.clone()),
             _ => None,
         }
+    }
+
+    fn desugar_expr_else(&self, expr: Expr, err_binding: Option<Ident>, else_block: Block) -> Expr {
+        let expr_span = expr.span();
+        let ok_ident = Spanned::new("Ok".to_string(), expr_span);
+        let err_ident = Spanned::new("Err".to_string(), else_block.span);
+        let span = Span::new(expr_span.start, else_block.span.end);
+
+        Expr::Match(MatchExpr {
+            expr: Box::new(expr),
+            arms: vec![
+                MatchArm {
+                    pattern: Pattern::Call {
+                        path: Path {
+                            segments: vec![ok_ident],
+                            span: expr_span,
+                        },
+                        binding: None,
+                        span: expr_span,
+                    },
+                    body: Block {
+                        stmts: Vec::new(),
+                        span: expr_span,
+                    },
+                    span,
+                },
+                MatchArm {
+                    pattern: Pattern::Call {
+                        path: Path {
+                            segments: vec![err_ident],
+                            span: else_block.span,
+                        },
+                        binding: err_binding,
+                        span: else_block.span,
+                    },
+                    body: else_block,
+                    span,
+                },
+            ],
+            span,
+            match_span: expr_span,
+        })
     }
 
     fn parse_path(&mut self) -> Result<Path, ParseError> {

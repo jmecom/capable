@@ -137,6 +137,33 @@ fn run_let_else() {
 }
 
 #[test]
+fn run_expr_else() {
+    let out_dir = make_out_dir("expr_else");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/expr_else.cap"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("expr else ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_expr_else_break() {
+    let out_dir = make_out_dir("expr_else_break");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/expr_else_break.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("expr else break ok"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
 fn run_path_helpers() {
     let out_dir = make_out_dir("path_helpers");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

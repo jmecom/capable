@@ -47,8 +47,12 @@ fn parse_request_path(req: string) -> Result<string, ParseErr> {
 }
 
 fn respond_ok(conn: &TcpConn, body: string) -> Result<unit, NetErr> {
-  conn.write("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n")?
-  conn.write(body)?
+  conn.write("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n") else err {
+    return Err(err)
+  }
+  conn.write(body) else err {
+    return Err(err)
+  }
   return Ok(())
 }
 
@@ -61,15 +65,13 @@ fn respond_bad_request(conn: &TcpConn) -> Result<unit, NetErr> {
 }
 
 fn handle_request(conn: &TcpConn, readfs: &ReadFS, req: string) -> Result<unit, NetErr> {
-  match (parse_request_path(req)) {
-    Ok(path) => {
-      match (readfs.read_to_string_default(path)) {
-        Ok(body) => { return respond_ok(conn, body) }
-        Err(_) => { return respond_not_found(conn) }
-      }
-    }
-    Err(_) => { return respond_bad_request(conn) }
+  let Ok(path) = parse_request_path(req) else {
+    return respond_bad_request(conn)
   }
+  let Ok(body) = readfs.read_to_string_default(path) else {
+    return respond_not_found(conn)
+  }
+  return respond_ok(conn, body)
 }
 
 fn serve_forever(c: Console, net: Net, rc: RootCap, root: string, port: i32) -> Result<unit, NetErr> {
@@ -109,9 +111,9 @@ pub fn main(rc: RootCap) -> i32 {
   let args = rc.mint_args()
   let root = args.at_or(1, "examples/http_server")
   let port = 8090
-  let result = serve_forever(c, net, rc, root, port)
-  if (result.is_err()) {
+  serve_forever(c, net, rc, root, port) else {
     c.println("server error (is the port in use?)")
+    return 0
   }
   return 0
 }

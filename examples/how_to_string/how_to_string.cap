@@ -31,9 +31,15 @@ fn demo_string_view(c: Console) -> unit {
 fn demo_text_builder(c: Console) -> unit {
   c.println("-- Text builder --")
   let t = buffer::text_new_default()
-  t.push_str("hello").ok()
-  t.push_byte(' ').ok()
-  t.append("text").ok()
+  t.push_str("hello") else {
+    panic()
+  }
+  t.push_byte(' ') else {
+    panic()
+  }
+  t.append("text") else {
+    panic()
+  }
   c.println(t.slice_range(0, 5).ok())
   c.println(t.to_string().ok())
   t.free_default()
