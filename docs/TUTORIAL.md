@@ -268,6 +268,27 @@ Borrow-lite is intentionally conservative. In most public APIs, the important
 case is a short-lived borrowed parameter or receiver on a resource/capability
 type.
 
+For loops support both ranges and borrowed `Vec` iteration:
+
+```cap
+for i in 0..5 {
+  c.println_i32(i)
+}
+
+for item in values {
+  c.println_i32(item)
+}
+
+for i, item in values {
+  c.print_i32(i)
+  c.print(": ")
+  c.println_i32(item)
+}
+```
+
+Borrowed `Vec` iteration also accepts complex expressions. The source is
+evaluated once before the loop body runs.
+
 ## 9) Memory model
 
 Capable has explicit memory management. Owned heap types must be freed.

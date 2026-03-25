@@ -212,6 +212,34 @@ fn run_defer_free() {
 }
 
 #[test]
+fn run_for_each() {
+    let out_dir = make_out_dir("for_each");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/for_each.cap"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("for each ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_for_each_complex_source() {
+    let out_dir = make_out_dir("for_each_complex_source");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/for_each_complex_source.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert_eq!(stdout.matches("build").count(), 1, "stdout was: {stdout:?}");
+    assert!(
+        stdout.contains("for each complex ok"),
+        "stdout was: {stdout:?}"
+    );
+}
+
+#[test]
 fn run_match_expr() {
     let out_dir = make_out_dir("match_expr");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

@@ -1,0 +1,38 @@
+package safe
+module for_each
+use sys::system
+use sys::vec
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let values = vec::new<i32>()
+  defer values.free()
+
+  try values.push(3) else {
+    c.assert(false)
+    return 1
+  }
+  try values.push(5) else {
+    c.assert(false)
+    return 1
+  }
+  try values.push(8) else {
+    c.assert(false)
+    return 1
+  }
+
+  let sum = 0
+  for item in values {
+    sum = sum + item
+  }
+  c.assert(sum == 16)
+
+  let weighted = 0
+  for i, item in values {
+    weighted = weighted + (i * item)
+  }
+  c.assert(weighted == 21)
+
+  c.println("for each ok")
+  return 0
+}

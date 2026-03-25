@@ -78,8 +78,7 @@ fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
   sort_indices(lines, indices)
 
   // Print lines in sorted order (skip empty lines)
-  for i in 0..n {
-    let idx = indices.get_or(i, 0)
+  for idx in indices {
     let line = lines.get_or(idx, "")
     if (line.len() > 0) {
       c.println(line)

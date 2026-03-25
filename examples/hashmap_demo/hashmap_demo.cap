@@ -465,9 +465,7 @@ fn run_demo(c: Console) -> unit {
   try test_vals.push(320) else { panic() }
 
   // Insert all entries
-  let num_entries = test_keys.len()
-  for i in 0..num_entries {
-    let k = test_keys.get_or(i, 0)
+  for i, k in test_keys {
     let v = test_vals.get_or(i, 0)
     match (hashmap_insert(map, k, v)) {
       Ok(new_map) => {
@@ -497,8 +495,7 @@ fn run_demo(c: Console) -> unit {
   c.println("Looking up entries...")
 
   // Look up each key
-  for i in 0..num_entries {
-    let k = test_keys.get_or(i, 0)
+  for k in test_keys {
     c.print("  get(")
     c.print_i32(k)
     c.print(") = ")
@@ -540,9 +537,7 @@ fn run_demo(c: Console) -> unit {
   try missing.push(999) else { panic() }
   try missing.push(12345) else { panic() }
 
-  let num_missing = missing.len()
-  for i in 0..num_missing {
-    let k = missing.get_or(i, 0)
+  for k in missing {
     c.print("  contains(")
     c.print_i32(k)
     c.print(") = ")

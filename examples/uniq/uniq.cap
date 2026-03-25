@@ -19,10 +19,8 @@ fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
   let contents = input.read_to_string()?
   let lines = contents.lines_view()
   defer lines.free()
-  let n = lines.len()
-  for i in 0..n {
+  for i, line in lines {
     if (should_print(lines, i)) {
-      let line = lines.get_or(i, "")
       c.println(line)
     }
   }

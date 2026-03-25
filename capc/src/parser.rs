@@ -789,23 +789,6 @@ impl Parser {
         })
     }
 
-    fn parse_for_after(&mut self, start: usize) -> Result<ForStmt, ParseError> {
-        let var = self.expect_ident()?;
-        self.expect(TokenKind::In)?;
-        let range_start = self.parse_range_bound()?;
-        self.expect(TokenKind::DotDot)?;
-        let range_end = self.parse_range_bound()?;
-        let body = self.parse_block()?;
-        let end = body.span.end;
-        Ok(ForStmt {
-            var,
-            start: range_start,
-            end: range_end,
-            body,
-            span: Span::new(start, end),
-        })
-    }
-
     fn parse_for_stmt(&mut self) -> Result<Stmt, ParseError> {
         let for_token = self.expect(TokenKind::For)?;
         let start = for_token.span.start;
@@ -822,7 +805,37 @@ impl Parser {
                 span: Span::new(start, end),
             }));
         }
-        Ok(Stmt::For(self.parse_for_after(start)?))
+        let first = self.expect_ident()?;
+        let second = if self.maybe_consume(TokenKind::Comma).is_some() {
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
+        self.expect(TokenKind::In)?;
+        let range_or_source = self.parse_expr_no_struct()?;
+        if self.maybe_consume(TokenKind::DotDot).is_some() {
+            if second.is_some() {
+                return Err(self.error_at(
+                    first.span,
+                    "range for loops accept only one binding".to_string(),
+                ));
+            }
+            let range_end = self.parse_range_bound()?;
+            let body = self.parse_block()?;
+            let end = body.span.end;
+            return Ok(Stmt::For(ForStmt {
+                var: first,
+                start: range_or_source,
+                end: range_end,
+                body,
+                span: Span::new(start, end),
+            }));
+        }
+
+        let item = second.clone().unwrap_or_else(|| first.clone());
+        let index = second.map(|_| first);
+        let body = self.parse_block()?;
+        self.desugar_for_each(Span::new(start, body.span.end), index, item, range_or_source, body)
     }
 
     /// Parse a simple expression for range bounds (no struct literals allowed)
@@ -1590,6 +1603,142 @@ impl Parser {
             ],
             span,
             match_span: expr_span,
+        })
+    }
+
+    fn desugar_for_each(
+        &self,
+        for_span: Span,
+        index_binding: Option<Ident>,
+        item_binding: Ident,
+        source: Expr,
+        body: Block,
+    ) -> Result<Stmt, ParseError> {
+        let hidden_source_span = self.synthetic_span(for_span, 1);
+        let hidden_len_span = self.synthetic_span(for_span, 2);
+        let hidden_idx_span = self.synthetic_span(for_span, 3);
+        let source_free_span = self.synthetic_span(for_span, 4);
+        let len_call_span = self.synthetic_span(for_span, 5);
+        let get_call_span = self.synthetic_span(for_span, 6);
+        let try_span = self.synthetic_span(for_span, 7);
+        let else_span = self.synthetic_span(for_span, 8);
+        let zero_span = self.synthetic_span(for_span, 9);
+
+        let hidden_source = self.synthetic_ident("__for_source", hidden_source_span);
+        let hidden_idx = self.synthetic_ident("__for_idx", hidden_idx_span);
+        let hidden_len = self.synthetic_ident("__for_len", hidden_len_span);
+        let hidden_idx_expr = self.ident_expr(&hidden_idx);
+        let hidden_len_expr = self.ident_expr(&hidden_len);
+        let (source_expr, mut setup_stmts) = if source.to_path().is_some() {
+            (source, Vec::new())
+        } else {
+            let hidden_source_expr = self.ident_expr(&hidden_source);
+            let source_stmt = Stmt::Let(LetStmt {
+                name: hidden_source.clone(),
+                ty: None,
+                expr: source,
+                span: hidden_source_span,
+            });
+            let free_expr =
+                self.method_call_expr(hidden_source_expr.clone(), "free", Vec::new(), source_free_span);
+            let free_stmt = Stmt::Defer(DeferStmt {
+                expr: free_expr,
+                span: source_free_span,
+            });
+            (hidden_source_expr, vec![source_stmt, free_stmt])
+        };
+
+        let len_stmt = Stmt::Let(LetStmt {
+            name: hidden_len.clone(),
+            ty: None,
+            expr: self.method_call_expr(source_expr.clone(), "len", Vec::new(), len_call_span),
+            span: hidden_len_span,
+        });
+
+        let get_stmt = Stmt::Let(self.desugar_try_let(
+            try_span,
+            item_binding,
+            None,
+            self.method_call_expr(
+                source_expr,
+                "get",
+                vec![hidden_idx_expr.clone()],
+                get_call_span,
+            ),
+            None,
+            Block {
+                stmts: Vec::new(),
+                span: else_span,
+            },
+        ));
+
+        let mut loop_stmts = Vec::new();
+        if let Some(index_ident) = index_binding {
+            loop_stmts.push(Stmt::Let(LetStmt {
+                name: index_ident.clone(),
+                ty: None,
+                expr: hidden_idx_expr.clone(),
+                span: index_ident.span,
+            }));
+        }
+        loop_stmts.push(get_stmt);
+        loop_stmts.extend(body.stmts);
+
+        let loop_body = Block {
+            stmts: loop_stmts,
+            span: body.span,
+        };
+
+        let range_stmt = Stmt::For(ForStmt {
+            var: hidden_idx,
+            start: Expr::Literal(LiteralExpr {
+                value: Literal::Int(0),
+                span: zero_span,
+            }),
+            end: hidden_len_expr,
+            body: loop_body,
+            span: for_span,
+        });
+
+        setup_stmts.push(len_stmt);
+        setup_stmts.push(range_stmt);
+
+        let then_block = Block { stmts: setup_stmts, span: for_span };
+
+        Ok(Stmt::If(IfStmt {
+            cond: Expr::Literal(LiteralExpr {
+                value: Literal::Bool(true),
+                span: for_span,
+            }),
+            then_block,
+            else_block: None,
+            span: for_span,
+        }))
+    }
+
+    fn synthetic_ident(&self, prefix: &str, span: Span) -> Ident {
+        Spanned::new(format!("{prefix}_{}", span.start), span)
+    }
+
+    fn synthetic_span(&self, base: Span, offset: usize) -> Span {
+        let point = base.start.saturating_add(offset);
+        Span::new(point, point)
+    }
+
+    fn ident_expr(&self, ident: &Ident) -> Expr {
+        Expr::Path(Path {
+            segments: vec![ident.clone()],
+            span: ident.span,
+        })
+    }
+
+    fn method_call_expr(&self, receiver: Expr, method: &str, args: Vec<Expr>, span: Span) -> Expr {
+        Expr::MethodCall(MethodCallExpr {
+            receiver: Box::new(receiver),
+            method: Spanned::new(method.to_string(), span),
+            type_args: Vec::new(),
+            args,
+            span,
         })
     }
 

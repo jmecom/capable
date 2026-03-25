@@ -117,6 +117,22 @@ fn typecheck_defer_free_ok() {
 }
 
 #[test]
+fn typecheck_for_each_ok() {
+    let source = load_program("for_each.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_for_each_complex_source_ok() {
+    let source = load_program("for_each_complex_source.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_fs_close_ok() {
     let source = load_program("should_pass_fs_close.cap");
     let module = parse_module(&source).expect("parse module");
