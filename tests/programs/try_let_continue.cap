@@ -1,0 +1,29 @@
+package safe
+module try_let_continue
+use sys::system
+
+fn parse(i: i32) -> Result<i32, string> {
+  if (i == 0) {
+    return Err("skip")
+  }
+  return Ok(i)
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let i = 0
+  let sum = 0
+
+  while (i < 3) {
+    try let n = parse(i) else {
+      i = i + 1
+      continue
+    }
+    sum = sum + n
+    i = i + 1
+  }
+
+  c.assert(sum == 3)
+  c.println("try let continue ok")
+  return 0
+}

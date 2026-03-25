@@ -161,6 +161,20 @@ fn run_try_let() {
 }
 
 #[test]
+fn run_try_let_continue() {
+    let out_dir = make_out_dir("try_let_continue");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/try_let_continue.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("try let continue ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_expr_else() {
     let out_dir = make_out_dir("expr_else");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

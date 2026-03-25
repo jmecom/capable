@@ -269,17 +269,32 @@ fn emit_hir_stmt_inner(
                     return Ok(Flow::Continues);
                 }
             }
-            let value = emit_hir_expr(
-                builder,
-                &let_stmt.expr,
-                locals,
-                fn_map,
-                enum_index,
-                struct_layouts,
-                return_lowering,
-                module,
-                data_counter,
-            )?;
+            let value = if let crate::hir::HirExpr::Match(match_expr) = &let_stmt.expr {
+                match_lowering::emit_hir_match_expr(
+                    builder,
+                    match_expr,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                    loop_target,
+                )?
+            } else {
+                emit_hir_expr(
+                    builder,
+                    &let_stmt.expr,
+                    locals,
+                    fn_map,
+                    enum_index,
+                    struct_layouts,
+                    return_lowering,
+                    module,
+                    data_counter,
+                )?
+            };
             if let crate::typeck::Ty::Path(name, _) = &let_stmt.ty.ty {
                 if let Some(layout) = enum_index.layouts.get(name) {
                     let align = layout.align.max(1);
@@ -1841,6 +1856,7 @@ fn emit_hir_expr_inner(
                     return_lowering,
                     module,
                     data_counter,
+                    None, // nested expression matches still cannot break/continue
                 )
             }
         }

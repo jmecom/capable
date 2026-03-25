@@ -77,6 +77,22 @@ fn typecheck_try_let_ok() {
 }
 
 #[test]
+fn typecheck_try_let_continue_ok() {
+    let source = load_program("try_let_continue.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_try_let_continue_linear_ok() {
+    let source = load_program("try_let_continue_linear.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_expr_else_ok() {
     let source = load_program("expr_else.cap");
     let module = parse_module(&source).expect("parse module");

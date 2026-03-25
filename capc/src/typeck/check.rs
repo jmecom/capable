@@ -262,23 +262,46 @@ fn check_stmt(
             } else {
                 UseMode::Move
             };
-            let expr_ty = check_expr(
-                &let_stmt.expr,
-                functions,
-                trait_map,
-                trait_impls,
-                scopes,
-                expr_use_mode,
-                recorder,
-                use_map,
-                struct_map,
-                enum_map,
-                stdlib,
-                ret_ty,
-                module_name,
-                type_params,
-                type_param_bounds,
-            )?;
+            let expr_ty = if let Expr::Match(match_expr) = &let_stmt.expr {
+                let expr_ty = check_match_expr_value(
+                    match_expr,
+                    functions,
+                    trait_map,
+                    trait_impls,
+                    scopes,
+                    expr_use_mode,
+                    recorder,
+                    use_map,
+                    struct_map,
+                    enum_map,
+                    stdlib,
+                    ret_ty,
+                    module_name,
+                    type_params,
+                    type_param_bounds,
+                    in_loop,
+                )?;
+                recorder.record(&let_stmt.expr, &expr_ty);
+                expr_ty
+            } else {
+                check_expr(
+                    &let_stmt.expr,
+                    functions,
+                    trait_map,
+                    trait_impls,
+                    scopes,
+                    expr_use_mode,
+                    recorder,
+                    use_map,
+                    struct_map,
+                    enum_map,
+                    stdlib,
+                    ret_ty,
+                    module_name,
+                    type_params,
+                    type_param_bounds,
+                )?
+            };
             let final_ty = if let Some(annot) = &let_stmt.ty {
                 if let Some(span) = type_contains_ref(annot) {
                     match annot {
@@ -1914,7 +1937,7 @@ pub(super) fn check_expr(
             module_name,
             type_params,
             type_param_bounds,
-            false, // break/continue not allowed in value-producing match
+            false, // nested expression matches still cannot break/continue
         ),
         Expr::Try(try_expr) => {
             let inner_ty = check_expr(
@@ -2349,7 +2372,10 @@ fn check_match_expr_value(
             in_loop,
         )?;
         arm_scope.pop_scope();
-        arm_scopes.push(arm_scope);
+        let arm_continues = !matches!(arm_ty, Ty::Builtin(BuiltinType::Never));
+        if arm_continues {
+            arm_scopes.push(arm_scope);
+        }
         if let Some(prev) = &result_ty {
             if matches!(prev, Ty::Builtin(BuiltinType::Never)) {
                 result_ty = Some(arm_ty);
@@ -2373,7 +2399,7 @@ fn check_match_expr_value(
         module_name,
         match_expr.match_span,
     )?;
-    if !module_name.starts_with("sys.") {
+    if !module_name.starts_with("sys.") && !arm_scopes.is_empty() {
         merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
     }
     Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))

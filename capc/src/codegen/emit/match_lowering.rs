@@ -207,6 +207,7 @@ pub(super) fn emit_hir_match_expr(
     return_lowering: &ReturnLowering,
     module: &mut ObjectModule,
     data_counter: &mut u32,
+    loop_target: Option<LoopTarget>,
 ) -> Result<ValueRepr, CodegenError> {
     use crate::hir::HirStmt;
 
@@ -296,7 +297,7 @@ pub(super) fn emit_hir_match_expr(
                 struct_layouts,
                 module,
                 data_counter,
-                None,
+                loop_target,
                 return_lowering,
                 &mut arm_defers,
             )?;
