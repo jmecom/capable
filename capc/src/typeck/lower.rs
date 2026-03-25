@@ -19,6 +19,11 @@ use super::{
 };
 
 /// Context for HIR lowering (uses the type checker as source of truth).
+#[derive(Default)]
+struct LoweringScope {
+    locals: HashMap<String, (LocalId, Ty)>,
+}
+
 struct LoweringCtx<'a> {
     functions: &'a HashMap<String, FunctionSig>,
     structs: &'a HashMap<String, StructInfo>,
@@ -29,10 +34,7 @@ struct LoweringCtx<'a> {
     module_name: &'a str,
     type_tables: Option<&'a FunctionTypeTables>,
     type_table: Option<&'a TypeTable>,
-    /// Maps variable names to their LocalId
-    local_map: HashMap<String, LocalId>,
-    /// Maps variable names to their types (needed for type checking during lowering)
-    local_types: HashMap<String, Ty>,
+    scopes: Vec<LoweringScope>,
     local_counter: usize,
     type_params: HashSet<String>,
     type_param_bounds: HashMap<String, Vec<String>>,
@@ -59,31 +61,54 @@ impl<'a> LoweringCtx<'a> {
             module_name,
             type_tables,
             type_table: None,
-            local_map: HashMap::new(),
-            local_types: HashMap::new(),
+            scopes: vec![LoweringScope::default()],
             local_counter: 0,
             type_params: HashSet::new(),
             type_param_bounds: HashMap::new(),
         }
     }
 
+    fn reset_function_scopes(&mut self) {
+        self.scopes.clear();
+        self.scopes.push(LoweringScope::default());
+    }
+
     fn fresh_local(&mut self, name: String, ty: Ty) -> LocalId {
         let id = LocalId(self.local_counter);
         self.local_counter += 1;
-        self.local_map.insert(name.clone(), id);
-        self.local_types.insert(name, ty);
+        if self.scopes.is_empty() {
+            self.scopes.push(LoweringScope::default());
+        }
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.locals.insert(name, (id, ty));
+        }
         id
     }
 
     fn get_local(&self, name: &str) -> Option<LocalId> {
-        self.local_map.get(name).copied()
+        self.lookup_local(name).map(|(id, _)| id)
     }
 
-    /// Push a new scope for name bindings (shadowing is not yet modeled here).
-    fn push_scope(&mut self) {}
+    fn has_local(&self, name: &str) -> bool {
+        self.lookup_local(name).is_some()
+    }
 
-    /// Pop the most recent scope (placeholder for future scope stacks).
-    fn pop_scope(&mut self) {}
+    fn lookup_local(&self, name: &str) -> Option<(LocalId, &Ty)> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.locals.get(name).map(|(id, ty)| (*id, ty)))
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(LoweringScope::default());
+    }
+
+    fn pop_scope(&mut self) {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
+    }
 }
 
 /// Lower a fully type-checked module into HIR.
@@ -235,8 +260,7 @@ pub(super) fn lower_module(
 /// Lower a type-checked function into HIR, assigning LocalIds.
 fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction, TypeError> {
     ctx.local_counter = 0;
-    ctx.local_map.clear();
-    ctx.local_types.clear();
+    ctx.reset_function_scopes();
     let is_runtime_intrinsic =
         crate::runtime_intrinsics::is_runtime_intrinsic(ctx.module_name, &func.name.item);
     ctx.type_table = ctx
@@ -470,7 +494,7 @@ fn lower_defer_stmt(
 
             let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver)
             {
-                ctx.local_types.contains_key(base_name)
+                ctx.has_local(base_name)
             } else {
                 true
             };
@@ -490,7 +514,12 @@ fn lower_defer_stmt(
             };
 
             if !base_is_local && is_function {
-                let path = path_call.expect("path exists for function call");
+                let Some(path) = path_call else {
+                    return Err(TypeError::new(
+                        "defer receiver path could not be resolved".to_string(),
+                        method_call.span,
+                    ));
+                };
                 let mut args = Vec::with_capacity(method_call.args.len());
                 for arg in &method_call.args {
                     args.push(capture_defer_expr(arg, ctx, ret_ty, &mut stmts)?);
@@ -787,7 +816,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
         Expr::Path(path) => {
             if path.segments.len() == 1 {
                 let name = &path.segments[0].item;
-                if ctx.local_types.contains_key(name) {
+                if ctx.has_local(name) {
                     let local_id = ctx.get_local(name).unwrap();
                     return Ok(HirExpr::Local(HirLocal {
                         local_id,
@@ -920,7 +949,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             let base_is_local = if let Some(base_name) = get_leftmost_segment(&method_call.receiver)
             {
-                ctx.local_types.contains_key(base_name)
+                ctx.has_local(base_name)
             } else {
                 true
             };
@@ -940,7 +969,12 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             };
 
             if !base_is_local && is_function {
-                let path = path_call.expect("path exists for function call");
+                let Some(path) = path_call else {
+                    return Err(TypeError::new(
+                        "method receiver path could not be resolved".to_string(),
+                        method_call.span,
+                    ));
+                };
                 let resolved = super::resolve_path(&path, ctx.use_map);
                 let key = resolved.join(".");
                 let args: Result<Vec<HirExpr>, TypeError> = method_call
@@ -1096,7 +1130,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
 
             let base_is_local =
                 if let Some(base_name) = get_leftmost_path_segment(&field_access.object) {
-                    ctx.local_types.contains_key(base_name)
+                    ctx.has_local(base_name)
                 } else {
                     true
                 };

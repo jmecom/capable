@@ -3,6 +3,8 @@
 //! This module is intentionally focused on expression/statement lowering and
 //! ABI-adjacent helper routines used by the main codegen entry point.
 
+mod arith;
+mod defer;
 mod match_lowering;
 mod runtime;
 
@@ -25,7 +27,12 @@ use super::{
     TypeLayout, ValueRepr,
 };
 
+pub(super) use defer::DeferStack;
 pub(super) use runtime::emit_runtime_wrapper_call;
+use arith::{
+    emit_checked_add, emit_checked_div, emit_checked_mod, emit_checked_mul, emit_checked_sub,
+    emit_string_eq, is_string_type,
+};
 
 /// Target blocks for break/continue inside a loop.
 #[derive(Copy, Clone, Debug)]
@@ -47,167 +54,6 @@ pub(super) enum ReturnLowering {
         ok_ty: crate::hir::HirType,
         err_ty: crate::hir::HirType,
     },
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum DeferScopeKind {
-    Regular,
-    LoopBody,
-}
-
-#[derive(Clone, Debug)]
-struct DeferScope {
-    kind: DeferScopeKind,
-    defers: Vec<crate::hir::HirExpr>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct DeferStack {
-    scopes: Vec<DeferScope>,
-}
-
-impl DeferStack {
-    pub(super) fn new() -> Self {
-        Self { scopes: Vec::new() }
-    }
-
-    pub(super) fn push_block_scope(&mut self) {
-        self.push_scope(DeferScopeKind::Regular);
-    }
-
-    pub(super) fn push_loop_scope(&mut self) {
-        self.push_scope(DeferScopeKind::LoopBody);
-    }
-
-    fn push_scope(&mut self, kind: DeferScopeKind) {
-        self.scopes.push(DeferScope {
-            kind,
-            defers: Vec::new(),
-        });
-    }
-
-    pub(super) fn pop_scope(&mut self) {
-        let _ = self.scopes.pop();
-    }
-
-    pub(super) fn push_defer(&mut self, expr: crate::hir::HirExpr) {
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.defers.push(expr);
-        }
-    }
-
-    fn emit_scope_defers(
-        &self,
-        scope: &DeferScope,
-        builder: &mut FunctionBuilder,
-        locals: &HashMap<crate::hir::LocalId, LocalValue>,
-        fn_map: &HashMap<String, FnInfo>,
-        enum_index: &EnumIndex,
-        struct_layouts: &StructLayoutIndex,
-        return_lowering: &ReturnLowering,
-        module: &mut ObjectModule,
-        data_counter: &mut u32,
-    ) -> Result<(), CodegenError> {
-        for defer_expr in scope.defers.iter().rev() {
-            let _ = emit_hir_expr(
-                builder,
-                defer_expr,
-                locals,
-                fn_map,
-                enum_index,
-                struct_layouts,
-                return_lowering,
-                module,
-                data_counter,
-            )?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn emit_current_and_pop(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        locals: &HashMap<crate::hir::LocalId, LocalValue>,
-        fn_map: &HashMap<String, FnInfo>,
-        enum_index: &EnumIndex,
-        struct_layouts: &StructLayoutIndex,
-        return_lowering: &ReturnLowering,
-        module: &mut ObjectModule,
-        data_counter: &mut u32,
-    ) -> Result<(), CodegenError> {
-        if let Some(scope) = self.scopes.last() {
-            self.emit_scope_defers(
-                scope,
-                builder,
-                locals,
-                fn_map,
-                enum_index,
-                struct_layouts,
-                return_lowering,
-                module,
-                data_counter,
-            )?;
-        }
-        self.pop_scope();
-        Ok(())
-    }
-
-    pub(super) fn emit_all_and_clear(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        locals: &HashMap<crate::hir::LocalId, LocalValue>,
-        fn_map: &HashMap<String, FnInfo>,
-        enum_index: &EnumIndex,
-        struct_layouts: &StructLayoutIndex,
-        return_lowering: &ReturnLowering,
-        module: &mut ObjectModule,
-        data_counter: &mut u32,
-    ) -> Result<(), CodegenError> {
-        while let Some(scope) = self.scopes.pop() {
-            self.emit_scope_defers(
-                &scope,
-                builder,
-                locals,
-                fn_map,
-                enum_index,
-                struct_layouts,
-                return_lowering,
-                module,
-                data_counter,
-            )?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn emit_until_loop_and_pop(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        locals: &HashMap<crate::hir::LocalId, LocalValue>,
-        fn_map: &HashMap<String, FnInfo>,
-        enum_index: &EnumIndex,
-        struct_layouts: &StructLayoutIndex,
-        return_lowering: &ReturnLowering,
-        module: &mut ObjectModule,
-        data_counter: &mut u32,
-    ) -> Result<(), CodegenError> {
-        while let Some(scope) = self.scopes.pop() {
-            self.emit_scope_defers(
-                &scope,
-                builder,
-                locals,
-                fn_map,
-                enum_index,
-                struct_layouts,
-                return_lowering,
-                module,
-                data_counter,
-            )?;
-            if scope.kind == DeferScopeKind::LoopBody {
-                break;
-            }
-        }
-        Ok(())
-    }
 }
 
 /// Emit a single HIR statement.
@@ -906,7 +752,9 @@ fn emit_hir_stmt_inner(
             *locals = saved_locals;
         }
         HirStmt::Break(_) => {
-            let target = loop_target.expect("break outside of loop (should be caught by typeck)");
+            let target = loop_target.ok_or_else(|| {
+                CodegenError::Unsupported("break outside of loop".to_string())
+            })?;
             defer_stack.emit_until_loop_and_pop(
                 builder,
                 locals,
@@ -921,8 +769,9 @@ fn emit_hir_stmt_inner(
             return Ok(Flow::Terminated);
         }
         HirStmt::Continue(_) => {
-            let target =
-                loop_target.expect("continue outside of loop (should be caught by typeck)");
+            let target = loop_target.ok_or_else(|| {
+                CodegenError::Unsupported("continue outside of loop".to_string())
+            })?;
             defer_stack.emit_until_loop_and_pop(
                 builder,
                 locals,
@@ -1894,146 +1743,6 @@ fn emit_hir_expr_inner(
             data_counter,
         ),
     }
-}
-
-fn emit_checked_add(
-    builder: &mut FunctionBuilder,
-    a: Value,
-    b: Value,
-    ty: &crate::hir::HirType,
-) -> Result<Value, CodegenError> {
-    let (sum, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
-        builder.ins().uadd_overflow(a, b)
-    } else {
-        builder.ins().sadd_overflow(a, b)
-    };
-    trap_on_overflow(builder, overflow);
-    Ok(sum)
-}
-
-fn emit_checked_sub(
-    builder: &mut FunctionBuilder,
-    a: Value,
-    b: Value,
-    ty: &crate::hir::HirType,
-) -> Result<Value, CodegenError> {
-    let (diff, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
-        builder.ins().usub_overflow(a, b)
-    } else {
-        builder.ins().ssub_overflow(a, b)
-    };
-    trap_on_overflow(builder, overflow);
-    Ok(diff)
-}
-
-fn emit_checked_mul(
-    builder: &mut FunctionBuilder,
-    a: Value,
-    b: Value,
-    ty: &crate::hir::HirType,
-) -> Result<Value, CodegenError> {
-    let (prod, overflow) = if crate::typeck::is_unsigned_type(&ty.ty) {
-        builder.ins().umul_overflow(a, b)
-    } else {
-        builder.ins().smul_overflow(a, b)
-    };
-    trap_on_overflow(builder, overflow);
-    Ok(prod)
-}
-
-fn emit_checked_div(
-    builder: &mut FunctionBuilder,
-    a: Value,
-    b: Value,
-    ty: &crate::hir::HirType,
-) -> Result<Value, CodegenError> {
-    let b_ty = builder.func.dfg.value_type(b);
-    let zero = builder.ins().iconst(b_ty, 0);
-    let is_zero = builder.ins().icmp(IntCC::Equal, b, zero);
-    let ok_block = builder.create_block();
-    let trap_block = builder.create_block();
-    builder.ins().brif(is_zero, trap_block, &[], ok_block, &[]);
-    builder.switch_to_block(trap_block);
-    builder.ins().trap(ir::TrapCode::IntegerDivisionByZero);
-    builder.switch_to_block(ok_block);
-    builder.seal_block(trap_block);
-    builder.seal_block(ok_block);
-    let value = if crate::typeck::is_unsigned_type(&ty.ty) {
-        builder.ins().udiv(a, b)
-    } else {
-        builder.ins().sdiv(a, b)
-    };
-    Ok(value)
-}
-
-fn emit_checked_mod(
-    builder: &mut FunctionBuilder,
-    a: Value,
-    b: Value,
-    ty: &crate::hir::HirType,
-) -> Result<Value, CodegenError> {
-    let b_ty = builder.func.dfg.value_type(b);
-    let zero = builder.ins().iconst(b_ty, 0);
-    let is_zero = builder.ins().icmp(IntCC::Equal, b, zero);
-    let ok_block = builder.create_block();
-    let trap_block = builder.create_block();
-    builder.ins().brif(is_zero, trap_block, &[], ok_block, &[]);
-    builder.switch_to_block(trap_block);
-    builder.ins().trap(ir::TrapCode::IntegerDivisionByZero);
-    builder.switch_to_block(ok_block);
-    builder.seal_block(trap_block);
-    builder.seal_block(ok_block);
-    let value = if crate::typeck::is_unsigned_type(&ty.ty) {
-        builder.ins().urem(a, b)
-    } else {
-        builder.ins().srem(a, b)
-    };
-    Ok(value)
-}
-
-fn trap_on_overflow(builder: &mut FunctionBuilder, overflow: Value) {
-    let ok_block = builder.create_block();
-    let trap_block = builder.create_block();
-    builder.ins().brif(overflow, trap_block, &[], ok_block, &[]);
-    builder.switch_to_block(trap_block);
-    builder.ins().trap(ir::TrapCode::IntegerOverflow);
-    builder.switch_to_block(ok_block);
-    builder.seal_block(trap_block);
-    builder.seal_block(ok_block);
-}
-
-/// Emit a call to the runtime string equality function.
-/// Returns an i8 value: 1 if strings are equal, 0 otherwise.
-fn emit_string_eq(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    lhs: Value,
-    rhs: Value,
-) -> Result<Value, CodegenError> {
-    use cranelift_codegen::ir::{AbiParam, Signature};
-
-    let ptr_ty = module.isa().pointer_type();
-
-    // Build signature: (ptr, ptr) -> i8
-    let mut sig = Signature::new(module.isa().default_call_conv());
-    sig.params.push(AbiParam::new(ptr_ty));
-    sig.params.push(AbiParam::new(ptr_ty));
-    sig.returns.push(AbiParam::new(ir::types::I8));
-
-    // Declare and import the runtime function
-    let func_id = module
-        .declare_function("capable_rt_string_eq", Linkage::Import, &sig)
-        .map_err(|err| CodegenError::Codegen(err.to_string()))?;
-    let local_func = module.declare_func_in_func(func_id, builder.func);
-
-    // Call the function
-    let call_inst = builder.ins().call(local_func, &[lhs, rhs]);
-    let results = builder.inst_results(call_inst);
-    Ok(results[0])
-}
-
-fn is_string_type(ty: &crate::typeck::Ty) -> bool {
-    matches!(ty, crate::typeck::Ty::Path(name, _) if name == "sys.string.string" || name == "string")
 }
 
 /// Emit an index expression, calling the appropriate runtime function.
