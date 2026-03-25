@@ -14,8 +14,8 @@ fn trim_trailing_slashes(raw_path: string) -> string {
   if (end == raw_path.len()) {
     return raw_path
   }
-  match (raw_path.slice_range(0, end)) {
-    Ok(out) => { return out }
+  return match (raw_path.slice_range(0, end)) {
+    Ok(out) => { out }
     Err(_) => { panic() }
   }
 }
@@ -70,9 +70,9 @@ pub fn clean_relative_with_alloc(alloc: buffer::Alloc, raw_path: string) -> Resu
   }
   let result = out.copy_string()
   out.free()
-  match (result) {
-    Ok(path) => { return Ok(path) }
-    Err(_) => { return Err(()) }
+  return match (result) {
+    Ok(path) => { Ok(path) }
+    Err(_) => { Err(()) }
   }
 }
 
@@ -97,32 +97,35 @@ pub fn basename_view(raw_path: string) -> string {
   if (path.is_empty()) {
     return path
   }
-  match (path.last_index_of_byte('/')) {
+  return match (path.last_index_of_byte('/')) {
     Ok(i) => {
       match (path.slice_range(i + 1, path.len())) {
-        Ok(out) => { return out }
+        Ok(out) => { out }
         Err(_) => { panic() }
       }
     }
-    Err(_) => { return path }
+    Err(_) => { path }
   }
 }
 
 /// Return the dirname of a path as a view.
 pub fn dirname_view(raw_path: string) -> string {
   let path = trim_trailing_slashes(raw_path)
+  let result = ""
   match (path.last_index_of_byte('/')) {
     Ok(i) => {
       if (i == 0) {
-        return ""
-      }
-      match (path.slice_range(0, i)) {
-        Ok(out) => { return out }
-        Err(_) => { panic() }
+        result = ""
+      } else {
+        match (path.slice_range(0, i)) {
+          Ok(out) => { result = out }
+          Err(_) => { panic() }
+        }
       }
     }
-    Err(_) => { return "" }
+    Err(_) => { result = "" }
   }
+  return result
 }
 
 /// Join two path segments using the process default allocator.

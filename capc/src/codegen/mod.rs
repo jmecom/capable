@@ -194,10 +194,11 @@ struct ResultShape {
 }
 
 /// Result shape kinds for match-expression lowering.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ResultKind {
     Unit,
     Single,
+    Result(Box<ResultKind>, Box<ResultKind>),
 }
 
 /// Build and write the object file for a fully-checked HIR program.

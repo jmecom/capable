@@ -13,10 +13,9 @@ use crate::hir::{
 };
 
 use super::{
-    build_type_param_bounds, build_type_params, check, function_key, lower_type,
-    resolve_enum_variant, resolve_method_target, resolve_type_name, type_param_names, EnumInfo,
-    FunctionSig, FunctionTypeTables, SpanExt, StdlibIndex, StructInfo, TraitImplInfo, TraitInfo,
-    Ty, TypeTable, UseMap,
+    build_type_param_bounds, build_type_params, function_key, lower_type, resolve_enum_variant,
+    resolve_method_target, resolve_type_name, type_param_names, EnumInfo, FunctionSig,
+    FunctionTypeTables, StdlibIndex, StructInfo, TraitImplInfo, TraitInfo, Ty, TypeTable, UseMap,
 };
 
 /// Context for HIR lowering (uses the type checker as source of truth).
@@ -25,13 +24,11 @@ struct LoweringCtx<'a> {
     structs: &'a HashMap<String, StructInfo>,
     enums: &'a HashMap<String, EnumInfo>,
     traits: &'a HashMap<String, TraitInfo>,
-    trait_impls: &'a [TraitImplInfo],
     use_map: &'a UseMap,
     stdlib: &'a StdlibIndex,
     module_name: &'a str,
     type_tables: Option<&'a FunctionTypeTables>,
     type_table: Option<&'a TypeTable>,
-    allow_type_fallback: bool,
     /// Maps variable names to their LocalId
     local_map: HashMap<String, LocalId>,
     /// Maps variable names to their types (needed for type checking during lowering)
@@ -47,25 +44,21 @@ impl<'a> LoweringCtx<'a> {
         structs: &'a HashMap<String, StructInfo>,
         enums: &'a HashMap<String, EnumInfo>,
         traits: &'a HashMap<String, TraitInfo>,
-        trait_impls: &'a [TraitImplInfo],
         use_map: &'a UseMap,
         stdlib: &'a StdlibIndex,
         module_name: &'a str,
         type_tables: Option<&'a FunctionTypeTables>,
-        allow_type_fallback: bool,
     ) -> Self {
         Self {
             functions,
             structs,
             enums,
             traits,
-            trait_impls,
             use_map,
             stdlib,
             module_name,
             type_tables,
             type_table: None,
-            allow_type_fallback,
             local_map: HashMap::new(),
             local_types: HashMap::new(),
             local_counter: 0,
@@ -100,11 +93,10 @@ pub(super) fn lower_module(
     structs: &HashMap<String, StructInfo>,
     enums: &HashMap<String, EnumInfo>,
     traits: &HashMap<String, TraitInfo>,
-    trait_impls: &[TraitImplInfo],
+    _trait_impls: &[TraitImplInfo],
     use_map: &UseMap,
     stdlib: &StdlibIndex,
     type_tables: Option<&FunctionTypeTables>,
-    allow_type_fallback: bool,
 ) -> Result<crate::hir::HirModule, TypeError> {
     let module_name = module.name.to_string();
     let mut ctx = LoweringCtx::new(
@@ -112,12 +104,10 @@ pub(super) fn lower_module(
         structs,
         enums,
         traits,
-        trait_impls,
         use_map,
         stdlib,
         &module_name,
         type_tables,
-        allow_type_fallback,
     );
 
     let mut hir_functions = Vec::new();
@@ -247,6 +237,8 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
     ctx.local_counter = 0;
     ctx.local_map.clear();
     ctx.local_types.clear();
+    let is_runtime_intrinsic =
+        crate::runtime_intrinsics::is_runtime_intrinsic(ctx.module_name, &func.name.item);
     ctx.type_table = ctx
         .type_tables
         .and_then(|tables| tables.get(&function_key(ctx.module_name, &func.name.item)));
@@ -278,7 +270,11 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
 
     let ret_ty = lower_type(&func.ret, ctx.use_map, ctx.stdlib, &type_params)?;
     let hir_ret_ty = hir_type_for(ret_ty.clone(), ctx, func.ret.span())?;
-    let body = lower_block(&func.body, ctx, &ret_ty)?;
+    let body = if is_runtime_intrinsic {
+        lower_runtime_intrinsic_stub_body(func.body.span, hir_ret_ty.clone())
+    } else {
+        lower_block(&func.body, ctx, &ret_ty)?
+    };
 
     Ok(HirFunction {
         name: func.name.item.clone(),
@@ -287,6 +283,18 @@ fn lower_function(func: &Function, ctx: &mut LoweringCtx) -> Result<HirFunction,
         ret_ty: hir_ret_ty,
         body,
     })
+}
+
+fn lower_runtime_intrinsic_stub_body(span: Span, ret_ty: HirType) -> HirBlock {
+    HirBlock {
+        stmts: vec![HirStmt::Expr(HirExprStmt {
+            expr: HirExpr::Trap(HirTrap {
+                ty: ret_ty,
+                span,
+            }),
+            span,
+        })],
+    }
 }
 
 /// Lower a block into HIR.
@@ -305,6 +313,13 @@ fn lower_block(block: &Block, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirB
 /// Lower a statement into HIR.
 fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<Vec<HirStmt>, TypeError> {
     match stmt {
+        Stmt::LetElse(_)
+        | Stmt::TryLet(_)
+        | Stmt::TryElse(_)
+        | Stmt::ForEach(_) => Err(TypeError::new(
+            "internal error: desugaring did not lower high-level statement".to_string(),
+            stmt.span(),
+        )),
         Stmt::Let(let_stmt) => {
             let expr = lower_expr(&let_stmt.expr, ctx, ret_ty)?;
             let ty = expr.ty().clone();
@@ -427,7 +442,7 @@ fn lower_defer_stmt(
     ret_ty: &Ty,
 ) -> Result<Vec<HirStmt>, TypeError> {
     let mut stmts = Vec::new();
-    let expr_ty = type_of_ast_expr(&defer_stmt.expr, ctx, ret_ty)?;
+    let expr_ty = type_of_ast_expr(&defer_stmt.expr, ctx)?;
     let hir_ret_ty = hir_type_for(expr_ty, ctx, defer_stmt.expr.span())?;
 
     let deferred = match &defer_stmt.expr {
@@ -495,7 +510,7 @@ fn lower_defer_stmt(
             }
 
             let receiver = capture_defer_expr(&method_call.receiver, ctx, ret_ty, &mut stmts)?;
-            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx)?;
             let receiver_base = match &receiver_ty {
                 Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
                 _ => &receiver_ty,
@@ -675,9 +690,9 @@ fn capture_defer_expr(
 
 /// Helper to get the type of an AST expression using the existing typechecker.
 /// This ensures we have a single source of truth for types.
-fn type_of_ast_expr(expr: &Expr, ctx: &LoweringCtx, ret_ty: &Ty) -> Result<Ty, TypeError> {
+fn type_of_ast_expr(expr: &Expr, ctx: &LoweringCtx) -> Result<Ty, TypeError> {
     if let Some(table) = ctx.type_table {
-        if let Some(ty) = table.get(expr.span()) {
+        if let Some(ty) = table.get(expr.id()) {
             return Ok(ty.clone());
         }
         return Err(TypeError::new(
@@ -685,32 +700,10 @@ fn type_of_ast_expr(expr: &Expr, ctx: &LoweringCtx, ret_ty: &Ty) -> Result<Ty, T
             expr.span(),
         ));
     }
-    if !ctx.allow_type_fallback {
-        return Err(TypeError::new(
-            "internal error: lowering requires typed expression data".to_string(),
-            expr.span(),
-        ));
-    }
-    let mut scopes = super::Scopes::from_flat_map(ctx.local_types.clone());
-    let mut recorder = super::check::TypeRecorder::new(None);
-    let type_params = ctx.type_params.clone();
-    check::check_expr(
-        expr,
-        ctx.functions,
-        ctx.traits,
-        ctx.trait_impls,
-        &mut scopes,
-        super::UseMode::Read,
-        &mut recorder,
-        ctx.use_map,
-        ctx.structs,
-        ctx.enums,
-        ctx.stdlib,
-        ret_ty,
-        ctx.module_name,
-        &type_params,
-        &ctx.type_param_bounds,
-    )
+    Err(TypeError::new(
+        "internal error: lowering requires typed expression data".to_string(),
+        expr.span(),
+    ))
 }
 
 fn lower_call_type_args(args: &[Type], ctx: &LoweringCtx) -> Result<Vec<Ty>, TypeError> {
@@ -781,7 +774,7 @@ fn hir_type_for(ty: Ty, ctx: &LoweringCtx, span: Span) -> Result<HirType, TypeEr
 
 /// Lower an expression into HIR with resolved callee information.
 fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr, TypeError> {
-    let ty = type_of_ast_expr(expr, ctx, ret_ty)?;
+    let ty = type_of_ast_expr(expr, ctx)?;
     let hir_ty = hir_type_for(ty.clone(), ctx, expr.span())?;
 
     match expr {
@@ -974,7 +967,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             }
 
             let receiver = lower_expr(&method_call.receiver, ctx, ret_ty)?;
-            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx, ret_ty)?;
+            let receiver_ty = type_of_ast_expr(&method_call.receiver, ctx)?;
             let receiver_base = match &receiver_ty {
                 Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
                 _ => &receiver_ty,
@@ -1139,7 +1132,7 @@ fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx, ret_ty: &Ty) -> Result<HirExpr
             }))
         }
         Expr::StructLiteral(lit) => {
-            let struct_ty = type_of_ast_expr(expr, ctx, ret_ty)?;
+            let struct_ty = type_of_ast_expr(expr, ctx)?;
             let type_name = resolve_type_name(&lit.path, ctx.use_map, ctx.stdlib);
             let key = if lit.path.segments.len() == 1 {
                 if ctx.stdlib.types.contains_key(&lit.path.segments[0].item) {
@@ -1449,7 +1442,6 @@ mod tests {
             aliases: HashMap::new(),
         };
         let traits = HashMap::new();
-        let trait_impls = Vec::new();
         let stdlib = StdlibIndex {
             types: HashMap::new(),
         };
@@ -1458,12 +1450,10 @@ mod tests {
             &structs,
             &enums,
             &traits,
-            &trait_impls,
             &use_map,
             &stdlib,
             "foo",
             None,
-            true,
         );
         let ty = Ty::Path("Pair".to_string(), Vec::new());
         let abi = abi_type_for(&ty, &ctx, Span::new(0, 0)).expect("abi");

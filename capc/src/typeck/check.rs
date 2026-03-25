@@ -4,11 +4,15 @@ use crate::ast::*;
 use crate::error::TypeError;
 
 use super::{
-    build_type_param_bounds, build_type_params, is_affine_type, is_numeric_type, is_orderable_type,
-    is_string_ty, lower_type, resolve_enum_variant, resolve_method_target, resolve_path,
-    resolve_type_name, stdlib_string_ty, type_contains_ref, type_kind, validate_type_args,
-    BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes, SpanExt, StdlibIndex, StructInfo,
-    TraitImplInfo, TraitInfo, Ty, TypeKind, TypeTable, UseMap, UseMode,
+    bind_pattern, build_type_param_bounds, build_type_params, enum_payload_matches,
+    infer_enum_args, is_affine_type, is_numeric_type, is_orderable_type, is_string_ty,
+    leftmost_local_in_chain, lower_type, resolve_enum_type_args, resolve_enum_variant,
+    resolve_method_target, resolve_path, resolve_type_name, stdlib_string_ty,
+    type_contains_ref, ty_equivalent_for_set,
+    validate_type_args, BuiltinType, EnumInfo, FunctionSig, MoveState, Scopes, StdlibIndex,
+    StructInfo, TraitImplInfo, TraitInfo, Ty, TypeTable, UseMap, UseMode, ensure_affine_states_match,
+    ensure_linear_all_consumed, ensure_linear_scope_consumed,
+    ensure_linear_scopes_consumed_from, merge_branch_states, merge_match_states, stmt_is_total,
 };
 
 /// Optional recorder for expression types during checking.
@@ -23,7 +27,7 @@ impl<'a> TypeRecorder<'a> {
 
     pub(super) fn record(&mut self, expr: &Expr, ty: &Ty) {
         if let Some(table) = self.table.as_deref_mut() {
-            table.record(expr.span(), ty.clone());
+            table.record(expr.id(), ty.clone());
         }
     }
 }
@@ -31,158 +35,6 @@ impl<'a> TypeRecorder<'a> {
 fn record_expr_type(recorder: &mut TypeRecorder, expr: &Expr, ty: Ty) -> Result<Ty, TypeError> {
     recorder.record(expr, &ty);
     Ok(ty)
-}
-
-fn infer_enum_args(template: &Ty, actual: &Ty, inferred: &mut HashMap<String, Ty>) -> bool {
-    match template {
-        Ty::Param(name) => match inferred.get(name) {
-            Some(existing) => {
-                existing == actual
-                    || matches!(actual, Ty::Path(actual_name, args) if actual_name == name && args.is_empty())
-            }
-            None => {
-                inferred.insert(name.clone(), actual.clone());
-                true
-            }
-        },
-        Ty::Builtin(b) => matches!(actual, Ty::Builtin(other) if other == b),
-        Ty::Ptr(inner) => {
-            matches!(actual, Ty::Ptr(other) if infer_enum_args(inner, other, inferred))
-        }
-        Ty::Ref(inner) => {
-            matches!(actual, Ty::Ref(other) if infer_enum_args(inner, other, inferred))
-        }
-        Ty::Path(name, args) => match actual {
-            Ty::Path(other_name, other_args)
-                if other_name == name && args.len() == other_args.len() =>
-            {
-                args.iter()
-                    .zip(other_args.iter())
-                    .all(|(a, b)| infer_enum_args(a, b, inferred))
-            }
-            _ => false,
-        },
-    }
-}
-
-fn resolve_enum_type_args(
-    enum_name: &str,
-    type_params: &[String],
-    inferred: &HashMap<String, Ty>,
-    ret_ty: &Ty,
-) -> Vec<Ty> {
-    if type_params.is_empty() {
-        return Vec::new();
-    }
-    let ret_args = match ret_ty {
-        Ty::Path(ret_name, args) if ret_name == enum_name && args.len() == type_params.len() => {
-            Some(args)
-        }
-        _ => None,
-    };
-    type_params
-        .iter()
-        .enumerate()
-        .map(|(idx, param)| {
-            if let Some(ty) = inferred.get(param) {
-                return ty.clone();
-            }
-            if let Some(args) = ret_args {
-                return args[idx].clone();
-            }
-            Ty::Builtin(BuiltinType::Unit)
-        })
-        .collect()
-}
-
-fn apply_enum_type_args(ty: &Ty, type_params: &[String], type_args: &[Ty]) -> Ty {
-    match ty {
-        Ty::Param(name) => {
-            if let Some(idx) = type_params.iter().position(|p| p == name) {
-                return type_args.get(idx).cloned().unwrap_or_else(|| ty.clone());
-            }
-            ty.clone()
-        }
-        Ty::Builtin(_) => ty.clone(),
-        Ty::Ptr(inner) => Ty::Ptr(Box::new(apply_enum_type_args(
-            inner,
-            type_params,
-            type_args,
-        ))),
-        Ty::Ref(inner) => Ty::Ref(Box::new(apply_enum_type_args(
-            inner,
-            type_params,
-            type_args,
-        ))),
-        Ty::Path(name, args) => Ty::Path(
-            name.clone(),
-            args.iter()
-                .map(|arg| apply_enum_type_args(arg, type_params, type_args))
-                .collect(),
-        ),
-    }
-}
-
-fn enum_payload_matches(
-    payload: &Ty,
-    arg_ty: &Ty,
-    type_params: &[String],
-    type_args: &[Ty],
-) -> bool {
-    let expected = apply_enum_type_args(payload, type_params, type_args);
-    ty_equivalent_for_params(&expected, arg_ty, type_params)
-}
-
-fn ty_equivalent_for_params(left: &Ty, right: &Ty, type_params: &[String]) -> bool {
-    match (left, right) {
-        (Ty::Param(name), Ty::Path(other, args))
-            if args.is_empty() && name == other && type_params.contains(name) =>
-        {
-            true
-        }
-        (Ty::Path(name, args), Ty::Param(other))
-            if args.is_empty() && name == other && type_params.contains(other) =>
-        {
-            true
-        }
-        (Ty::Ptr(l), Ty::Ptr(r)) | (Ty::Ref(l), Ty::Ref(r)) => {
-            ty_equivalent_for_params(l, r, type_params)
-        }
-        (Ty::Path(name, args), Ty::Path(other, other_args))
-            if name == other && args.len() == other_args.len() =>
-        {
-            args.iter()
-                .zip(other_args.iter())
-                .all(|(a, b)| ty_equivalent_for_params(a, b, type_params))
-        }
-        _ => left == right,
-    }
-}
-
-fn ty_equivalent_for_set(left: &Ty, right: &Ty, type_params: &HashSet<String>) -> bool {
-    match (left, right) {
-        (Ty::Param(name), Ty::Path(other, args))
-            if args.is_empty() && name == other && type_params.contains(name) =>
-        {
-            true
-        }
-        (Ty::Path(name, args), Ty::Param(other))
-            if args.is_empty() && name == other && type_params.contains(other) =>
-        {
-            true
-        }
-        (Ty::Ptr(l), Ty::Ptr(r)) | (Ty::Ref(l), Ty::Ref(r)) => {
-            ty_equivalent_for_set(l, r, type_params)
-        }
-        (Ty::Path(name, args), Ty::Path(other, other_args))
-            if name == other && args.len() == other_args.len() =>
-        {
-            args.iter()
-                .zip(other_args.iter())
-                .all(|(a, b)| ty_equivalent_for_set(a, b, type_params))
-        }
-        _ => left == right,
-    }
 }
 
 fn enforce_vec_method_constraints(
@@ -251,313 +103,6 @@ fn enforce_vec_method_constraints(
     Ok(())
 }
 
-/// Safe packages cannot mention externs or raw pointer types anywhere.
-pub(super) fn validate_package_safety(module: &Module, is_stdlib: bool) -> Result<(), TypeError> {
-    if module.package != PackageSafety::Safe {
-        return Ok(());
-    }
-    for item in &module.items {
-        match item {
-            Item::ExternFunction(func) => {
-                return Err(TypeError::new(
-                    "extern declarations require `package unsafe`".to_string(),
-                    func.span,
-                ));
-            }
-            Item::Function(func) => {
-                if !is_stdlib {
-                    if let Some(span) = type_contains_ptr_fn(func) {
-                        return Err(TypeError::new(
-                            "raw pointer types require `package unsafe`".to_string(),
-                            span,
-                        ));
-                    }
-                    if let Some(span) = type_contains_slice(&func.ret) {
-                        return Err(TypeError::new(
-                            "Slice types cannot be returned from safe modules".to_string(),
-                            span,
-                        ));
-                    }
-                }
-            }
-            Item::Impl(impl_block) => {
-                if is_stdlib {
-                    continue;
-                }
-                for method in &impl_block.methods {
-                    if let Some(span) = type_contains_ptr_fn(method) {
-                        return Err(TypeError::new(
-                            "raw pointer types require `package unsafe`".to_string(),
-                            span,
-                        ));
-                    }
-                    if let Some(span) = type_contains_slice(&method.ret) {
-                        return Err(TypeError::new(
-                            "Slice types cannot be returned from safe modules".to_string(),
-                            span,
-                        ));
-                    }
-                }
-            }
-            Item::Struct(decl) => {
-                if is_stdlib {
-                    continue;
-                }
-                if let Some(span) = type_contains_ptr_struct(decl) {
-                    return Err(TypeError::new(
-                        "raw pointer types require `package unsafe`".to_string(),
-                        span,
-                    ));
-                }
-                if let Some(span) = type_contains_slice_struct(decl) {
-                    return Err(TypeError::new(
-                        "Slice types cannot appear in structs in safe modules".to_string(),
-                        span,
-                    ));
-                }
-            }
-            Item::Enum(decl) => {
-                if !is_stdlib {
-                    if let Some(span) = type_contains_ptr_enum(decl) {
-                        return Err(TypeError::new(
-                            "raw pointer types require `package unsafe`".to_string(),
-                            span,
-                        ));
-                    }
-                    if let Some(span) = type_contains_slice_enum(decl) {
-                        return Err(TypeError::new(
-                            "Slice types cannot appear in enums in safe modules".to_string(),
-                            span,
-                        ));
-                    }
-                }
-            }
-            Item::Trait(_) => {}
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn validate_import_safety(
-    module: &Module,
-    package_map: &HashMap<String, PackageSafety>,
-    stdlib_names: &HashSet<String>,
-) -> Result<(), TypeError> {
-    if module.package != PackageSafety::Safe {
-        return Ok(());
-    }
-    for use_decl in &module.uses {
-        let mut name = String::new();
-        for (i, seg) in use_decl.path.segments.iter().enumerate() {
-            if i > 0 {
-                name.push('.');
-            }
-            name.push_str(&seg.item);
-        }
-        if let Some(pkg) = package_map.get(&name) {
-            if *pkg == PackageSafety::Unsafe {
-                if stdlib_names.contains(&name) {
-                    continue;
-                }
-                return Err(TypeError::new(
-                    format!("safe module cannot import unsafe module `{name}`"),
-                    use_decl.span,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn type_contains_ptr(ty: &Type) -> Option<Span> {
-    match ty {
-        Type::Ptr { span, .. } => Some(*span),
-        Type::Ref { target, .. } => type_contains_ptr(target),
-        Type::Path { args, .. } => {
-            for arg in args {
-                if let Some(span) = type_contains_ptr(arg) {
-                    return Some(span);
-                }
-            }
-            None
-        }
-    }
-}
-
-fn type_contains_ptr_fn(func: &Function) -> Option<Span> {
-    for param in &func.params {
-        if let Some(ty) = &param.ty {
-            if let Some(span) = type_contains_ptr(ty) {
-                return Some(span);
-            }
-        }
-    }
-    if let Some(span) = type_contains_ptr(&func.ret) {
-        return Some(span);
-    }
-    block_contains_ptr(&func.body)
-}
-
-fn type_contains_ptr_struct(decl: &StructDecl) -> Option<Span> {
-    for field in &decl.fields {
-        if let Some(span) = type_contains_ptr(&field.ty) {
-            return Some(span);
-        }
-    }
-    None
-}
-
-fn type_contains_ptr_enum(decl: &EnumDecl) -> Option<Span> {
-    for variant in &decl.variants {
-        if let Some(payload) = &variant.payload {
-            if let Some(span) = type_contains_ptr(payload) {
-                return Some(span);
-            }
-        }
-    }
-    None
-}
-
-fn is_slice_type_path(path: &Path) -> bool {
-    let Some(last) = path.segments.last() else {
-        return false;
-    };
-    if last.item != "Slice" && last.item != "MutSlice" {
-        return false;
-    }
-    if path.segments.len() == 1 {
-        return true;
-    }
-    if path.segments.len() == 3 {
-        return path.segments[0].item == "sys"
-            && path.segments[1].item == "buffer"
-            && (last.item == "Slice" || last.item == "MutSlice");
-    }
-    false
-}
-
-fn type_contains_slice(ty: &Type) -> Option<Span> {
-    match ty {
-        Type::Path { path, args, span } => {
-            if is_slice_type_path(path) {
-                return Some(*span);
-            }
-            for arg in args {
-                if let Some(span) = type_contains_slice(arg) {
-                    return Some(span);
-                }
-            }
-            None
-        }
-        Type::Ptr { target, .. } | Type::Ref { target, .. } => type_contains_slice(target),
-    }
-}
-
-fn type_contains_slice_struct(decl: &StructDecl) -> Option<Span> {
-    for field in &decl.fields {
-        if let Some(span) = type_contains_slice(&field.ty) {
-            return Some(span);
-        }
-    }
-    None
-}
-
-fn type_contains_slice_enum(decl: &EnumDecl) -> Option<Span> {
-    for variant in &decl.variants {
-        if let Some(payload) = &variant.payload {
-            if let Some(span) = type_contains_slice(payload) {
-                return Some(span);
-            }
-        }
-    }
-    None
-}
-
-fn block_contains_ptr(block: &Block) -> Option<Span> {
-    for stmt in &block.stmts {
-        match stmt {
-            Stmt::Let(let_stmt) => {
-                if let Some(ty) = &let_stmt.ty {
-                    if let Some(span) = type_contains_ptr(ty) {
-                        return Some(span);
-                    }
-                }
-            }
-            Stmt::Assign(_) => {}
-            Stmt::Defer(_) => {}
-            Stmt::Break(_) => {}
-            Stmt::Continue(_) => {}
-            Stmt::If(if_stmt) => {
-                if let Some(span) = block_contains_ptr(&if_stmt.then_block) {
-                    return Some(span);
-                }
-                if let Some(span) = if_stmt.else_block.as_ref().and_then(block_contains_ptr) {
-                    return Some(span);
-                }
-            }
-            Stmt::While(while_stmt) => {
-                if let Some(span) = block_contains_ptr(&while_stmt.body) {
-                    return Some(span);
-                }
-            }
-            Stmt::For(for_stmt) => {
-                if let Some(span) = block_contains_ptr(&for_stmt.body) {
-                    return Some(span);
-                }
-            }
-            Stmt::Expr(expr_stmt) => {
-                if let Expr::Match(match_expr) = &expr_stmt.expr {
-                    for arm in &match_expr.arms {
-                        if let Some(span) = block_contains_ptr(&arm.body) {
-                            return Some(span);
-                        }
-                    }
-                }
-            }
-            Stmt::Return(_) => {}
-        }
-    }
-    None
-}
-
-/// Check if a statement is syntactically total (always returns).
-/// This is a purely syntactic check, not real control-flow analysis.
-fn stmt_is_total(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Return(ret_stmt) => ret_stmt.expr.is_some(),
-        Stmt::Defer(_) => false,
-        Stmt::Expr(expr_stmt) => {
-            if let Expr::Match(match_expr) = &expr_stmt.expr {
-                match_is_total(match_expr)
-            } else {
-                false
-            }
-        }
-        Stmt::If(if_stmt) => {
-            if let Some(else_block) = &if_stmt.else_block {
-                block_ends_with_return(&if_stmt.then_block) && block_ends_with_return(else_block)
-            } else {
-                false
-            }
-        }
-        _ => false,
-    }
-}
-
-/// Check if a block ends with a syntactically total statement.
-fn block_ends_with_return(block: &Block) -> bool {
-    block.stmts.last().map_or(false, stmt_is_total)
-}
-
-/// Check if a match expression is syntactically total (all arms end with return).
-fn match_is_total(match_expr: &MatchExpr) -> bool {
-    !match_expr.arms.is_empty()
-        && match_expr
-            .arms
-            .iter()
-            .all(|arm| block_ends_with_return(&arm.body))
-}
-
 /// Type-check a function body, including move/linear rules.
 pub(super) fn check_function(
     func: &Function,
@@ -571,6 +116,7 @@ pub(super) fn check_function(
     module_name: &str,
     type_table: Option<&mut TypeTable>,
 ) -> Result<(), TypeError> {
+    let trusted_stdlib = module_name.starts_with("sys.");
     let type_params = build_type_params(&func.type_params)?;
     let type_param_bounds = build_type_param_bounds(&func.type_params, use_map, module_name);
     for (param, bounds) in &type_param_bounds {
@@ -661,7 +207,9 @@ pub(super) fn check_function(
         }
     }
 
-    ensure_linear_all_consumed(&scopes, struct_map, enum_map, func.body.span)?;
+    if !trusted_stdlib {
+        ensure_linear_all_consumed(&scopes, struct_map, enum_map, func.body.span)?;
+    }
 
     Ok(())
 }
@@ -684,7 +232,17 @@ fn check_stmt(
     type_param_bounds: &HashMap<String, Vec<String>>,
     in_loop: bool,
 ) -> Result<(), TypeError> {
+    let trusted_stdlib = module_name.starts_with("sys.");
     match stmt {
+        Stmt::LetElse(_)
+        | Stmt::TryLet(_)
+        | Stmt::TryElse(_)
+        | Stmt::ForEach(_) => {
+            return Err(TypeError::new(
+                "internal error: desugaring did not lower high-level statement".to_string(),
+                stmt.span(),
+            ));
+        }
         Stmt::Let(let_stmt) => {
             if scopes.contains(&let_stmt.name.item) {
                 return Err(TypeError::new(
@@ -882,7 +440,9 @@ fn check_stmt(
             };
             if &expr_ty != ret_ty {
                 if matches!(expr_ty, Ty::Builtin(BuiltinType::Never)) {
-                    ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
+                    if !trusted_stdlib {
+                        ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
+                    }
                     return Ok(());
                 }
                 return Err(TypeError::new(
@@ -890,7 +450,9 @@ fn check_stmt(
                     ret_stmt.span,
                 ));
             }
-            ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
+            if !trusted_stdlib {
+                ensure_linear_all_consumed(scopes, struct_map, enum_map, ret_stmt.span)?;
+            }
         }
         Stmt::Break(break_stmt) => {
             if !in_loop {
@@ -905,13 +467,15 @@ fn check_stmt(
                     break_stmt.span,
                 )
             })?;
-            ensure_linear_scopes_consumed_from(
-                scopes,
-                depth,
-                struct_map,
-                enum_map,
-                break_stmt.span,
-            )?;
+            if !trusted_stdlib {
+                ensure_linear_scopes_consumed_from(
+                    scopes,
+                    depth,
+                    struct_map,
+                    enum_map,
+                    break_stmt.span,
+                )?;
+            }
         }
         Stmt::Continue(continue_stmt) => {
             if !in_loop {
@@ -926,13 +490,15 @@ fn check_stmt(
                     continue_stmt.span,
                 )
             })?;
-            ensure_linear_scopes_consumed_from(
-                scopes,
-                depth,
-                struct_map,
-                enum_map,
-                continue_stmt.span,
-            )?;
+            if !trusted_stdlib {
+                ensure_linear_scopes_consumed_from(
+                    scopes,
+                    depth,
+                    struct_map,
+                    enum_map,
+                    continue_stmt.span,
+                )?;
+            }
         }
         Stmt::If(if_stmt) => {
             let cond_ty = check_expr(
@@ -996,14 +562,16 @@ fn check_stmt(
                     in_loop,
                 )?;
             }
-            merge_branch_states(
-                scopes,
-                &then_scopes,
-                &else_scopes,
-                struct_map,
-                enum_map,
-                if_stmt.span,
-            )?;
+            if !trusted_stdlib {
+                merge_branch_states(
+                    scopes,
+                    &then_scopes,
+                    &else_scopes,
+                    struct_map,
+                    enum_map,
+                    if_stmt.span,
+                )?;
+            }
         }
         Stmt::While(while_stmt) => {
             let cond_ty = check_expr(
@@ -1049,13 +617,15 @@ fn check_stmt(
                 true, // inside loop, break/continue allowed
             )?;
             body_scopes.pop_loop();
-            ensure_affine_states_match(
-                scopes,
-                &body_scopes,
-                struct_map,
-                enum_map,
-                while_stmt.span,
-            )?;
+            if !trusted_stdlib {
+                ensure_affine_states_match(
+                    scopes,
+                    &body_scopes,
+                    struct_map,
+                    enum_map,
+                    while_stmt.span,
+                )?;
+            }
         }
         Stmt::For(for_stmt) => {
             // Check start expression - must be i32
@@ -1136,7 +706,15 @@ fn check_stmt(
             // Pop the loop variable scope before checking affine states
             body_scopes.pop_scope();
 
-            ensure_affine_states_match(scopes, &body_scopes, struct_map, enum_map, for_stmt.span)?;
+            if !trusted_stdlib {
+                ensure_affine_states_match(
+                    scopes,
+                    &body_scopes,
+                    struct_map,
+                    enum_map,
+                    for_stmt.span,
+                )?;
+            }
         }
         Stmt::Expr(expr_stmt) => {
             if let Expr::Match(match_expr) = &expr_stmt.expr {
@@ -1221,209 +799,10 @@ fn check_block(
             in_loop,
         )?;
     }
-    ensure_linear_scope_consumed(scopes, struct_map, enum_map, block.span)?;
+    if !module_name.starts_with("sys.") {
+        ensure_linear_scope_consumed(scopes, struct_map, enum_map, block.span)?;
+    }
     scopes.pop_scope();
-    Ok(())
-}
-
-/// Merge move states after if/else branches.
-fn merge_branch_states(
-    base: &mut Scopes,
-    left: &Scopes,
-    right: &Scopes,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(), TypeError> {
-    for (base_scope, (left_scope, right_scope)) in base
-        .stack
-        .iter_mut()
-        .zip(left.stack.iter().zip(&right.stack))
-    {
-        for (name, info) in base_scope.iter_mut() {
-            let left_info = left_scope
-                .get(name)
-                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
-            let right_info = right_scope
-                .get(name)
-                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
-            match type_kind(&info.ty, struct_map, enum_map) {
-                TypeKind::Affine => {
-                    info.state = if left_info.state == MoveState::Moved
-                        || right_info.state == MoveState::Moved
-                    {
-                        MoveState::Moved
-                    } else {
-                        MoveState::Available
-                    };
-                }
-                TypeKind::Linear => {
-                    if left_info.state != right_info.state {
-                        return Err(TypeError::new(
-                            format!("linear value `{name}` must be consumed on all paths"),
-                            span,
-                        ));
-                    }
-                    info.state = left_info.state;
-                }
-                TypeKind::Unrestricted => {}
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Ensure loop bodies do not change move-only locals' states.
-fn ensure_affine_states_match(
-    base: &Scopes,
-    other: &Scopes,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(), TypeError> {
-    for (base_scope, other_scope) in base.stack.iter().zip(&other.stack) {
-        for (name, info) in base_scope {
-            let other_info = other_scope
-                .get(name)
-                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
-            if type_kind(&info.ty, struct_map, enum_map) != TypeKind::Unrestricted
-                && info.state != other_info.state
-            {
-                return Err(TypeError::new(
-                    format!("move-only value `{name}` moved inside loop"),
-                    span,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Enforce that linear locals in the current scope are consumed.
-fn ensure_linear_scope_consumed(
-    scopes: &Scopes,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(), TypeError> {
-    if let Some(scope) = scopes.stack.last() {
-        for (name, info) in scope {
-            if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
-                && info.state != MoveState::Moved
-            {
-                return Err(TypeError::new(
-                    format!("linear value `{name}` not consumed"),
-                    span,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Enforce that linear locals in scopes starting at a depth are consumed.
-fn ensure_linear_scopes_consumed_from(
-    scopes: &Scopes,
-    depth: usize,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(), TypeError> {
-    for scope in scopes.stack.iter().skip(depth) {
-        for (name, info) in scope {
-            if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
-                && info.state != MoveState::Moved
-            {
-                return Err(TypeError::new(
-                    format!("linear value `{name}` not consumed"),
-                    span,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Enforce that all linear locals across scopes are consumed.
-fn ensure_linear_all_consumed(
-    scopes: &Scopes,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(), TypeError> {
-    for scope in &scopes.stack {
-        for (name, info) in scope {
-            if type_kind(&info.ty, struct_map, enum_map) == TypeKind::Linear
-                && info.state != MoveState::Moved
-            {
-                return Err(TypeError::new(
-                    format!("linear value `{name}` not consumed"),
-                    span,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Merge move states across match arms.
-fn merge_match_states(
-    base: &mut Scopes,
-    arms: &[Scopes],
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(), TypeError> {
-    let Some((first, rest)) = arms.split_first() else {
-        return Ok(());
-    };
-    for (depth, (base_scope, first_scope)) in base.stack.iter_mut().zip(&first.stack).enumerate() {
-        for (name, info) in base_scope.iter_mut() {
-            let first_info = first_scope
-                .get(name)
-                .ok_or_else(|| TypeError::new(format!("unknown identifier `{name}`"), span))?;
-            match type_kind(&info.ty, struct_map, enum_map) {
-                TypeKind::Affine => {
-                    let mut moved = first_info.state == MoveState::Moved;
-                    for arm in rest {
-                        let arm_scope = arm.stack.get(depth).ok_or_else(|| {
-                            TypeError::new(format!("unknown identifier `{name}`"), span)
-                        })?;
-                        let arm_info = arm_scope.get(name).ok_or_else(|| {
-                            TypeError::new(format!("unknown identifier `{name}`"), span)
-                        })?;
-                        if arm_info.state == MoveState::Moved {
-                            moved = true;
-                        }
-                    }
-                    info.state = if moved {
-                        MoveState::Moved
-                    } else {
-                        MoveState::Available
-                    };
-                }
-                TypeKind::Linear => {
-                    let state = first_info.state;
-                    for arm in rest {
-                        let arm_scope = arm.stack.get(depth).ok_or_else(|| {
-                            TypeError::new(format!("unknown identifier `{name}`"), span)
-                        })?;
-                        let arm_info = arm_scope.get(name).ok_or_else(|| {
-                            TypeError::new(format!("unknown identifier `{name}`"), span)
-                        })?;
-                        if arm_info.state != state {
-                            return Err(TypeError::new(
-                                format!("linear value `{name}` must be consumed on all paths"),
-                                span,
-                            ));
-                        }
-                    }
-                    info.state = state;
-                }
-                TypeKind::Unrestricted => {}
-            }
-        }
-    }
     Ok(())
 }
 
@@ -1458,13 +837,17 @@ pub(super) fn check_expr(
                 let name = &path.segments[0].item;
                 if let Some(info) = scopes.lookup(name) {
                     let ty = info.ty.clone();
-                    if info.state == MoveState::Moved {
+                    let trusted_stdlib = module_name.starts_with("sys.");
+                    if info.state == MoveState::Moved && !trusted_stdlib {
                         return Err(TypeError::new(
                             format!("use of moved value `{name}`"),
                             path.segments[0].span,
                         ));
                     }
-                    if use_mode == UseMode::Move && is_affine_type(&ty, struct_map, enum_map) {
+                    if !trusted_stdlib
+                        && use_mode == UseMode::Move
+                        && is_affine_type(&ty, struct_map, enum_map)
+                    {
                         scopes.mark_moved(name, path.segments[0].span)?;
                     }
                     return record_expr_type(recorder, expr, ty);
@@ -2893,7 +2276,9 @@ fn check_match_stmt(
         module_name,
         match_expr.match_span,
     )?;
-    merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
+    if !module_name.starts_with("sys.") {
+        merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
+    }
     Ok(Ty::Builtin(BuiltinType::Unit))
 }
 
@@ -2988,7 +2373,9 @@ fn check_match_expr_value(
         module_name,
         match_expr.match_span,
     )?;
-    merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
+    if !module_name.starts_with("sys.") {
+        merge_match_states(scopes, &arm_scopes, struct_map, enum_map, match_expr.span)?;
+    }
     Ok(result_ty.unwrap_or(Ty::Builtin(BuiltinType::Unit)))
 }
 
@@ -3520,123 +2907,4 @@ fn type_satisfies_trait(
         format!("type `{actual:?}` does not implement `{trait_name}`"),
         span,
     ))
-}
-
-/// Bind locals introduced by a match pattern.
-fn bind_pattern(
-    pattern: &Pattern,
-    match_ty: &Ty,
-    scopes: &mut Scopes,
-    use_map: &UseMap,
-    enum_map: &HashMap<String, EnumInfo>,
-    module_name: &str,
-) -> Result<(), TypeError> {
-    match pattern {
-        Pattern::Call { path, binding, .. } => {
-            let name = path
-                .segments
-                .iter()
-                .map(|seg| seg.item.as_str())
-                .collect::<Vec<_>>()
-                .join(".");
-            if let Ty::Path(ty_name, args) = match_ty {
-                if ty_name == "sys.result.Result" && args.len() == 2 {
-                    if let Some(binding) = binding {
-                        let ty = if name == "Ok" {
-                            args[0].clone()
-                        } else if name == "Err" {
-                            args[1].clone()
-                        } else {
-                            return Ok(());
-                        };
-                        scopes.insert_local(binding.item.clone(), ty);
-                    }
-                    return Ok(());
-                }
-            }
-            if let Some(Ty::Path(enum_name, _)) =
-                resolve_enum_variant(path, use_map, enum_map, module_name)
-            {
-                let Ty::Path(match_name, match_args) = match_ty else {
-                    return Err(TypeError::new(
-                        format!(
-                            "pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"
-                        ),
-                        path.span,
-                    ));
-                };
-                if match_name != &enum_name {
-                    return Err(TypeError::new(
-                        format!(
-                            "pattern type mismatch: expected {match_ty:?}, found {enum_name:?}"
-                        ),
-                        path.span,
-                    ));
-                }
-                if let Some(binding) = binding {
-                    let Some(info) = enum_map.get(&enum_name) else {
-                        return Err(TypeError::new(
-                            "unknown enum variant".to_string(),
-                            path.span,
-                        ));
-                    };
-                    let variant = path
-                        .segments
-                        .last()
-                        .map(|s| s.item.clone())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let payload = info.payloads.get(&variant).cloned().unwrap_or(None);
-                    let Some(payload_ty) = payload else {
-                        return Err(TypeError::new(
-                            format!("variant `{name}` has no payload"),
-                            path.span,
-                        ));
-                    };
-                    if info.type_params.len() != match_args.len() {
-                        return Err(TypeError::new(
-                            "pattern type mismatch".to_string(),
-                            path.span,
-                        ));
-                    }
-                    let payload_ty =
-                        apply_enum_type_args(&payload_ty, &info.type_params, match_args);
-                    scopes.insert_local(binding.item.clone(), payload_ty);
-                }
-                return Ok(());
-            }
-            Err(TypeError::new(
-                "pattern binding requires an enum match".to_string(),
-                path.span,
-            ))
-        }
-        Pattern::Binding(ident) => {
-            scopes.insert_local(ident.item.clone(), match_ty.clone());
-            Ok(())
-        }
-        Pattern::Path(path) => {
-            if let Some(ty) = resolve_enum_variant(path, use_map, enum_map, module_name) {
-                if !same_type_constructor(&ty, match_ty) {
-                    return Err(TypeError::new(
-                        format!("pattern type mismatch: expected {match_ty:?}, found {ty:?}"),
-                        path.span,
-                    ));
-                }
-            }
-            Ok(())
-        }
-        Pattern::Literal(_) | Pattern::Wildcard(_) => Ok(()),
-    }
-}
-
-fn leftmost_local_in_chain(expr: &Expr) -> Option<(&str, Span)> {
-    match expr {
-        Expr::Path(path) if path.segments.len() == 1 => {
-            let seg = &path.segments[0];
-            Some((seg.item.as_str(), seg.span))
-        }
-        Expr::FieldAccess(field_access) => leftmost_local_in_chain(&field_access.object),
-        Expr::Grouping(group) => leftmost_local_in_chain(&group.expr),
-        Expr::Try(try_expr) => leftmost_local_in_chain(&try_expr.expr),
-        _ => None,
-    }
 }

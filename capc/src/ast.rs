@@ -24,6 +24,9 @@ impl<T> Spanned<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExprId(pub u32);
+
 pub type Ident = Spanned<String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +171,9 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Let(LetStmt),
+    LetElse(LetElseStmt),
+    TryLet(TryLetStmt),
+    TryElse(TryElseStmt),
     Assign(AssignStmt),
     Defer(DeferStmt),
     Return(ReturnStmt),
@@ -176,6 +182,7 @@ pub enum Stmt {
     If(IfStmt),
     While(WhileStmt),
     For(ForStmt),
+    ForEach(ForEachStmt),
     Expr(ExprStmt),
 }
 
@@ -184,6 +191,32 @@ pub struct LetStmt {
     pub name: Ident,
     pub ty: Option<Type>,
     pub expr: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LetElseStmt {
+    pub pattern: Pattern,
+    pub expr: Expr,
+    pub else_block: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TryLetStmt {
+    pub name: Ident,
+    pub ty: Option<Type>,
+    pub expr: Expr,
+    pub err_binding: Option<Ident>,
+    pub else_block: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TryElseStmt {
+    pub expr: Expr,
+    pub err_binding: Option<Ident>,
+    pub else_block: Block,
     pub span: Span,
 }
 
@@ -228,6 +261,15 @@ pub struct ForStmt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForEachStmt {
+    pub index: Option<Ident>,
+    pub item: Ident,
+    pub source: Expr,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprStmt {
     pub expr: Expr,
     pub span: Span,
@@ -250,6 +292,9 @@ impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Stmt::Let(s) => s.span,
+            Stmt::LetElse(s) => s.span,
+            Stmt::TryLet(s) => s.span,
+            Stmt::TryElse(s) => s.span,
             Stmt::Assign(s) => s.span,
             Stmt::Defer(s) => s.span,
             Stmt::Return(s) => s.span,
@@ -258,6 +303,7 @@ impl Stmt {
             Stmt::If(s) => s.span,
             Stmt::While(s) => s.span,
             Stmt::For(s) => s.span,
+            Stmt::ForEach(s) => s.span,
             Stmt::Expr(s) => s.span,
         }
     }
@@ -281,6 +327,7 @@ pub enum Expr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLiteralExpr {
+    pub id: ExprId,
     pub path: Path,
     pub type_args: Vec<Type>,
     pub fields: Vec<StructLiteralField>,
@@ -296,12 +343,14 @@ pub struct StructLiteralField {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiteralExpr {
+    pub id: ExprId,
     pub value: Literal,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupingExpr {
+    pub id: ExprId,
     pub expr: Box<Expr>,
     pub span: Span,
 }
@@ -317,6 +366,7 @@ pub enum Literal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Path {
+    pub id: ExprId,
     pub segments: Vec<Ident>,
     pub span: Span,
 }
@@ -337,6 +387,7 @@ impl fmt::Display for Path {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallExpr {
+    pub id: ExprId,
     pub callee: Box<Expr>,
     pub type_args: Vec<Type>,
     pub args: Vec<Expr>,
@@ -345,6 +396,7 @@ pub struct CallExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldAccessExpr {
+    pub id: ExprId,
     pub object: Box<Expr>,
     pub field: Ident,
     pub span: Span,
@@ -352,6 +404,7 @@ pub struct FieldAccessExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexExpr {
+    pub id: ExprId,
     pub object: Box<Expr>,
     pub index: Box<Expr>,
     pub span: Span,
@@ -359,6 +412,7 @@ pub struct IndexExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodCallExpr {
+    pub id: ExprId,
     pub receiver: Box<Expr>,
     pub method: Ident,
     pub type_args: Vec<Type>,
@@ -368,6 +422,7 @@ pub struct MethodCallExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnaryExpr {
+    pub id: ExprId,
     pub op: UnaryOp,
     pub expr: Box<Expr>,
     pub span: Span,
@@ -382,6 +437,7 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryExpr {
+    pub id: ExprId,
     pub op: BinaryOp,
     pub left: Box<Expr>,
     pub right: Box<Expr>,
@@ -390,6 +446,7 @@ pub struct BinaryExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TryExpr {
+    pub id: ExprId,
     pub expr: Box<Expr>,
     pub span: Span,
 }
@@ -418,6 +475,7 @@ pub enum BinaryOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchExpr {
+    pub id: ExprId,
     pub expr: Box<Expr>,
     pub arms: Vec<MatchArm>,
     pub span: Span,
@@ -462,6 +520,40 @@ impl Type {
 }
 
 impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Literal(lit) => lit.span,
+            Expr::Path(path) => path.span,
+            Expr::Call(call) => call.span,
+            Expr::MethodCall(method_call) => method_call.span,
+            Expr::FieldAccess(field) => field.span,
+            Expr::Index(index) => index.span,
+            Expr::StructLiteral(lit) => lit.span,
+            Expr::Unary(unary) => unary.span,
+            Expr::Binary(binary) => binary.span,
+            Expr::Match(m) => m.span,
+            Expr::Try(try_expr) => try_expr.span,
+            Expr::Grouping(g) => g.span,
+        }
+    }
+
+    pub fn id(&self) -> ExprId {
+        match self {
+            Expr::Literal(lit) => lit.id,
+            Expr::Path(path) => path.id,
+            Expr::Call(call) => call.id,
+            Expr::MethodCall(method_call) => method_call.id,
+            Expr::FieldAccess(field) => field.id,
+            Expr::Index(index) => index.id,
+            Expr::StructLiteral(lit) => lit.id,
+            Expr::Unary(unary) => unary.id,
+            Expr::Binary(binary) => binary.id,
+            Expr::Match(m) => m.id,
+            Expr::Try(try_expr) => try_expr.id,
+            Expr::Grouping(g) => g.id,
+        }
+    }
+
     /// Converts an expression to a Path if possible.
     /// This handles converting FieldAccess chains and single Paths.
     /// Used for resolving module-qualified names and enum variants.

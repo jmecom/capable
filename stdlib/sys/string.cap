@@ -83,8 +83,8 @@ fn build_range(alloc: buffer::Alloc, s: string, start: i32, end: i32) -> string 
     }
     i = i + 1
   }
-  match (buf.copy_string()) {
-    Ok(out) => { return out }
+  return match (buf.copy_string()) {
+    Ok(out) => { out }
     Err(_) => { panic() }
   }
 }
@@ -96,73 +96,73 @@ fn view_range(s: string, start: i32, end: i32) -> string {
   if (start == 0 && end == s.len()) {
     return s
   }
-  match (s.slice_range(start, end)) {
-    Ok(out) => { return out }
+  return match (s.slice_range(start, end)) {
+    Ok(out) => { out }
     Err(_) => { panic() }
   }
 }
 
 fn lower_ascii_byte(b: u8) -> u8 {
-  match (b) {
-    'A' => { return 'a' }
-    'B' => { return 'b' }
-    'C' => { return 'c' }
-    'D' => { return 'd' }
-    'E' => { return 'e' }
-    'F' => { return 'f' }
-    'G' => { return 'g' }
-    'H' => { return 'h' }
-    'I' => { return 'i' }
-    'J' => { return 'j' }
-    'K' => { return 'k' }
-    'L' => { return 'l' }
-    'M' => { return 'm' }
-    'N' => { return 'n' }
-    'O' => { return 'o' }
-    'P' => { return 'p' }
-    'Q' => { return 'q' }
-    'R' => { return 'r' }
-    'S' => { return 's' }
-    'T' => { return 't' }
-    'U' => { return 'u' }
-    'V' => { return 'v' }
-    'W' => { return 'w' }
-    'X' => { return 'x' }
-    'Y' => { return 'y' }
-    'Z' => { return 'z' }
-    _ => { return b }
+  return match (b) {
+    'A' => { 'a' }
+    'B' => { 'b' }
+    'C' => { 'c' }
+    'D' => { 'd' }
+    'E' => { 'e' }
+    'F' => { 'f' }
+    'G' => { 'g' }
+    'H' => { 'h' }
+    'I' => { 'i' }
+    'J' => { 'j' }
+    'K' => { 'k' }
+    'L' => { 'l' }
+    'M' => { 'm' }
+    'N' => { 'n' }
+    'O' => { 'o' }
+    'P' => { 'p' }
+    'Q' => { 'q' }
+    'R' => { 'r' }
+    'S' => { 's' }
+    'T' => { 't' }
+    'U' => { 'u' }
+    'V' => { 'v' }
+    'W' => { 'w' }
+    'X' => { 'x' }
+    'Y' => { 'y' }
+    'Z' => { 'z' }
+    _ => { b }
   }
 }
 
 fn upper_ascii_byte(b: u8) -> u8 {
-  match (b) {
-    'a' => { return 'A' }
-    'b' => { return 'B' }
-    'c' => { return 'C' }
-    'd' => { return 'D' }
-    'e' => { return 'E' }
-    'f' => { return 'F' }
-    'g' => { return 'G' }
-    'h' => { return 'H' }
-    'i' => { return 'I' }
-    'j' => { return 'J' }
-    'k' => { return 'K' }
-    'l' => { return 'L' }
-    'm' => { return 'M' }
-    'n' => { return 'N' }
-    'o' => { return 'O' }
-    'p' => { return 'P' }
-    'q' => { return 'Q' }
-    'r' => { return 'R' }
-    's' => { return 'S' }
-    't' => { return 'T' }
-    'u' => { return 'U' }
-    'v' => { return 'V' }
-    'w' => { return 'W' }
-    'x' => { return 'X' }
-    'y' => { return 'Y' }
-    'z' => { return 'Z' }
-    _ => { return b }
+  return match (b) {
+    'a' => { 'A' }
+    'b' => { 'B' }
+    'c' => { 'C' }
+    'd' => { 'D' }
+    'e' => { 'E' }
+    'f' => { 'F' }
+    'g' => { 'G' }
+    'h' => { 'H' }
+    'i' => { 'I' }
+    'j' => { 'J' }
+    'k' => { 'K' }
+    'l' => { 'L' }
+    'm' => { 'M' }
+    'n' => { 'N' }
+    'o' => { 'O' }
+    'p' => { 'P' }
+    'q' => { 'Q' }
+    'r' => { 'R' }
+    's' => { 'S' }
+    't' => { 'T' }
+    'u' => { 'U' }
+    'v' => { 'V' }
+    'w' => { 'W' }
+    'x' => { 'X' }
+    'y' => { 'Y' }
+    'z' => { 'Z' }
+    _ => { b }
   }
 }
 
@@ -874,17 +874,17 @@ impl string {
 
   /// True if the substring is present.
   pub fn contains(self, needle: string) -> bool {
-    match (self.index_of(needle)) {
-      Ok(_) => { return true }
-      Err(_) => { return false }
+    return match (self.index_of(needle)) {
+      Ok(_) => { true }
+      Err(_) => { false }
     }
   }
 
   /// True if the byte is present.
   pub fn contains_byte(self, needle: u8) -> bool {
-    match (self.index_of_byte(needle)) {
-      Ok(_) => { return true }
-      Err(_) => { return false }
+    return match (self.index_of_byte(needle)) {
+      Ok(_) => { true }
+      Err(_) => { false }
     }
   }
 
@@ -963,8 +963,8 @@ impl string {
       }
       i = i + 1
     }
-    match (buf.copy_string()) {
-      Ok(out) => { return out }
+    return match (buf.copy_string()) {
+      Ok(out) => { out }
       Err(_) => { panic() }
     }
   }
@@ -989,8 +989,8 @@ impl string {
       }
       i = i + 1
     }
-    match (buf.copy_string()) {
-      Ok(out) => { return out }
+    return match (buf.copy_string()) {
+      Ok(out) => { out }
       Err(_) => { panic() }
     }
   }

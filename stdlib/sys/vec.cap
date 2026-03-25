@@ -635,8 +635,8 @@ impl Vec<u8> {
   /// Borrow the bytes as a string view (no copy).
   /// The view is invalid after freeing this Vec.
   pub fn as_string(self) -> string {
-    match (string::from_bytes(self.as_slice())) {
-      Ok(s) => { return s }
+    return match (string::from_bytes(self.as_slice())) {
+      Ok(s) => { s }
       Err(_) => { panic() }
     }
   }

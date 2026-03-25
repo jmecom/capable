@@ -12,6 +12,7 @@ struct Parser {
     tokens: Vec<Token>,
     index: usize,
     eof_span: Span,
+    next_expr_id: u32,
 }
 
 impl Parser {
@@ -51,7 +52,14 @@ impl Parser {
             tokens,
             index: 0,
             eof_span,
+            next_expr_id: 0,
         }
+    }
+
+    fn fresh_expr_id(&mut self) -> ExprId {
+        let id = ExprId(self.next_expr_id);
+        self.next_expr_id += 1;
+        id
     }
 
     fn parse_module(&mut self) -> Result<Module, ParseError> {
@@ -553,7 +561,7 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek_kind() {
-            Some(TokenKind::Let) => Ok(Stmt::Let(self.parse_let()?)),
+            Some(TokenKind::Let) => self.parse_let(),
             Some(TokenKind::Return) => Ok(Stmt::Return(self.parse_return()?)),
             Some(TokenKind::Break) => Ok(Stmt::Break(self.parse_break()?)),
             Some(TokenKind::Continue) => Ok(Stmt::Continue(self.parse_continue()?)),
@@ -573,7 +581,7 @@ impl Parser {
         }
     }
 
-    fn parse_let(&mut self) -> Result<LetStmt, ParseError> {
+    fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         let let_token = self.expect(TokenKind::Let)?;
         let start = let_token.span.start;
         if self.peek_kind() == Some(TokenKind::Ident)
@@ -592,12 +600,12 @@ impl Parser {
             let end = self
                 .maybe_consume(TokenKind::Semi)
                 .map_or(expr.span().end, |t| t.span.end);
-            return Ok(LetStmt {
+            return Ok(Stmt::Let(LetStmt {
                 name,
                 ty,
                 expr,
                 span: Span::new(start, end),
-            });
+            }));
         }
 
         let pattern = self.parse_pattern()?;
@@ -605,12 +613,21 @@ impl Parser {
         let expr = self.parse_expr()?;
         self.expect(TokenKind::Else)?;
         let else_block = self.parse_block()?;
-        let mut stmt = self.desugar_let_else(let_token.span, pattern, expr, else_block)?;
+        if self.pattern_binding_ident(&pattern).is_none() {
+            return Err(self.error_at(
+                let_token.span,
+                "`let ... else` requires a binding pattern".to_string(),
+            ));
+        }
         let end = self
             .maybe_consume(TokenKind::Semi)
-            .map_or(stmt.span.end, |t| t.span.end);
-        stmt.span = Span::new(start, end);
-        Ok(stmt)
+            .map_or(else_block.span.end, |t| t.span.end);
+        Ok(Stmt::LetElse(LetElseStmt {
+            pattern,
+            expr,
+            else_block,
+            span: Span::new(start, end),
+        }))
     }
 
     fn parse_assign(&mut self) -> Result<AssignStmt, ParseError> {
@@ -680,13 +697,17 @@ impl Parser {
                 None
             };
             let else_block = self.parse_block()?;
-            let mut stmt =
-                self.desugar_try_let(try_token.span, name, ty, expr, err_binding, else_block);
             let end = self
                 .maybe_consume(TokenKind::Semi)
-                .map_or(stmt.span.end, |t| t.span.end);
-            stmt.span = Span::new(start, end);
-            return Ok(Stmt::Let(stmt));
+                .map_or(else_block.span.end, |t| t.span.end);
+            return Ok(Stmt::TryLet(TryLetStmt {
+                name,
+                ty,
+                expr,
+                err_binding,
+                else_block,
+                span: Span::new(start, end),
+            }));
         }
 
         let expr = self.parse_expr()?;
@@ -701,13 +722,13 @@ impl Parser {
             None
         };
         let else_block = self.parse_block()?;
-        let expr = self.desugar_expr_else(expr, err_binding, else_block);
-        let expr_span = expr.span();
         let end = self
             .maybe_consume(TokenKind::Semi)
-            .map_or(expr_span.end, |t| t.span.end);
-        Ok(Stmt::Expr(ExprStmt {
+            .map_or(else_block.span.end, |t| t.span.end);
+        Ok(Stmt::TryElse(TryElseStmt {
             expr,
+            err_binding,
+            else_block,
             span: Span::new(start, end),
         }))
     }
@@ -796,6 +817,7 @@ impl Parser {
             let body = self.parse_block()?;
             let end = body.span.end;
             let cond = Expr::Literal(LiteralExpr {
+                id: self.fresh_expr_id(),
                 value: Literal::Bool(true),
                 span: for_token.span,
             });
@@ -835,7 +857,13 @@ impl Parser {
         let item = second.clone().unwrap_or_else(|| first.clone());
         let index = second.map(|_| first);
         let body = self.parse_block()?;
-        self.desugar_for_each(Span::new(start, body.span.end), index, item, range_or_source, body)
+        Ok(Stmt::ForEach(ForEachStmt {
+            index,
+            item,
+            source: range_or_source,
+            span: Span::new(start, body.span.end),
+            body,
+        }))
     }
 
     /// Parse a simple expression for range bounds (no struct literals allowed)
@@ -847,6 +875,7 @@ impl Parser {
                     self.error_at(token.span, "invalid integer literal".to_string())
                 })?;
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::Int(value),
                     span: token.span,
                 }))
@@ -854,6 +883,7 @@ impl Parser {
             Some(TokenKind::True) => {
                 let token = self.bump().unwrap();
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::Bool(true),
                     span: token.span,
                 }))
@@ -861,6 +891,7 @@ impl Parser {
             Some(TokenKind::False) => {
                 let token = self.bump().unwrap();
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::Bool(false),
                     span: token.span,
                 }))
@@ -879,6 +910,7 @@ impl Parser {
 
                 let end = segments.last().unwrap().span.end;
                 Ok(Expr::Path(Path {
+                    id: self.fresh_expr_id(),
                     segments,
                     span: Span::new(start, end),
                 }))
@@ -1013,6 +1045,7 @@ impl Parser {
                                 }
                                 let end = self.expect(TokenKind::RParen)?.span.end;
                                 lhs = Expr::MethodCall(MethodCallExpr {
+                                    id: self.fresh_expr_id(),
                                     receiver: Box::new(lhs),
                                     method: field,
                                     type_args,
@@ -1031,6 +1064,7 @@ impl Parser {
                             // Otherwise, it's a field access
                             let span = Span::new(start, field.span.end);
                             lhs = Expr::FieldAccess(FieldAccessExpr {
+                                id: self.fresh_expr_id(),
                                 object: Box::new(lhs),
                                 field,
                                 span,
@@ -1048,6 +1082,7 @@ impl Parser {
                             let index = self.parse_expr()?;
                             let end = self.expect(TokenKind::RBracket)?.span.end;
                             lhs = Expr::Index(IndexExpr {
+                                id: self.fresh_expr_id(),
                                 object: Box::new(lhs),
                                 index: Box::new(index),
                                 span: Span::new(start, end),
@@ -1058,6 +1093,7 @@ impl Parser {
                             let start = lhs.span().start;
                             let end = self.bump().unwrap().span.end;
                             lhs = Expr::Try(TryExpr {
+                                id: self.fresh_expr_id(),
                                 expr: Box::new(lhs),
                                 span: Span::new(start, end),
                             });
@@ -1133,6 +1169,7 @@ impl Parser {
             let rhs = self.parse_expr_bp(r_bp, allow_struct_literal)?;
             let span = Span::new(lhs.span().start, rhs.span().end);
             lhs = Expr::Binary(BinaryExpr {
+                id: self.fresh_expr_id(),
                 op,
                 left: Box::new(lhs),
                 right: Box::new(rhs),
@@ -1150,6 +1187,7 @@ impl Parser {
                 // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
                 let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
+                    id: self.fresh_expr_id(),
                     op: UnaryOp::Neg,
                     span: Span::new(start, expr.span().end),
                     expr: Box::new(expr),
@@ -1160,6 +1198,7 @@ impl Parser {
                 // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
                 let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
+                    id: self.fresh_expr_id(),
                     op: UnaryOp::BitNot,
                     span: Span::new(start, expr.span().end),
                     expr: Box::new(expr),
@@ -1170,6 +1209,7 @@ impl Parser {
                 // Propagate struct-literal allowance to avoid block ambiguity in no-struct contexts.
                 let expr = self.parse_expr_bp(7, allow_struct_literal)?;
                 Ok(Expr::Unary(UnaryExpr {
+                    id: self.fresh_expr_id(),
                     op: UnaryOp::Not,
                     span: Span::new(start, expr.span().end),
                     expr: Box::new(expr),
@@ -1200,12 +1240,14 @@ impl Parser {
                             ));
                         }
                         return Ok(Expr::Literal(LiteralExpr {
+                            id: self.fresh_expr_id(),
                             value: Literal::U8(value as u8),
                             span: Span::new(token.span.start, suffix.span.end),
                         }));
                     }
                 }
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::Int(value),
                     span: token.span,
                 }))
@@ -1216,6 +1258,7 @@ impl Parser {
                     self.error_at(token.span, format!("invalid string literal: {message}"))
                 })?;
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::String(value),
                     span: token.span,
                 }))
@@ -1226,6 +1269,7 @@ impl Parser {
                     self.error_at(token.span, format!("invalid char literal: {message}"))
                 })?;
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::U8(value),
                     span: token.span,
                 }))
@@ -1233,6 +1277,7 @@ impl Parser {
             Some(TokenKind::True) => {
                 let token = self.bump().unwrap();
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::Bool(true),
                     span: token.span,
                 }))
@@ -1240,6 +1285,7 @@ impl Parser {
             Some(TokenKind::False) => {
                 let token = self.bump().unwrap();
                 Ok(Expr::Literal(LiteralExpr {
+                    id: self.fresh_expr_id(),
                     value: Literal::Bool(false),
                     span: token.span,
                 }))
@@ -1249,6 +1295,7 @@ impl Parser {
                 if self.peek_kind() == Some(TokenKind::RParen) {
                     let end = self.bump().unwrap().span.end;
                     Ok(Expr::Literal(LiteralExpr {
+                        id: self.fresh_expr_id(),
                         value: Literal::Unit,
                         span: Span::new(start, end),
                     }))
@@ -1256,6 +1303,7 @@ impl Parser {
                     let expr = self.parse_expr()?;
                     let end = self.expect(TokenKind::RParen)?.span.end;
                     Ok(Expr::Grouping(GroupingExpr {
+                        id: self.fresh_expr_id(),
                         expr: Box::new(expr),
                         span: Span::new(start, end),
                     }))
@@ -1276,6 +1324,7 @@ impl Parser {
 
                 let end = segments.last().unwrap().span.end;
                 let path = Path {
+                    id: self.fresh_expr_id(),
                     segments,
                     span: Span::new(start, end),
                 };
@@ -1319,6 +1368,7 @@ impl Parser {
         }
         let end = self.expect(TokenKind::RBrace)?.span.end;
         Ok(Expr::Match(MatchExpr {
+            id: self.fresh_expr_id(),
             expr: Box::new(expr),
             arms,
             span: Span::new(start, end),
@@ -1395,164 +1445,6 @@ impl Parser {
         }
     }
 
-    fn desugar_let_else(
-        &self,
-        let_span: Span,
-        pattern: Pattern,
-        expr: Expr,
-        else_block: Block,
-    ) -> Result<LetStmt, ParseError> {
-        let binding = self.pattern_binding_ident(&pattern).ok_or_else(|| {
-            self.error_at(
-                let_span,
-                "`let ... else` requires a binding pattern".to_string(),
-            )
-        })?;
-
-        let binding_expr = Expr::Path(Path {
-            segments: vec![binding.clone()],
-            span: binding.span,
-        });
-        let ok_body = Block {
-            stmts: vec![Stmt::Expr(ExprStmt {
-                expr: binding_expr,
-                span: binding.span,
-            })],
-            span: binding.span,
-        };
-
-        let panic_ident = Spanned::new("panic".to_string(), else_block.span);
-        let panic_expr = Expr::Call(CallExpr {
-            callee: Box::new(Expr::Path(Path {
-                segments: vec![panic_ident],
-                span: else_block.span,
-            })),
-            type_args: Vec::new(),
-            args: Vec::new(),
-            span: else_block.span,
-        });
-        let mut else_stmts = else_block.stmts;
-        else_stmts.push(Stmt::Expr(ExprStmt {
-            expr: panic_expr,
-            span: else_block.span,
-        }));
-        let else_body = Block {
-            stmts: else_stmts,
-            span: else_block.span,
-        };
-
-        let match_span = Span::new(let_span.start, else_block.span.end);
-        let match_expr = Expr::Match(MatchExpr {
-            expr: Box::new(expr),
-            arms: vec![
-                MatchArm {
-                    pattern,
-                    body: ok_body,
-                    span: match_span,
-                },
-                MatchArm {
-                    pattern: Pattern::Wildcard(else_block.span),
-                    body: else_body,
-                    span: match_span,
-                },
-            ],
-            span: match_span,
-            match_span: let_span,
-        });
-
-        Ok(LetStmt {
-            name: binding,
-            ty: None,
-            expr: match_expr,
-            span: match_span,
-        })
-    }
-
-    fn desugar_try_let(
-        &self,
-        try_span: Span,
-        binding: Ident,
-        ty: Option<Type>,
-        expr: Expr,
-        err_binding: Option<Ident>,
-        else_block: Block,
-    ) -> LetStmt {
-        let binding_expr = Expr::Path(Path {
-            segments: vec![binding.clone()],
-            span: binding.span,
-        });
-        let ok_body = Block {
-            stmts: vec![Stmt::Expr(ExprStmt {
-                expr: binding_expr,
-                span: binding.span,
-            })],
-            span: binding.span,
-        };
-
-        let panic_ident = Spanned::new("panic".to_string(), else_block.span);
-        let panic_expr = Expr::Call(CallExpr {
-            callee: Box::new(Expr::Path(Path {
-                segments: vec![panic_ident],
-                span: else_block.span,
-            })),
-            type_args: Vec::new(),
-            args: Vec::new(),
-            span: else_block.span,
-        });
-        let mut else_stmts = else_block.stmts;
-        else_stmts.push(Stmt::Expr(ExprStmt {
-            expr: panic_expr,
-            span: else_block.span,
-        }));
-        let else_body = Block {
-            stmts: else_stmts,
-            span: else_block.span,
-        };
-
-        let expr_span = expr.span();
-        let ok_ident = Spanned::new("Ok".to_string(), expr_span);
-        let err_ident = Spanned::new("Err".to_string(), else_block.span);
-        let match_span = Span::new(try_span.start, else_block.span.end);
-        let match_expr = Expr::Match(MatchExpr {
-            expr: Box::new(expr),
-            arms: vec![
-                MatchArm {
-                    pattern: Pattern::Call {
-                        path: Path {
-                            segments: vec![ok_ident],
-                            span: expr_span,
-                        },
-                        binding: Some(binding.clone()),
-                        span: expr_span,
-                    },
-                    body: ok_body,
-                    span: match_span,
-                },
-                MatchArm {
-                    pattern: Pattern::Call {
-                        path: Path {
-                            segments: vec![err_ident],
-                            span: else_block.span,
-                        },
-                        binding: err_binding,
-                        span: else_block.span,
-                    },
-                    body: else_body,
-                    span: match_span,
-                },
-            ],
-            span: match_span,
-            match_span: try_span,
-        });
-
-        LetStmt {
-            name: binding,
-            ty,
-            expr: match_expr,
-            span: match_span,
-        }
-    }
-
     fn pattern_binding_ident(&self, pattern: &Pattern) -> Option<Ident> {
         match pattern {
             Pattern::Binding(ident) => Some(ident.clone()),
@@ -1562,184 +1454,6 @@ impl Parser {
             } => Some(ident.clone()),
             _ => None,
         }
-    }
-
-    fn desugar_expr_else(&self, expr: Expr, err_binding: Option<Ident>, else_block: Block) -> Expr {
-        let expr_span = expr.span();
-        let ok_ident = Spanned::new("Ok".to_string(), expr_span);
-        let err_ident = Spanned::new("Err".to_string(), else_block.span);
-        let span = Span::new(expr_span.start, else_block.span.end);
-
-        Expr::Match(MatchExpr {
-            expr: Box::new(expr),
-            arms: vec![
-                MatchArm {
-                    pattern: Pattern::Call {
-                        path: Path {
-                            segments: vec![ok_ident],
-                            span: expr_span,
-                        },
-                        binding: None,
-                        span: expr_span,
-                    },
-                    body: Block {
-                        stmts: Vec::new(),
-                        span: expr_span,
-                    },
-                    span,
-                },
-                MatchArm {
-                    pattern: Pattern::Call {
-                        path: Path {
-                            segments: vec![err_ident],
-                            span: else_block.span,
-                        },
-                        binding: err_binding,
-                        span: else_block.span,
-                    },
-                    body: else_block,
-                    span,
-                },
-            ],
-            span,
-            match_span: expr_span,
-        })
-    }
-
-    fn desugar_for_each(
-        &self,
-        for_span: Span,
-        index_binding: Option<Ident>,
-        item_binding: Ident,
-        source: Expr,
-        body: Block,
-    ) -> Result<Stmt, ParseError> {
-        let hidden_source_span = self.synthetic_span(for_span, 1);
-        let hidden_len_span = self.synthetic_span(for_span, 2);
-        let hidden_idx_span = self.synthetic_span(for_span, 3);
-        let source_free_span = self.synthetic_span(for_span, 4);
-        let len_call_span = self.synthetic_span(for_span, 5);
-        let get_call_span = self.synthetic_span(for_span, 6);
-        let try_span = self.synthetic_span(for_span, 7);
-        let else_span = self.synthetic_span(for_span, 8);
-        let zero_span = self.synthetic_span(for_span, 9);
-
-        let hidden_source = self.synthetic_ident("__for_source", hidden_source_span);
-        let hidden_idx = self.synthetic_ident("__for_idx", hidden_idx_span);
-        let hidden_len = self.synthetic_ident("__for_len", hidden_len_span);
-        let hidden_idx_expr = self.ident_expr(&hidden_idx);
-        let hidden_len_expr = self.ident_expr(&hidden_len);
-        let (source_expr, mut setup_stmts) = if source.to_path().is_some() {
-            (source, Vec::new())
-        } else {
-            let hidden_source_expr = self.ident_expr(&hidden_source);
-            let source_stmt = Stmt::Let(LetStmt {
-                name: hidden_source.clone(),
-                ty: None,
-                expr: source,
-                span: hidden_source_span,
-            });
-            let free_expr =
-                self.method_call_expr(hidden_source_expr.clone(), "free", Vec::new(), source_free_span);
-            let free_stmt = Stmt::Defer(DeferStmt {
-                expr: free_expr,
-                span: source_free_span,
-            });
-            (hidden_source_expr, vec![source_stmt, free_stmt])
-        };
-
-        let len_stmt = Stmt::Let(LetStmt {
-            name: hidden_len.clone(),
-            ty: None,
-            expr: self.method_call_expr(source_expr.clone(), "len", Vec::new(), len_call_span),
-            span: hidden_len_span,
-        });
-
-        let get_stmt = Stmt::Let(self.desugar_try_let(
-            try_span,
-            item_binding,
-            None,
-            self.method_call_expr(
-                source_expr,
-                "get",
-                vec![hidden_idx_expr.clone()],
-                get_call_span,
-            ),
-            None,
-            Block {
-                stmts: Vec::new(),
-                span: else_span,
-            },
-        ));
-
-        let mut loop_stmts = Vec::new();
-        if let Some(index_ident) = index_binding {
-            loop_stmts.push(Stmt::Let(LetStmt {
-                name: index_ident.clone(),
-                ty: None,
-                expr: hidden_idx_expr.clone(),
-                span: index_ident.span,
-            }));
-        }
-        loop_stmts.push(get_stmt);
-        loop_stmts.extend(body.stmts);
-
-        let loop_body = Block {
-            stmts: loop_stmts,
-            span: body.span,
-        };
-
-        let range_stmt = Stmt::For(ForStmt {
-            var: hidden_idx,
-            start: Expr::Literal(LiteralExpr {
-                value: Literal::Int(0),
-                span: zero_span,
-            }),
-            end: hidden_len_expr,
-            body: loop_body,
-            span: for_span,
-        });
-
-        setup_stmts.push(len_stmt);
-        setup_stmts.push(range_stmt);
-
-        let then_block = Block { stmts: setup_stmts, span: for_span };
-
-        Ok(Stmt::If(IfStmt {
-            cond: Expr::Literal(LiteralExpr {
-                value: Literal::Bool(true),
-                span: for_span,
-            }),
-            then_block,
-            else_block: None,
-            span: for_span,
-        }))
-    }
-
-    fn synthetic_ident(&self, prefix: &str, span: Span) -> Ident {
-        Spanned::new(format!("{prefix}_{}", span.start), span)
-    }
-
-    fn synthetic_span(&self, base: Span, offset: usize) -> Span {
-        let point = base.start.saturating_add(offset);
-        Span::new(point, point)
-    }
-
-    fn ident_expr(&self, ident: &Ident) -> Expr {
-        Expr::Path(Path {
-            segments: vec![ident.clone()],
-            span: ident.span,
-        })
-    }
-
-    fn method_call_expr(&self, receiver: Expr, method: &str, args: Vec<Expr>, span: Span) -> Expr {
-        Expr::MethodCall(MethodCallExpr {
-            receiver: Box::new(receiver),
-            method: Spanned::new(method.to_string(), span),
-            type_args: Vec::new(),
-            args,
-            span,
-        })
     }
 
     fn parse_path(&mut self) -> Result<Path, ParseError> {
@@ -1753,6 +1467,7 @@ impl Parser {
         }
         let end = segments.last().map(|s| s.span.end).unwrap_or(start);
         Ok(Path {
+            id: self.fresh_expr_id(),
             segments,
             span: Span::new(start, end),
         })
@@ -1795,6 +1510,7 @@ impl Parser {
             .unwrap_or(field_access.span.end);
 
         Ok(Path {
+            id: field_access.id,
             segments,
             span: Span::new(start, end),
         })
@@ -1869,6 +1585,7 @@ impl Parser {
         }
         let end = self.expect(TokenKind::RBrace)?.span.end;
         Ok(Expr::StructLiteral(StructLiteralExpr {
+            id: self.fresh_expr_id(),
             path,
             type_args,
             fields,
@@ -1890,6 +1607,7 @@ impl Parser {
         }
         let end = self.expect(TokenKind::RParen)?.span.end;
         Ok(Expr::Call(CallExpr {
+            id: self.fresh_expr_id(),
             callee: Box::new(callee),
             type_args,
             args,
@@ -2102,32 +1820,10 @@ fn unescape_char(text: &str) -> Result<u8, String> {
     Ok(value)
 }
 
-trait SpanExt {
-    fn span(&self) -> Span;
-}
-
-impl SpanExt for Expr {
-    fn span(&self) -> Span {
-        match self {
-            Expr::Literal(lit) => lit.span,
-            Expr::Path(path) => path.span,
-            Expr::Call(call) => call.span,
-            Expr::MethodCall(method_call) => method_call.span,
-            Expr::FieldAccess(field) => field.span,
-            Expr::Index(index) => index.span,
-            Expr::StructLiteral(lit) => lit.span,
-            Expr::Unary(unary) => unary.span,
-            Expr::Binary(binary) => binary.span,
-            Expr::Match(m) => m.span,
-            Expr::Try(try_expr) => try_expr.span,
-            Expr::Grouping(g) => g.span,
-        }
-    }
-}
-
 fn unit_type_at(span: Span) -> Type {
     let ident = Spanned::new("unit".to_string(), span);
     let path = Path {
+        id: ExprId(u32::MAX),
         segments: vec![ident],
         span,
     };
