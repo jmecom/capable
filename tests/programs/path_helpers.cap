@@ -18,12 +18,11 @@ pub fn main(rc: RootCap) -> i32 {
   }
 
   let parts = path::segments_view("site/docs/index.html")
+  defer parts.free()
   c.assert(parts.len() == 3)
   c.assert(parts.get_or(0, "").eq("site"))
   c.assert(parts.get_or(1, "").eq("docs"))
   c.assert(parts.get_or(2, "").eq("index.html"))
-  parts.free()
-
   c.assert(path::basename_view("site/docs/index.html").eq("index.html"))
   c.assert(path::dirname_view("site/docs/index.html").eq("site/docs"))
 

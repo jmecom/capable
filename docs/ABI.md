@@ -33,9 +33,11 @@ compiler-generated stubs when needed.
 
 ## Allocation convention
 
-APIs that allocate accept an explicit `Alloc` handle. The handle is passed
-through to the runtime and currently backed by libc `malloc`/`free`, but the ABI
-keeps the allocator explicit for future custom allocator support.
+The user-facing stdlib now defaults to the process allocator for ordinary code.
+Explicit `Alloc` handles still appear in low-level APIs and `_with_alloc`
+variants, and those handles are passed through to the runtime. The runtime
+currently backs `Alloc` with libc `malloc`/`free`, but the ABI keeps explicit
+allocator passing available for future custom or bounded allocators.
 
 ## Status
 

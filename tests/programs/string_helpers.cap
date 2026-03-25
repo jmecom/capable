@@ -12,6 +12,9 @@ pub fn main(rc: RootCap) -> i32 {
   let words = "a b  c".split_whitespace()
   let word_views = "a b  c".split_whitespace_view()
   let split_views = "a,b,c".split_view(',')
+  defer words.free()
+  defer word_views.free()
+  defer split_views.free()
   let count = words.len()
   let trimmed = "  hi \n".trim()
   let trimmed_view = "  hi \n".trim_view()
@@ -25,16 +28,18 @@ pub fn main(rc: RootCap) -> i32 {
   let sliced = "hello".slice_range(1, 4)
   let lines = "a\nb\n".split_lines()
   let line_views = "a\r\nb\n".lines_view()
+  defer lines.free()
+  defer line_views.free()
   let t = string::text_new()
+  defer t.free()
   try t.push_str("hi") else {
     panic()
   }
-  try let owned = t.to_string() else {
+  try let owned = t.copy_string() else {
     c.assert(false)
     return 1
   }
   c.assert(owned.eq("hi"))
-  t.free()
   c.assert(n == 3 && b == 'a' && count == 3)
   c.assert(word_views.len() == 3)
   c.assert(split_views.len() == 3)
@@ -120,18 +125,13 @@ pub fn main(rc: RootCap) -> i32 {
     Err(_) => { c.assert(false) }
   }
   let pieces = "a,b,c".split(',')
+  defer pieces.free()
   c.assert(pieces.len() == 3)
   c.assert(line_views.len() == 2)
   match (pieces.join(",")) {
     Ok(joined) => { c.assert(joined.eq("a,b,c")) }
     Err(_) => { c.assert(false) }
   }
-  words.free()
-  word_views.free()
-  split_views.free()
-  lines.free()
-  line_views.free()
-  pieces.free()
   c.println("string ok")
   return 0
 }

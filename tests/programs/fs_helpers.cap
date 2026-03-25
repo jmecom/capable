@@ -17,8 +17,8 @@ pub fn main(rc: RootCap) -> i32 {
   let rfs2 = rc.mint_readfs("./config")
   match rfs2.read_bytes("app.txt") {
     Ok(bytes) => {
+      defer bytes.free()
       c.assert(bytes.len() > 0)
-      bytes.free()
     }
     Err(_) => {
       c.println("read_bytes failed")
@@ -29,8 +29,8 @@ pub fn main(rc: RootCap) -> i32 {
   let rfs3 = rc.mint_readfs("./config")
   match rfs3.list_dir(".") {
     Ok(entries) => {
+      defer entries.free()
       c.assert(entries.len() > 0)
-      entries.free()
     }
     Err(_) => {
       c.println("list_dir failed")

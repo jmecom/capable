@@ -6,16 +6,16 @@ use sys::string
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let text = string::text_new()
+  defer text.free()
   try text.push_byte('h') else {
     panic()
   }
   try text.push_byte('i') else {
     panic()
   }
-  try let s = text.to_string() else {
+  try let s = text.copy_string() else {
     panic()
   }
   c.println(s)
-  text.free()
   return 0
 }

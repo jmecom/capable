@@ -68,7 +68,7 @@ pub fn clean_relative_with_alloc(alloc: buffer::Alloc, raw_path: string) -> Resu
     out.free()
     return Ok("index.html")
   }
-  let result = out.to_string()
+  let result = out.copy_string()
   out.free()
   match (result) {
     Ok(path) => { return Ok(path) }

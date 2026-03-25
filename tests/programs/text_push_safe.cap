@@ -2,18 +2,20 @@ package safe
 module text_push_safe
 use sys::system
 use sys::string
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
   let text = string::text_new()
+  defer text.free()
   try text.push_byte('\x00') else {
     panic()
   }
   try text.push_byte('\x07') else {
     panic()
   }
-  let v = alloc.vec_u8_new()
+  let v = vec::new<u8>()
+  defer v.free()
   try v.push('\t') else {
     panic()
   }
@@ -29,7 +31,5 @@ pub fn main(rc: RootCap) -> i32 {
   } else {
     c.println("push bad")
   }
-  alloc.vec_u8_free(v)
-  text.free()
   return 0
 }

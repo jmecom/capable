@@ -5,8 +5,8 @@ use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let v = alloc.vec_i32_new()
+  let v = vec::new<i32>()
+  defer v.free()
   try v.push(1) else {
     panic()
   }
@@ -45,19 +45,20 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(v.get_or(1, 99) == 1)
   c.assert(v.get_or(99, 77) == 77)
   let bytes = vec::new<u8>()
+  defer bytes.free()
   try bytes.push('h') else {
     panic()
   }
   try bytes.push('i') else {
     panic()
   }
-  try let s = bytes.to_string() else {
+  let view = bytes.as_string()
+  c.assert(view.eq("hi"))
+  try let s = bytes.copy_string() else {
     c.assert(false)
     return 1
   }
   c.assert(s.eq("hi"))
-  alloc.vec_i32_free(v)
-  bytes.free()
   c.println("vec search ok")
   return 0
 }

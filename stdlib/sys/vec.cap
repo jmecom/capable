@@ -632,6 +632,15 @@ impl Vec<u8> {
     return header.alloc.slice_from_ptr(header.raw, header.len)
   }
 
+  /// Borrow the bytes as a string view (no copy).
+  /// The view is invalid after freeing this Vec.
+  pub fn as_string(self) -> string {
+    match (string::from_bytes(self.as_slice())) {
+      Ok(s) => { return s }
+      Err(_) => { panic() }
+    }
+  }
+
   /// Copy contents into a new owned slice using the Vec allocator.
   pub fn copy_slice(self) -> Result<Slice<u8>, buffer::AllocErr> {
     let header = read_header<u8>(self)
@@ -647,8 +656,8 @@ impl Vec<u8> {
     return Ok(header.alloc.slice_from_ptr(raw, header.len))
   }
 
-  /// Copy contents into a new string view.
-  pub fn to_string(self) -> Result<string, buffer::AllocErr> {
+  /// Copy contents into a new owned string view.
+  pub fn copy_string(self) -> Result<string, buffer::AllocErr> {
     let owned = self.copy_slice()?
     return string::from_bytes(owned)
   }
@@ -672,6 +681,6 @@ impl Vec<string> {
       buf.push_str(part)?
       i = i + 1
     }
-    return buf.to_string()
+    return buf.copy_string()
   }
 }

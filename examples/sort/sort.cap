@@ -63,10 +63,12 @@ fn sort_indices(lines: Vec<string>, indices: Vec<i32>) -> unit {
 fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
   let contents = input.read_to_string()?
   let lines = contents.lines_view()
+  defer lines.free()
   let n = lines.len()
 
   // Create index array [0, 1, 2, ...]
   let indices = vec::new<i32>()
+  defer indices.free()
   for i in 0..n {
     try indices.push(i) else {
       panic()
@@ -83,9 +85,6 @@ fn run(c: Console, input: Stdin) -> Result<unit, io::IoErr> {
       c.println(line)
     }
   }
-
-  indices.free()
-  lines.free()
   return Ok(())
 }
 

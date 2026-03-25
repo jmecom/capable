@@ -286,20 +286,24 @@ lifetimes local until a full lifetime model exists.
 
 ### Allocators
 
-Allocation is explicit. Functions that allocate accept an `Alloc` handle:
+Most ordinary code uses the process default allocator. Reach for explicit
+`Alloc` handles when you need low-level control or budgeted allocation:
 
 ```cap
-let alloc = rc.mint_alloc_default()
-let v = alloc.vec_u8_new()
+let v = vec::new<u8>()
+defer v.free()
 ...
-alloc.vec_u8_free(v)
 ```
 
-Use `defer` to simplify cleanup.
+The intended style for plain heap owners is: allocate, then immediately
+schedule cleanup with `defer x.free()`. Keep plain `free()` for early release
+inside longer scopes.
 
 ## 10) Strings: `string` vs `Text`
 
-`string` is a view. `Text` is owned.
+`string` is the ordinary string type in most code. It is a borrowed view.
+`Text` is the owned builder type you use when you need to construct or mutate
+text.
 
 ```cap
 fn build_greeting() -> Result<string, buffer::AllocErr> {
@@ -312,7 +316,7 @@ fn build_greeting() -> Result<string, buffer::AllocErr> {
   t.push_str("hello")?
   t.push_byte(' ')?
   t.append("text")?
-  let out = t.to_string()?
+  let out = t.copy_string()?
   return Ok(out)
 }
 ```
@@ -320,6 +324,9 @@ fn build_greeting() -> Result<string, buffer::AllocErr> {
 Helpers:
 - `string.split`, `split_once`, `trim_*`, `contains`, `index_of_*`.
 - `string.concat(other)` creates a new owned string view.
+- `string.copy_text()` makes an owned `Text` builder when you need one.
+- `Text.as_string()` borrows cheaply; `Text.copy_string()` allocates a copy.
+- `Vec<u8>.as_string()` borrows bytes as text; `Vec<u8>.copy_string()` allocates a copy.
 - `Text.slice_range` returns a `string` view into its buffer.
 
 ## 11) Slices and indexing
@@ -343,11 +350,10 @@ fn use_tail(s: string) -> Result<unit, buffer::SliceErr> {
 
 ```cap
 let c = rc.mint_console()
-let alloc = rc.mint_alloc_default()
-let v = alloc.vec_u8_new()
+let v = vec::new<u8>()
 
 // ensure we free on all paths
- defer alloc.vec_u8_free(v)
+defer v.free()
 ```
 
 Deferred expressions must be calls; arguments are evaluated at the defer site.
@@ -377,7 +383,7 @@ reports unsafe packages.
 ```cap
 enum ParseErr { MissingEq, OutOfRange, Oom }
 
-fn parse_key_value(line: string, alloc: Alloc) -> Result<string, ParseErr> {
+fn parse_key_value(line: string) -> Result<string, ParseErr> {
   let eq = match (line.index_of_byte('=')) {
     Ok(i) => { i }
     Err(_) => { return Err(ParseErr::MissingEq) }
@@ -393,22 +399,19 @@ fn parse_key_value(line: string, alloc: Alloc) -> Result<string, ParseErr> {
 
   let t = string::text_new()
   defer t.free()
-  match (t.push_str(key)) {
-    Ok(_) => { }
-    Err(_) => { return Err(ParseErr::Oom) }
+  try t.push_str(key) else {
+    return Err(ParseErr::Oom)
   }
-  match (t.push_byte('=')) {
-    Ok(_) => { }
-    Err(_) => { return Err(ParseErr::Oom) }
+  try t.push_byte('=') else {
+    return Err(ParseErr::Oom)
   }
-  match (t.push_str(val)) {
-    Ok(_) => { }
-    Err(_) => { return Err(ParseErr::Oom) }
+  try t.push_str(val) else {
+    return Err(ParseErr::Oom)
   }
-  match (t.to_string()) {
-    Ok(out) => { return Ok(out) }
-    Err(_) => { return Err(ParseErr::Oom) }
+  try let out = t.copy_string() else {
+    return Err(ParseErr::Oom)
   }
+  return Ok(out)
 }
 ```
 

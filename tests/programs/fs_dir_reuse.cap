@@ -16,16 +16,16 @@ pub fn main(rc: RootCap) -> i32 {
 
   match dir.read_bytes("app.txt") {
     Ok(bytes) => {
+      defer bytes.free()
       c.assert(bytes.len() > 0)
-      bytes.free()
     }
     Err(_) => { c.println("dir read_bytes failed"); return 1 }
   }
 
   match dir.list_dir() {
     Ok(entries) => {
+      defer entries.free()
       c.assert(entries.len() > 0)
-      entries.free()
     }
     Err(_) => { c.println("dir list_dir failed"); return 1 }
   }

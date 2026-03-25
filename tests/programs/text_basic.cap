@@ -6,6 +6,7 @@ use sys::string
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let text = string::text_new()
+  defer text.free()
   try text.push_str("hi") else {
     panic()
   }
@@ -14,12 +15,11 @@ pub fn main(rc: RootCap) -> i32 {
   }
   let view = text.as_string()
   c.assert(view.eq("hi!"))
-  try let owned = text.to_string() else {
+  try let owned = text.copy_string() else {
     c.assert(false)
     return 1
   }
   c.assert(owned.eq("hi!"))
-  text.free()
   c.println("text basic ok")
   return 0
 }

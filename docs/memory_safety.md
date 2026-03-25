@@ -67,7 +67,9 @@ We want explicit, Zig-like control without GC, but without letting safe libs cor
 - Safe non-stdlib modules may not return or store `Slice<T>` / `MutSlice<T>` values.
 
 ### 3.2 Explicit allocators (optional dependency, not a security boundary)
-Capable may expose explicit allocation via an `Alloc` handle:
+Ordinary code can use default-first stdlib constructors and helpers. Capable
+also exposes explicit allocation via an `Alloc` handle when code needs direct
+control:
 - `alloc(Alloc, n) -> Owned[T]` or similar
 - `free(Alloc, Owned[T])` consumes the owner
 

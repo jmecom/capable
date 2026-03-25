@@ -20,16 +20,17 @@ fn demo_string_view(c: Console) -> unit {
   c.println(parts.right)
 
   let words = trimmed.split_view(',')
+  defer words.free()
   c.println("split count:")
   c.println_i32(words.len())
   c.println(words.get_or(0, ""))
   c.println(words.get_or(1, ""))
-  words.free()
 }
 
 fn demo_text_builder(c: Console) -> unit {
   c.println("-- Text builder --")
   let t = string::text_new()
+  defer t.free()
   try t.push_str("hello") else {
     panic()
   }
@@ -43,20 +44,19 @@ fn demo_text_builder(c: Console) -> unit {
     panic()
   }
   c.println(head)
-  try let owned = t.to_string() else {
+  try let owned = t.copy_string() else {
     panic()
   }
   c.println(owned)
-  t.free()
 
   try let t2 = string::text_from("owned") else {
     panic()
   }
-  try let owned2 = t2.to_string() else {
+  defer t2.free()
+  try let owned2 = t2.copy_string() else {
     panic()
   }
   c.println(owned2)
-  t2.free()
 
   try let joined = "a".concat("b") else {
     panic()

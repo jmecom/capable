@@ -12,7 +12,6 @@
 package safe
 module hashmap_demo
 use sys::console
-use sys::buffer
 use sys::vec
 
 /// Trait for types that can be hashed.
@@ -113,8 +112,7 @@ struct HashMap {
   /// Number of deleted (tombstone) entries
   deleted: i32,
   /// Capacity
-  capacity: i32,
-  alloc: buffer::Alloc
+  capacity: i32
 }
 
 /// Generic hash function using the Hash trait.
@@ -123,13 +121,13 @@ fn compute_hash<K: Hash>(key: K) -> i32 {
 }
 
 /// Create a new empty hash-map with initial capacity.
-pub fn hashmap_new(alloc: buffer::Alloc, initial_capacity: i32) -> HashMap {
+pub fn hashmap_new(initial_capacity: i32) -> HashMap {
   let cap = initial_capacity
   if (cap < 8) {
     cap = 8
   }
 
-  let entries = alloc.vec_new<Entry>()
+  let entries = vec::new<Entry>()
 
   // Initialize all entries as empty
   for i in 0..cap {
@@ -142,8 +140,7 @@ pub fn hashmap_new(alloc: buffer::Alloc, initial_capacity: i32) -> HashMap {
     entries: entries,
     size: 0,
     deleted: 0,
-    capacity: cap,
-    alloc: alloc
+    capacity: cap
   }
 }
 
@@ -223,10 +220,9 @@ impl HashMap {
 fn hashmap_rehash(map: HashMap, new_cap: i32) -> HashMap {
   let old_entries = map.entries
   let old_cap = map.capacity
-  let alloc = map.alloc
 
   // Create new entries vector
-  let new_entries = alloc.vec_new<Entry>()
+  let new_entries = vec::new<Entry>()
   for i in 0..new_cap {
     try new_entries.push(empty_entry()) else {
       panic()
@@ -274,8 +270,7 @@ fn hashmap_rehash(map: HashMap, new_cap: i32) -> HashMap {
     entries: new_entries,
     size: new_size,
     deleted: 0,
-    capacity: new_cap,
-    alloc: alloc
+    capacity: new_cap
   }
 }
 
@@ -366,8 +361,7 @@ pub fn hashmap_insert(map: HashMap, key: i32, value: i32) -> Result<HashMap, uni
     entries: m.entries,
     size: m.size + 1,
     deleted: new_deleted,
-    capacity: cap,
-    alloc: m.alloc
+    capacity: cap
   })
 }
 
@@ -398,8 +392,7 @@ pub fn hashmap_remove(map: HashMap, key: i32) -> Result<HashMap, unit> {
               entries: map.entries,
               size: map.size - 1,
               deleted: map.deleted + 1,
-              capacity: cap,
-              alloc: map.alloc
+              capacity: cap
             })
           }
         }
@@ -424,7 +417,7 @@ pub fn hashmap_free(map: HashMap) -> unit {
 }
 
 /// Demo: insert some values and look them up.
-fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
+fn run_demo(c: Console) -> unit {
   c.println("=== Hash-Map Demo (with Hash trait and Vec<Entry>) ===")
   c.println("")
   c.println("This demonstrates a hash-map using:")
@@ -435,13 +428,15 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   c.println("")
 
   // Create a hash-map with capacity 16
-  let map = hashmap_new(alloc, 16)
+  let map = hashmap_new(16)
 
   c.println("Inserting entries...")
 
   // Insert some key-value pairs
-  let test_keys = alloc.vec_i32_new()
-  let test_vals = alloc.vec_i32_new()
+  let test_keys = vec::new<i32>()
+  let test_vals = vec::new<i32>()
+  defer test_keys.free()
+  defer test_vals.free()
 
   // key -> key * 10
   try test_keys.push(42) else { panic() }
@@ -539,7 +534,8 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   c.println("")
   c.println("Looking up non-existent keys...")
 
-  let missing = alloc.vec_i32_new()
+  let missing = vec::new<i32>()
+  defer missing.free()
   try missing.push(100) else { panic() }
   try missing.push(999) else { panic() }
   try missing.push(12345) else { panic() }
@@ -627,9 +623,6 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
   c.println("")
 
   // Cleanup
-  alloc.vec_i32_free(test_keys)
-  alloc.vec_i32_free(test_vals)
-  alloc.vec_i32_free(missing)
   hashmap_free(map)
 
   c.println("")
@@ -639,9 +632,7 @@ fn run_demo(c: Console, alloc: buffer::Alloc) -> unit {
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-
-  run_demo(c, alloc)
+  run_demo(c)
 
   return 0
 }

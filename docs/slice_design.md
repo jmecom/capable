@@ -49,19 +49,26 @@ Implementation detail:
 
 ---
 
-## 3. Minimal API surface (suggested v0.2)
+## 3. Minimal API surface
 
 ### 3.1 Allocation / ownership
-Allocation is explicit (Zig-like). Functions that allocate accept an allocator value.
+Ordinary code uses default-first constructors. Explicit allocators remain
+available as escape hatches for low-level code.
 
 ```cap
-opaque struct Alloc
 opaque struct Vec[T]     // move-only owner
 
+fn vec::new<u8>() -> Vec<u8>
+fn vec::with_capacity<u8>(cap: i32) -> Result<Vec<u8>, AllocErr>
+
+impl Vec<u8> {
+  fn free(self) -> unit
+}
+
+opaque struct Alloc
 impl Alloc {
   fn vec_u8_new(self) -> Vec<u8>
   fn vec_u8_with_capacity(self, cap: i32) -> Result<Vec<u8>, AllocErr>
-  fn vec_u8_free(self, v: Vec<u8>) -> unit
 }
 ````
 
@@ -105,14 +112,15 @@ fn parse_u16_be(buf: Slice<u8>, off: i32) -> Result<u16, Err> {
 `sys.fs` provides methods that return owned bytes (`Vec<u8>`) and/or `string`:
 
 ```cap
-fn ReadFS.read_bytes(self, alloc: Alloc, path: string) -> Result<Vec<u8>, FsErr>
+fn ReadFS.read_bytes(self, path: string) -> Result<Vec<u8>, FsErr>
+fn ReadFS.read_bytes_with_alloc(self, alloc: Alloc, path: string) -> Result<Vec<u8>, FsErr>
 ```
 
 Usage:
 
 * safe code receives `Vec<u8>`
 * parses it via `Slice<u8>`
-* frees it (explicitly or with `defer`)
+* frees it explicitly or with `defer`
 
 ---
 

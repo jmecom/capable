@@ -15,8 +15,8 @@ pub fn main(rc: RootCap) -> i32 {
 
   match rfs.read_bytes("app.txt") {
     Ok(bytes) => {
+      defer bytes.free()
       c.assert(bytes.len() > 0)
-      bytes.free()
     }
     Err(_) => { c.println("read_bytes failed"); return 1 }
   }

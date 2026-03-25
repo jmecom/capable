@@ -40,3 +40,8 @@ struct` values are the main move-tracked categories, and structs/enums that
 contain them become move-tracked by containment. The goal is not to turn all
 programming into ownership puzzles; it is to make authority and resource
 lifetime explicit where they matter.
+
+For text and collections, the intended default story is:
+- use `string` values in ordinary code
+- use `Text` only when building or mutating text
+- treat `sys::buffer` as the low-level allocator/memory layer, not the main API

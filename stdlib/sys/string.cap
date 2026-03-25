@@ -83,7 +83,7 @@ fn build_range(alloc: buffer::Alloc, s: string, start: i32, end: i32) -> string 
     }
     i = i + 1
   }
-  match (buf.to_string()) {
+  match (buf.copy_string()) {
     Ok(out) => { return out }
     Err(_) => { panic() }
   }
@@ -223,9 +223,9 @@ impl Text {
     return Ok(string { bytes: sub })
   }
 
-  /// Copy contents into a new string view.
-  /// This allocates a new owned slice for the string view.
-  pub fn to_string(self) -> Result<string, buffer::AllocErr> {
+  /// Copy contents into a new owned string view.
+  /// This allocates a new owned slice for the returned string.
+  pub fn copy_string(self) -> Result<string, buffer::AllocErr> {
     let owned = self.bytes.copy_slice()?
     return from_bytes(owned)
   }
@@ -271,13 +271,13 @@ impl string {
     return Ok(string { bytes: sub })
   }
 
-  /// Copy this string view into a new owned Text with the provided allocator.
-  pub fn to_text(self) -> Result<Text, buffer::AllocErr> {
+  /// Copy this string view into a new owned Text using the process default allocator.
+  pub fn copy_text(self) -> Result<Text, buffer::AllocErr> {
     return text_from(self)
   }
 
   /// Copy this string view into a new owned Text using the provided allocator.
-  pub fn to_text_with_alloc(self, alloc: buffer::Alloc) -> Result<Text, buffer::AllocErr> {
+  pub fn copy_text_with_alloc(self, alloc: buffer::Alloc) -> Result<Text, buffer::AllocErr> {
     return text_from_with_alloc(alloc, self)
   }
 
@@ -291,7 +291,7 @@ impl string {
     let out = text_new_with_alloc(alloc)
     out.push_str(self)?
     out.push_str(other)?
-    return out.to_string()
+    return out.copy_string()
   }
 
   /// Index into the string by byte.
@@ -963,7 +963,7 @@ impl string {
       }
       i = i + 1
     }
-    match (buf.to_string()) {
+    match (buf.copy_string()) {
       Ok(out) => { return out }
       Err(_) => { panic() }
     }
@@ -989,7 +989,7 @@ impl string {
       }
       i = i + 1
     }
-    match (buf.to_string()) {
+    match (buf.copy_string()) {
       Ok(out) => { return out }
       Err(_) => { panic() }
     }

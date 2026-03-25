@@ -6,6 +6,7 @@ use sys::string
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let text = string::text_new()
+  defer text.free()
   try text.push_byte('a') else {
     panic()
   }
@@ -23,6 +24,5 @@ pub fn main(rc: RootCap) -> i32 {
   } else {
     c.println("text bad")
   }
-  text.free()
   return 0
 }

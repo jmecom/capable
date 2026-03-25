@@ -5,8 +5,8 @@ use sys::system
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let parts = "a,b,c".split(',')
+  defer parts.free()
   let count = parts.len()
-  parts.free()
   c.assert(count == 3)
   c.println("split ok")
   return 0

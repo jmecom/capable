@@ -23,10 +23,11 @@ it is still not especially lightweight.
 Capable now has both:
 
 - explicit `Alloc`
-- a growing default-allocator surface
+- a default-first stdlib surface
 
-That is pragmatic, but the model is not fully settled. Allocation is currently
-part resource handle, part policy hook, part convenience burden.
+That is a much better default than before, but the model is not fully settled.
+Allocation is still part resource handle, part policy hook, and the stdlib
+still carries duplicated `_with_alloc` forms.
 
 The language should eventually make this story crisp:
 
@@ -37,9 +38,9 @@ Until then, the stdlib will keep carrying duplicated APIs.
 
 ## 3. Expression and statement control flow are still somewhat brittle
 
-Recent work made `let ... else` and `expr else` viable, but it also showed that
-control-flow behavior was not fully uniform across parser, typechecker, and
-codegen.
+Recent work made `let ... else`, `try let`, and `try ... else` viable, but it
+also showed that control-flow behavior was not fully uniform across parser,
+typechecker, and codegen.
 
 The language now supports these forms, but this area still needs discipline.
 If more expression-oriented control-flow is added casually, complexity will

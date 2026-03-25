@@ -1,6 +1,7 @@
 package safe
 module vec_custom_eq
 use sys::eq
+use sys::vec
 
 copy struct Entry {
   key: i32,
@@ -15,10 +16,10 @@ impl eq::Eq for Entry {
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
 
   // Test Vec<Entry> with custom Eq
-  let v = alloc.vec_new<Entry>()
+  let v = vec::new<Entry>()
+  defer v.free()
   try v.push(Entry { key: 1, value: 10 }) else {
     panic()
   }
@@ -61,10 +62,9 @@ pub fn main(rc: RootCap) -> i32 {
 
   // Test filter_eq
   let filtered = v.filter_eq(Entry { key: 2, value: 20 })
+  defer filtered.free()
   c.assert(filtered.len() == 2)
-  filtered.free()
 
-  v.free()
   c.println("vec custom eq ok")
   return 0
 }

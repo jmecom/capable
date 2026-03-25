@@ -2,11 +2,12 @@ package safe
 module text_helpers_more
 use sys::system
 use sys::string
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
   let text = string::text_new()
+  defer text.free()
   try text.push_str("hi") else {
     panic()
   }
@@ -21,14 +22,15 @@ pub fn main(rc: RootCap) -> i32 {
     return 1
   }
   c.assert(prefix.eq("hi"))
-  let v = alloc.vec_u8_new()
+  let v = vec::new<u8>()
+  defer v.free()
   try v.push('!') else {
     panic()
   }
   try text.extend_vec(v) else {
     panic()
   }
-  try let owned = text.to_string() else {
+  try let owned = text.copy_string() else {
     c.assert(false)
     return 1
   }
@@ -36,23 +38,21 @@ pub fn main(rc: RootCap) -> i32 {
   try let t2 = string::text_from("cap") else {
     panic()
   }
-  try let owned2 = t2.to_string() else {
+  defer t2.free()
+  try let owned2 = t2.copy_string() else {
     c.assert(false)
     return 1
   }
   c.assert(owned2.eq("cap"))
-  t2.free()
-  try let t3 = "owned".to_text() else {
+  try let t3 = "owned".copy_text() else {
     panic()
   }
-  try let owned3 = t3.to_string() else {
+  defer t3.free()
+  try let owned3 = t3.copy_string() else {
     c.assert(false)
     return 1
   }
   c.assert(owned3.eq("owned"))
-  t3.free()
-  alloc.vec_u8_free(v)
-  text.free()
   c.println("text helpers ok")
   return 0
 }
