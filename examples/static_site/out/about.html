@@ -2,12 +2,31 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>About This Example</title>
-<style>body{font:16px/1.6 Georgia,serif;max-width:720px;margin:40px auto;padding:0 16px;}h1,h2{line-height:1.2;}code{background:#f3f3f3;padding:2px 4px;}a{color:#0f5cbd;}</style>
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
+<header class="site-header">
+<div class="site-shell">
+<div class="brand-row"><a href="index.html">Capable Static</a><nav class="site-nav"><a href="about.html">About</a> <a href="posts/index.html">Posts</a></nav>
+</div>
+</div>
+</header>
+<main class="site-shell">
+<article class="page">
 <h1>About This Example</h1>
-<p>The generator reads markdown through a rooted ReadFS capability.</p>
-<p>It writes HTML through a rooted Dir capability derived from Filesystem.</p>
+<p>The generator reads markdown through a rooted `ReadFS` capability.</p>
+<p>The output side is narrower: it writes HTML through a rooted `Dir` capability derived from `Filesystem`.</p>
+<h2>Why It Exists</h2>
+<ul>
+<li>to exercise path handling</li>
+<li>to exercise text building</li>
+<li>to exercise multi-page generation instead of one-off demos</li>
+</ul>
+<blockquote>If the sample feels clumsy, that is signal about the language, not just the example.</blockquote>
+</article>
+</main>
+<footer class="site-footer"><div class="site-shell">Generated with Capable.</div></footer>
 </body>
 </html>

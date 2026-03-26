@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hello World</title>
+<title>Pressure-Testing the Tooling</title>
 <link rel="stylesheet" href="../site.css">
 </head>
 <body>
@@ -15,14 +15,19 @@
 </header>
 <main class="site-shell">
 <article class="page">
-<p class="meta">2026-03-18</p>
-<h1>Hello World</h1>
-<p>This is the first generated page.</p>
+<p class="meta">2026-03-26</p>
+<h1>Pressure-Testing the Tooling</h1>
+<p>The first version of the generator exposed missing pieces immediately:</p>
 <ul>
-<li>it is read from the delegated content root</li>
-<li>it is rendered into HTML</li>
-<li>it lands beside the other generated files under `posts/`</li>
+<li>directory classification</li>
+<li>recursive directory creation</li>
+<li>rooted string writes</li>
+<li>path extension replacement</li>
 </ul>
+<h2>The Useful Rule</h2>
+<p>When a sample program wants a weird workaround, it is usually pointing at a stdlib deficiency.</p>
+<pre><code>sample pain -&gt; repeated workaround -&gt; stdlib helper
+</code></pre>
 </article>
 </main>
 <footer class="site-footer"><div class="site-shell">Generated with Capable.</div></footer>

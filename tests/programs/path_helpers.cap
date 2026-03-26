@@ -24,6 +24,7 @@ pub fn main(rc: RootCap) -> i32 {
   c.assert(parts.get_or(1, "").eq("docs"))
   c.assert(parts.get_or(2, "").eq("index.html"))
   c.assert(path::basename_view("site/docs/index.html").eq("index.html"))
+  c.assert(path::stem_view("site/docs/index.html").eq("index"))
   c.assert(path::dirname_view("site/docs/index.html").eq("site/docs"))
 
   let joined = path::join("site/docs", "index.html")

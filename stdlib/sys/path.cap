@@ -109,6 +109,26 @@ pub fn basename_view(raw_path: string) -> string {
   }
 }
 
+/// Return the basename without the final extension as a view.
+pub fn stem_view(raw_path: string) -> string {
+  let base = basename_view(raw_path)
+  if (base.is_empty()) {
+    return base
+  }
+  match (base.last_index_of_byte('.')) {
+    Ok(i) => {
+      if (i == 0) {
+        return base
+      }
+      return match (base.slice_range(0, i)) {
+        Ok(out) => { out }
+        Err(_) => { panic() }
+      }
+    }
+    Err(_) => { return base }
+  }
+}
+
 /// Return the dirname of a path as a view.
 pub fn dirname_view(raw_path: string) -> string {
   let path = trim_trailing_slashes(raw_path)

@@ -231,16 +231,22 @@ fn run_static_site_example() {
     ]);
     assert_eq!(code, 0, "stderr was: {stderr:?}");
     assert!(
-        stdout.contains("generated pages: 4"),
+        stdout.contains("generated pages: 6"),
         "stdout was: {stdout:?}"
     );
 
     let index = std::fs::read_to_string(generated_dir.join("index.html")).expect("read index");
     let post =
         std::fs::read_to_string(generated_dir.join("posts").join("hello.html")).expect("read post");
+    let archive =
+        std::fs::read_to_string(generated_dir.join("posts").join("index.html")).expect("read archive");
+    let css = std::fs::read_to_string(generated_dir.join("site.css")).expect("read css");
 
     assert!(index.contains("<h1>Capable Static Site</h1>"), "index was: {index:?}");
+    assert!(index.contains("Recent Posts"), "index was: {index:?}");
     assert!(post.contains("<h1>Hello World</h1>"), "post was: {post:?}");
+    assert!(archive.contains("Pressure-Testing the Tooling"), "archive was: {archive:?}");
+    assert!(css.contains(".site-header"), "css was: {css:?}");
 }
 
 #[test]

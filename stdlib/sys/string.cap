@@ -661,6 +661,14 @@ impl string {
     return self.trim_prefix_with_alloc(buffer::default_alloc(), prefix)
   }
 
+  /// Remove a leading prefix if present without copying.
+  pub fn trim_prefix_view(self, prefix: string) -> string {
+    if (self.starts_with(prefix)) {
+      return view_range(self, prefix.len(), self.len())
+    }
+    return self
+  }
+
   /// Remove a leading prefix if present using the provided allocator.
   pub fn trim_prefix_with_alloc(self, alloc: buffer::Alloc, prefix: string) -> string {
     if (self.starts_with(prefix)) {
@@ -672,6 +680,14 @@ impl string {
   /// Remove a trailing suffix if present using the process default allocator.
   pub fn trim_suffix(self, suffix: string) -> string {
     return self.trim_suffix_with_alloc(buffer::default_alloc(), suffix)
+  }
+
+  /// Remove a trailing suffix if present without copying.
+  pub fn trim_suffix_view(self, suffix: string) -> string {
+    if (self.ends_with(suffix)) {
+      return view_range(self, 0, self.len() - suffix.len())
+    }
+    return self
   }
 
   /// Remove a trailing suffix if present using the provided allocator.
