@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
+use crossbeam_channel::RecvTimeoutError;
 use lsp_server::{Connection, Message, Notification, Request};
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, InitializeResult, Position, PublishDiagnosticsParams, Range,
@@ -9,6 +11,8 @@ use lsp_types::{
 use capc::{load_stdlib, load_user_modules_transitive, parse_module, type_check_program};
 use capc::ast::{Module, Span};
 use capc::error::{ParseError, TypeError};
+
+const DIAGNOSTIC_DEBOUNCE: Duration = Duration::from_millis(250);
 
 fn main() {
     let (connection, io_threads) = Connection::stdio();
@@ -28,7 +32,13 @@ fn main() {
 
     let mut state = ServerState::default();
 
-    for msg in &connection.receiver {
+    loop {
+        flush_due_diagnostics(&mut state, &connection);
+        let msg = match recv_next(&connection, &state) {
+            Ok(msg) => msg,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req).unwrap_or(false) {
@@ -52,6 +62,7 @@ fn main() {
 struct ServerState {
     open_files: HashMap<Url, String>,
     stdlib: Option<Vec<Module>>,
+    pending_diagnostics: HashMap<Url, Instant>,
 }
 
 fn handle_request(req: Request, connection: &Connection) {
@@ -83,22 +94,72 @@ fn handle_notification(
             let uri = params.text_document.uri;
             if let Some(change) = params.content_changes.into_iter().last() {
                 state.open_files.insert(uri.clone(), change.text);
-                publish_diagnostics(state, &uri, connection);
+                schedule_diagnostics(state, &uri, DIAGNOSTIC_DEBOUNCE);
             }
         }
         "textDocument/didSave" => {
             let params: lsp_types::DidSaveTextDocumentParams =
                 serde_json::from_value(notif.params).map_err(|err| err.to_string())?;
-            // `didChange` already publishes diagnostics for open buffers. Avoid doing the
-            // same full parse/load/typecheck pass again on save unless we do not have the
-            // file contents cached locally.
-            if !state.open_files.contains_key(&params.text_document.uri) {
-                publish_diagnostics(state, &params.text_document.uri, connection);
-            }
+            state.pending_diagnostics.remove(&params.text_document.uri);
+            publish_diagnostics(state, &params.text_document.uri, connection);
+        }
+        "textDocument/didClose" => {
+            let params: lsp_types::DidCloseTextDocumentParams =
+                serde_json::from_value(notif.params).map_err(|err| err.to_string())?;
+            let uri = params.text_document.uri;
+            state.open_files.remove(&uri);
+            state.pending_diagnostics.remove(&uri);
+            clear_diagnostics(&uri, connection);
         }
         _ => {}
     }
     Ok(())
+}
+
+fn recv_next(
+    connection: &Connection,
+    state: &ServerState,
+) -> Result<Message, RecvTimeoutError> {
+    match next_diagnostic_deadline(state) {
+        Some(deadline) => connection
+            .receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now())),
+        None => connection
+            .receiver
+            .recv()
+            .map_err(|_| RecvTimeoutError::Disconnected),
+    }
+}
+
+fn next_diagnostic_deadline(state: &ServerState) -> Option<Instant> {
+    let mut next = None;
+    for due in state.pending_diagnostics.values() {
+        match next {
+            Some(current) if current <= *due => {}
+            _ => next = Some(*due),
+        }
+    }
+    next
+}
+
+fn schedule_diagnostics(state: &mut ServerState, uri: &Url, delay: Duration) {
+    state
+        .pending_diagnostics
+        .insert(uri.clone(), Instant::now() + delay);
+}
+
+fn flush_due_diagnostics(state: &mut ServerState, connection: &Connection) {
+    let now = Instant::now();
+    let mut ready = Vec::new();
+    for (uri, due) in &state.pending_diagnostics {
+        if *due <= now {
+            ready.push(uri.clone());
+        }
+    }
+    for uri in ready {
+        state.pending_diagnostics.remove(&uri);
+        publish_diagnostics(state, &uri, connection);
+    }
 }
 
 fn publish_diagnostics(state: &mut ServerState, uri: &Url, connection: &Connection) {
@@ -113,6 +174,18 @@ fn publish_diagnostics(state: &mut ServerState, uri: &Url, connection: &Connecti
     let params = PublishDiagnosticsParams {
         uri: uri.clone(),
         diagnostics,
+        version: None,
+    };
+    let _ = connection.sender.send(Message::Notification(Notification::new(
+        "textDocument/publishDiagnostics".to_string(),
+        params,
+    )));
+}
+
+fn clear_diagnostics(uri: &Url, connection: &Connection) {
+    let params = PublishDiagnosticsParams {
+        uri: uri.clone(),
+        diagnostics: Vec::new(),
         version: None,
     };
     let _ = connection.sender.send(Message::Notification(Notification::new(
@@ -192,4 +265,34 @@ fn offset_to_position(text: &str, offset: usize) -> Position {
         idx += ch.len_utf8();
     }
     Position { line, character: col }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schedule_replaces_existing_deadline() {
+        let mut state = ServerState::default();
+        let uri = Url::parse("file:///tmp/test.cap").expect("uri");
+        schedule_diagnostics(&mut state, &uri, Duration::from_millis(10));
+        let first = state.pending_diagnostics.get(&uri).copied().expect("deadline");
+        schedule_diagnostics(&mut state, &uri, Duration::from_millis(50));
+        let second = state.pending_diagnostics.get(&uri).copied().expect("deadline");
+        assert!(second >= first);
+    }
+
+    #[test]
+    fn next_deadline_picks_earliest_pending_uri() {
+        let mut state = ServerState::default();
+        let a = Url::parse("file:///tmp/a.cap").expect("uri");
+        let b = Url::parse("file:///tmp/b.cap").expect("uri");
+        state
+            .pending_diagnostics
+            .insert(a, Instant::now() + Duration::from_millis(40));
+        let earliest = Instant::now() + Duration::from_millis(10);
+        state.pending_diagnostics.insert(b, earliest);
+        let next = next_diagnostic_deadline(&state).expect("next");
+        assert!(next <= earliest + Duration::from_millis(1));
+    }
 }

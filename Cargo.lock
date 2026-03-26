@@ -188,6 +188,7 @@ name = "caplsp"
 version = "0.1.0"
 dependencies = [
  "capc",
+ "crossbeam-channel",
  "lsp-server",
  "lsp-types",
  "serde_json",
