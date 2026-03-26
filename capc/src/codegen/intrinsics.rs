@@ -5,29 +5,31 @@
 //! function is not listed here, the Capable implementation is used instead.
 //! See `stdlib/README.md` for the stdlib-facing explanation.
 
-mod io;
-mod memory;
-
 use std::collections::HashMap;
 
-use cranelift_codegen::ir::Type;
-
 use super::{FnInfo, FnSig};
+use crate::runtime_intrinsics::runtime_bindings;
 
-fn runtime_fn(sig: FnSig, abi_sig: Option<FnSig>, symbol: &str) -> FnInfo {
-    FnInfo {
-        sig,
-        abi_sig,
-        symbol: symbol.to_string(),
-        runtime_symbol: None,
-        is_runtime: true,
-    }
-}
-
-pub fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
-    let mut map = HashMap::new();
-    io::register_io_intrinsics(&mut map);
-    memory::register_memory_intrinsics(&mut map);
-    let _ = ptr_ty;
-    map
+pub fn register_runtime_intrinsics() -> HashMap<String, FnInfo> {
+    runtime_bindings()
+        .iter()
+        .map(|(key, binding)| {
+            (
+                key.clone(),
+                FnInfo {
+                    sig: FnSig {
+                        params: binding.sig.params.clone(),
+                        ret: binding.sig.ret.clone(),
+                    },
+                    abi_sig: binding.abi_sig.as_ref().map(|abi_sig| FnSig {
+                        params: abi_sig.params.clone(),
+                        ret: abi_sig.ret.clone(),
+                    }),
+                    symbol: binding.symbol.to_string(),
+                    runtime_symbol: None,
+                    is_runtime: true,
+                },
+            )
+        })
+        .collect()
 }

@@ -409,21 +409,21 @@ pub fn type_check_program(
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();
     validate_package_safety(&module, false)
-        .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
+        .map_err(|err| err.in_module(module.name.to_string()).with_context(format!("in module `{}`", module.name)))?;
     validate_import_safety(&module, &package_map, &stdlib_names)
-        .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
+        .map_err(|err| err.in_module(module.name.to_string()).with_context(format!("in module `{}`", module.name)))?;
     for user_module in &user_modules {
         validate_package_safety(user_module, false)
-            .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
+            .map_err(|err| err.in_module(user_module.name.to_string()).with_context(format!("in module `{}`", user_module.name)))?;
         validate_import_safety(user_module, &package_map, &stdlib_names)
-            .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
+            .map_err(|err| err.in_module(user_module.name.to_string()).with_context(format!("in module `{}`", user_module.name)))?;
     }
     for stdlib_module in &stdlib {
         validate_package_safety(stdlib_module, true)
-            .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
+            .map_err(|err| err.in_module(stdlib_module.name.to_string()).with_context(format!("in module `{}`", stdlib_module.name)))?;
         if stdlib_module.package == PackageSafety::Safe {
             validate_import_safety(stdlib_module, &package_map, &stdlib_names)
-                .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
+                .map_err(|err| err.in_module(stdlib_module.name.to_string()).with_context(format!("in module `{}`", stdlib_module.name)))?;
         }
     }
     let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)
@@ -476,7 +476,7 @@ pub fn type_check_program(
                         &module_name,
                         Some(&mut table),
                     )
-                    .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
+                    .map_err(|err| err.in_module(module_name.clone()).with_context(format!("in module `{}`", module_name)))?;
                     type_tables.insert(function_key(&module_name, &func.name.item), table);
                 }
                 Item::Impl(impl_block) => {
@@ -509,7 +509,7 @@ pub fn type_check_program(
                             &module_name,
                             Some(&mut table),
                         )
-                        .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
+                        .map_err(|err| err.in_module(module_name.clone()).with_context(format!("in module `{}`", module_name)))?;
                         type_tables.insert(function_key(&module_name, &method.name.item), table);
                     }
                 }
@@ -542,7 +542,7 @@ pub fn type_check_program(
                 &stdlib_index,
                 Some(&type_tables),
             )
-            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
+            .map_err(|err| err.in_module(m.name.to_string()).with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
@@ -561,7 +561,7 @@ pub fn type_check_program(
                 &stdlib_index,
                 Some(&type_tables),
             )
-            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
+            .map_err(|err| err.in_module(m.name.to_string()).with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
@@ -576,7 +576,7 @@ pub fn type_check_program(
         &stdlib_index,
         Some(&type_tables),
     )
-    .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
+    .map_err(|err| err.in_module(module.name.to_string()).with_context(format!("in module `{}`", module.name)))?;
 
     let hir_trait_impls: Vec<HirTraitImpl> = trait_impls
         .iter()

@@ -1,10 +1,20 @@
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
-use miette::{miette, NamedSource, Result};
+use miette::{miette, Result};
 
 use crate::ast::{Module, PackageSafety, Path as AstPath};
+use crate::codegen::CodegenError;
+use crate::error::TypeError;
 use crate::hir::HirProgram;
-use crate::{build_object, parse_module, type_check_program, validate_module_path, ModuleGraph};
+use crate::loader::{load_module_from_path_with_source, LoadedModule};
+use crate::{build_object, type_check_program, validate_module_path, ModuleGraph};
+
+#[derive(Clone)]
+pub struct SourceFile {
+    pub path: PathBuf,
+    pub source: String,
+}
 
 #[derive(Clone)]
 pub struct LoadedProgram {
@@ -14,6 +24,7 @@ pub struct LoadedProgram {
     pub stdlib: Vec<Module>,
     pub user_modules: Vec<Module>,
     pub root: PathBuf,
+    sources: HashMap<String, SourceFile>,
 }
 
 pub struct LinkOptions<'a> {
@@ -24,32 +35,36 @@ pub struct LinkOptions<'a> {
 }
 
 pub fn load_program(path: &Path) -> Result<LoadedProgram> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|err| miette!("failed to read {}: {err}", path.display()))?;
-    let module = parse_module(&source).map_err(|err| {
-        let named = NamedSource::new(path.display().to_string(), source.clone());
-        miette::Report::new(err).with_source_code(named)
-    })?;
+    let loaded_entry = load_module_from_path_with_source(path).map_err(miette::Report::new)?;
+    let source = loaded_entry.source.clone();
+    let module = loaded_entry.module.clone();
     let root = path
         .parent()
         .ok_or_else(|| miette!("entry path has no parent directory"))?
         .to_path_buf();
-    validate_module_path(&module, path, &root).map_err(|err| {
-        let err = err.with_context(format!("while loading module `{}`", module.name));
-        miette::Report::new(err)
-    })?;
+    validate_module_path(&module, path, &root)
+        .map_err(|err| miette::Report::new(err.with_source(path.display().to_string(), source.clone())))?;
     let mut graph = ModuleGraph::new();
-    let stdlib = graph.load_stdlib().map_err(miette::Report::new)?;
+    let stdlib = graph.load_stdlib_with_sources().map_err(miette::Report::new)?;
     let user_modules = graph
-        .load_user_modules_transitive(path, &module)
+        .load_user_modules_transitive_with_sources(path, &module)
         .map_err(miette::Report::new)?;
+    let mut sources = HashMap::new();
+    insert_source_file(&mut sources, &loaded_entry);
+    for loaded in &stdlib {
+        insert_source_file(&mut sources, loaded);
+    }
+    for loaded in &user_modules {
+        insert_source_file(&mut sources, loaded);
+    }
     Ok(LoadedProgram {
         path: path.to_path_buf(),
         source,
         module,
-        stdlib,
-        user_modules,
+        stdlib: stdlib.into_iter().map(|loaded| loaded.module).collect(),
+        user_modules: user_modules.into_iter().map(|loaded| loaded.module).collect(),
         root,
+        sources,
     })
 }
 
@@ -57,10 +72,8 @@ pub fn type_check_loaded(loaded: &LoadedProgram, safe_only: bool) -> Result<HirP
     if safe_only {
         enforce_safe_only(&loaded.module, &loaded.user_modules, &loaded.root)?;
     }
-    type_check_program(&loaded.module, &loaded.stdlib, &loaded.user_modules).map_err(|err| {
-        let named = NamedSource::new(loaded.path.display().to_string(), loaded.source.clone());
-        miette::Report::new(err).with_source_code(named)
-    })
+    type_check_program(&loaded.module, &loaded.stdlib, &loaded.user_modules)
+        .map_err(|err| miette::Report::new(attach_type_error_source(err, loaded)))
 }
 
 pub fn build_binary(
@@ -76,10 +89,8 @@ pub fn build_binary(
         .map_err(|err| miette!("failed to create build dir {}: {err}", build_dir.display()))?;
 
     let obj_path = build_dir.join("program.o");
-    build_object(program, &obj_path).map_err(|err| {
-        let named = NamedSource::new(loaded.path.display().to_string(), loaded.source.clone());
-        miette::Report::new(err).with_source_code(named)
-    })?;
+    build_object(program, &obj_path)
+        .map_err(|err| miette::Report::new(attach_codegen_error_source(err, loaded)))?;
 
     let cargo_path = resolve_tool("CARGO", "cargo");
     let rustc_path = resolve_tool("RUSTC", "rustc");
@@ -138,6 +149,115 @@ pub fn build_binary(
         return Err(miette!("link failed: {stderr}"));
     }
     Ok(out_path)
+}
+
+impl LoadedProgram {
+    fn source_for_module(&self, module_name: &str) -> Option<&SourceFile> {
+        self.sources.get(module_name)
+    }
+}
+
+fn insert_source_file(target: &mut HashMap<String, SourceFile>, loaded: &LoadedModule) {
+    target.insert(
+        loaded.module.name.to_string(),
+        SourceFile {
+            path: loaded.path.clone(),
+            source: loaded.source.clone(),
+        },
+    );
+}
+
+fn attach_type_error_source(mut err: TypeError, loaded: &LoadedProgram) -> TypeError {
+    if err.has_source() {
+        return err;
+    }
+    if let Some(module_name) = err.module_name() {
+        if let Some(source) = loaded.source_for_module(module_name) {
+            err = err.with_source(source.path.display().to_string(), source.source.clone());
+            return err;
+        }
+    }
+    err.with_source(loaded.path.display().to_string(), loaded.source.clone())
+}
+
+fn attach_codegen_error_source(mut err: CodegenError, loaded: &LoadedProgram) -> CodegenError {
+    if err.has_source() {
+        return err;
+    }
+    if let Some(module_name) = err.module_name() {
+        if let Some(source) = loaded.source_for_module(module_name) {
+            err = err.with_source(source.path.display().to_string(), source.source.clone());
+            return err;
+        }
+    }
+    err.with_source(loaded.path.display().to_string(), loaded.source.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{ExprId, PackageSafety, Path as AstPath, Span, Spanned};
+
+    fn dummy_module(name: &str) -> Module {
+        Module {
+            package: PackageSafety::Safe,
+            name: AstPath {
+                id: ExprId(0),
+                segments: vec![Spanned::new(name.to_string(), Span::new(0, 0))],
+                span: Span::new(0, 0),
+            },
+            uses: Vec::new(),
+            items: Vec::new(),
+            span: Span::new(0, 0),
+        }
+    }
+
+    fn loaded_with_helper_source() -> LoadedProgram {
+        let module = dummy_module("main");
+        let helper = dummy_module("helper");
+        let mut sources = HashMap::new();
+        sources.insert(
+            "main".to_string(),
+            SourceFile {
+                path: PathBuf::from("main.cap"),
+                source: "package safe\nmodule main\n".to_string(),
+            },
+        );
+        sources.insert(
+            "helper".to_string(),
+            SourceFile {
+                path: PathBuf::from("helper.cap"),
+                source: "package safe\nmodule helper\n".to_string(),
+            },
+        );
+        LoadedProgram {
+            path: PathBuf::from("main.cap"),
+            source: "package safe\nmodule main\n".to_string(),
+            module,
+            stdlib: Vec::new(),
+            user_modules: vec![helper],
+            root: PathBuf::from("."),
+            sources,
+        }
+    }
+
+    #[test]
+    fn attach_type_error_uses_module_source() {
+        let loaded = loaded_with_helper_source();
+        let err = TypeError::new("boom".to_string(), Span::new(0, 1)).in_module("helper");
+        let attached = attach_type_error_source(err, &loaded);
+        assert!(attached.has_source());
+        assert_eq!(attached.module_name(), Some("helper"));
+    }
+
+    #[test]
+    fn attach_codegen_error_uses_module_source() {
+        let loaded = loaded_with_helper_source();
+        let err = CodegenError::spanned("boom", Span::new(0, 1)).in_module("helper");
+        let attached = attach_codegen_error_source(err, &loaded);
+        assert!(attached.has_source());
+        assert_eq!(attached.module_name(), Some("helper"));
+    }
 }
 
 pub fn enforce_safe_only(entry: &Module, user_modules: &[Module], root: &Path) -> Result<()> {

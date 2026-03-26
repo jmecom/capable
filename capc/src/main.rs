@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use miette::{miette, NamedSource, Result};
+use miette::{miette, Result};
 
 use capc::{build_binary, load_program, module_path_for, parse_module, type_check_loaded, LinkOptions};
 
@@ -55,10 +55,8 @@ fn main() -> Result<()> {
         Command::Parse { path } => {
             let source = std::fs::read_to_string(&path)
                 .map_err(|err| miette!("failed to read {}: {err}", path.display()))?;
-            let module = parse_module(&source).map_err(|err| {
-                let named = NamedSource::new(path.display().to_string(), source);
-                miette::Report::new(err).with_source_code(named)
-            })?;
+            let module = parse_module(&source)
+                .map_err(|err| miette::Report::new(err.with_source(path.display().to_string(), source)))?;
             println!("{module:#?}");
             Ok(())
         }
