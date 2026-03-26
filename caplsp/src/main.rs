@@ -7,7 +7,7 @@ use lsp_types::{
 };
 
 use capc::{load_stdlib, load_user_modules_transitive, parse_module, type_check_program};
-use capc::ast::Span;
+use capc::ast::{Module, Span};
 use capc::error::{ParseError, TypeError};
 
 fn main() {
@@ -51,6 +51,7 @@ fn main() {
 #[derive(Default)]
 struct ServerState {
     open_files: HashMap<Url, String>,
+    stdlib: Option<Vec<Module>>,
 }
 
 fn handle_request(req: Request, connection: &Connection) {
@@ -88,7 +89,12 @@ fn handle_notification(
         "textDocument/didSave" => {
             let params: lsp_types::DidSaveTextDocumentParams =
                 serde_json::from_value(notif.params).map_err(|err| err.to_string())?;
-            publish_diagnostics(state, &params.text_document.uri, connection);
+            // `didChange` already publishes diagnostics for open buffers. Avoid doing the
+            // same full parse/load/typecheck pass again on save unless we do not have the
+            // file contents cached locally.
+            if !state.open_files.contains_key(&params.text_document.uri) {
+                publish_diagnostics(state, &params.text_document.uri, connection);
+            }
         }
         _ => {}
     }
@@ -103,7 +109,7 @@ fn publish_diagnostics(state: &mut ServerState, uri: &Url, connection: &Connecti
             Err(_) => String::new(),
         },
     };
-    let diagnostics = analyze(uri, &text);
+    let diagnostics = analyze(state, uri, &text);
     let params = PublishDiagnosticsParams {
         uri: uri.clone(),
         diagnostics,
@@ -115,14 +121,20 @@ fn publish_diagnostics(state: &mut ServerState, uri: &Url, connection: &Connecti
     )));
 }
 
-fn analyze(uri: &Url, text: &str) -> Vec<Diagnostic> {
+fn analyze(state: &mut ServerState, uri: &Url, text: &str) -> Vec<Diagnostic> {
     let module = match parse_module(text) {
         Ok(module) => module,
         Err(err) => return vec![diag_from_parse(text, &err)],
     };
-    let stdlib = match load_stdlib() {
-        Ok(stdlib) => stdlib,
-        Err(err) => return vec![diag_from_parse(text, &err)],
+    if state.stdlib.is_none() {
+        match load_stdlib() {
+            Ok(stdlib) => state.stdlib = Some(stdlib),
+            Err(err) => return vec![diag_from_parse(text, &err)],
+        }
+    }
+    let stdlib = match state.stdlib.as_ref() {
+        Some(stdlib) => stdlib,
+        None => return Vec::new(),
     };
     let user_modules = match uri.to_file_path() {
         Ok(path) => match load_user_modules_transitive(&path, &module) {

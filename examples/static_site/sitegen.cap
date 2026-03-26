@@ -20,34 +20,6 @@ copy struct PageInfo {
   url: string
 }
 
-fn join_rel(base: string, name: string) -> string {
-  if (base.is_empty()) {
-    return name
-  }
-  return path::join(base, name)
-}
-
-fn str_lt(a: string, b: string) -> bool {
-  let a_bytes = a.as_slice()
-  let b_bytes = b.as_slice()
-  let len = a_bytes.len()
-  if (b_bytes.len() < len) {
-    len = b_bytes.len()
-  }
-  let i = 0
-  while (i < len) {
-    let ca = a_bytes.at(i)
-    let cb = b_bytes.at(i)
-    if (ca < cb) {
-      return true
-    }
-    if (ca > cb) {
-      return false
-    }
-    i = i + 1
-  }
-  return a.len() < b.len()
-}
 
 fn empty_page_info() -> PageInfo {
   return PageInfo {
@@ -573,7 +545,7 @@ fn collect_posts(c: Console, src: &ReadFS, rel: string, posts: vec::Vec<PageInfo
     }
     defer entries.free()
     for entry in entries {
-      let child = join_rel(rel, entry)
+      let child = path::join(rel, entry)
       if (!collect_posts(c, src, child, posts)) {
         return false
       }
@@ -605,9 +577,9 @@ fn post_before(posts: vec::Vec<PageInfo>, i: i32, j: i32) -> bool {
   let left = posts.get_or(i, empty_page_info())
   let right = posts.get_or(j, empty_page_info())
   if (!left.date.eq(right.date)) {
-    return str_lt(right.date, left.date)
+    return left.date.compare(right.date) > 0
   }
-  return str_lt(left.title, right.title)
+  return left.title.compare(right.title) < 0
 }
 
 fn sort_posts(posts: vec::Vec<PageInfo>) -> bool {
@@ -639,7 +611,7 @@ fn generate_tree(c: Console, src: &ReadFS, out: &Dir, rel: string, posts: vec::V
     defer entries.free()
     let generated = 0
     for entry in entries {
-      let child = join_rel(rel, entry)
+      let child = path::join(rel, entry)
       let count = generate_tree(c, src, out, child, posts)
       if (count < 0) {
         return -1

@@ -6,38 +6,11 @@ use sys::stdin
 use sys::io
 use sys::vec
 
-fn min_i32(a: i32, b: i32) -> i32 {
-  if (a < b) {
-    return a
-  }
-  return b
-}
-
-// Returns true if a < b lexicographically
-fn str_lt(a: string, b: string) -> bool {
-  let a_bytes = a.as_slice()
-  let b_bytes = b.as_slice()
-  let len = min_i32(a_bytes.len(), b_bytes.len())
-  let i = 0
-  while (i < len) {
-    let ca = a_bytes.at(i)
-    let cb = b_bytes.at(i)
-    if (ca < cb) {
-      return true
-    }
-    if (ca > cb) {
-      return false
-    }
-    i = i + 1
-  }
-  return a.len() < b.len()
-}
-
 // Compare lines at indices i and j
 fn line_lt(lines: Vec<string>, i: i32, j: i32) -> bool {
   let line_i = lines.get_or(i, "")
   let line_j = lines.get_or(j, "")
-  return str_lt(line_i, line_j)
+  return line_i.compare(line_j) < 0
 }
 
 // Insertion sort on indices

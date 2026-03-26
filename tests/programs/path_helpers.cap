@@ -29,6 +29,8 @@ pub fn main(rc: RootCap) -> i32 {
 
   let joined = path::join("site/docs", "index.html")
   c.assert(joined.eq("site/docs/index.html"))
+  let root_join = path::join("", "posts")
+  c.assert(root_join.eq("posts"))
 
   c.println("path ok")
   return 0
