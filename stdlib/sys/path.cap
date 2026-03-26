@@ -4,6 +4,7 @@ module sys::path
 
 use sys::buffer
 use sys::fs
+use sys::string
 use sys::vec
 
 fn trim_trailing_slashes(raw_path: string) -> string {
@@ -126,6 +127,63 @@ pub fn dirname_view(raw_path: string) -> string {
     Err(_) => { result = "" }
   }
   return result
+}
+
+fn extension_cut(raw_path: string) -> i32 {
+  let base = basename_view(raw_path)
+  if (base.is_empty()) {
+    return raw_path.len()
+  }
+  let dot = 0
+  match (base.last_index_of_byte('.')) {
+    Ok(found) => { dot = found }
+    Err(_) => { return raw_path.len() }
+  }
+  if (dot == 0) {
+    return raw_path.len()
+  }
+  return raw_path.len() - base.len() + dot
+}
+
+/// Replace or add a path extension using the process default allocator.
+/// `ext` may be provided with or without a leading `.`.
+pub fn replace_extension(raw_path: string, ext: string) -> string {
+  return replace_extension_with_alloc(buffer::default_alloc(), raw_path, ext)
+}
+
+/// Replace or add a path extension using the provided allocator.
+/// `ext` may be provided with or without a leading `.`.
+pub fn replace_extension_with_alloc(alloc: buffer::Alloc, raw_path: string, ext: string) -> string {
+  let cut = extension_cut(raw_path)
+  let out = string::text_new_with_alloc(alloc)
+  defer out.free()
+  if (cut > 0) {
+    let prefix = match (raw_path.slice_range(0, cut)) {
+      Ok(part) => { part }
+      Err(_) => { panic() }
+    }
+    match (out.push_str(prefix)) {
+      Ok(_) => { }
+      Err(_) => { panic() }
+    }
+  }
+  if (!ext.is_empty()) {
+    if (!ext.starts_with(".")) {
+      match (out.push_byte('.')) {
+        Ok(_) => { }
+        Err(_) => { panic() }
+      }
+    }
+    match (out.push_str(ext)) {
+      Ok(_) => { }
+      Err(_) => { panic() }
+    }
+  }
+  let result = out.copy_string()
+  return match (result) {
+    Ok(path) => { path }
+    Err(_) => { panic() }
+  }
 }
 
 /// Join two path segments using the process default allocator.

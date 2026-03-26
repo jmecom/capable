@@ -406,6 +406,12 @@ fn runtime_binding_list() -> Vec<RuntimeBinding> {
         ),
         binding(
             "sys.fs",
+            "ReadFS__is_dir",
+            "capable_rt_fs_is_dir",
+            sig(vec![AbiType::Handle, AbiType::Ptr], AbiType::Bool),
+        ),
+        binding(
+            "sys.fs",
             "ReadFS__close",
             "capable_rt_fs_readfs_close",
             sig(vec![AbiType::Handle], AbiType::Unit),
@@ -492,6 +498,47 @@ fn runtime_binding_list() -> Vec<RuntimeBinding> {
             "Dir__exists",
             "capable_rt_fs_dir_exists",
             sig(vec![AbiType::Handle, AbiType::Ptr], AbiType::Bool),
+        ),
+        binding(
+            "sys.fs",
+            "Dir__is_dir",
+            "capable_rt_fs_dir_is_dir",
+            sig(vec![AbiType::Handle, AbiType::Ptr], AbiType::Bool),
+        ),
+        binding_with_abi(
+            "sys.fs",
+            "Dir__create_dir_all",
+            "capable_rt_fs_dir_create_dir_all",
+            sig(
+                vec![AbiType::Handle, AbiType::Ptr],
+                AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Handle,
+                    AbiType::Ptr,
+                    AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.fs",
+            "Dir__write_string",
+            "capable_rt_fs_dir_write_string",
+            sig(
+                vec![AbiType::Handle, AbiType::Ptr, AbiType::Ptr],
+                AbiType::Result(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Handle,
+                    AbiType::Ptr,
+                    AbiType::Ptr,
+                    AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::Unit), Box::new(AbiType::I32)),
+            ),
         ),
         binding(
             "sys.fs",

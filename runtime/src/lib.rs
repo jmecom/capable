@@ -307,6 +307,25 @@ fn write_handle_result_code(
     }
 }
 
+fn write_unit_result(out_err: *mut i32, result: Result<(), FsErr>) -> u8 {
+    unsafe {
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(()) => 0,
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err as i32;
+                }
+            }
+            1
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
@@ -494,6 +513,22 @@ pub extern "C" fn capable_rt_fs_exists(fs: Handle, path: *const CapString) -> u8
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_fs_is_dir(fs: Handle, path: *const CapString) -> u8 {
+    let path = unsafe { read_cap_string(path) };
+    let state = clone_handle(&READ_FS, fs, "readfs table");
+    let (Some(state), Some(path)) = (state, path) else {
+        return 0;
+    };
+    let Some(relative) = normalize_relative(Path::new(&path)) else {
+        return 0;
+    };
+    match resolve_rooted_path(&state.root, &relative) {
+        Ok(path) => u8::from(path.is_dir()),
+        Err(_) => 0,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_fs_read_bytes(
     fs: Handle,
     _alloc: Handle,
@@ -573,6 +608,23 @@ pub extern "C" fn capable_rt_fs_dir_exists(dir: Handle, name: *const CapString) 
     let combined = state.rel.join(name_rel);
     match resolve_rooted_path(&state.root, &combined) {
         Ok(path) => u8::from(path.exists()),
+        Err(_) => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_is_dir(dir: Handle, name: *const CapString) -> u8 {
+    let name = unsafe { read_cap_string(name) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(name)) = (state, name) else {
+        return 0;
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return 0;
+    };
+    let combined = state.rel.join(name_rel);
+    match resolve_rooted_path(&state.root, &combined) {
+        Ok(path) => u8::from(path.is_dir()),
         Err(_) => 0,
     }
 }
@@ -664,6 +716,58 @@ pub extern "C" fn capable_rt_fs_dir_read_to_string(
     match std::fs::read_to_string(&full) {
         Ok(contents) => write_result_with_alloc(_alloc, out_ok, out_err, Ok(contents)),
         Err(err) => write_result_with_alloc(_alloc, out_ok, out_err, Err(map_fs_err(err))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_create_dir_all(
+    dir: Handle,
+    path: *const CapString,
+    out_err: *mut i32,
+) -> u8 {
+    let path = unsafe { read_cap_string(path) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(path)) = (state, path) else {
+        return write_unit_result(out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(path_rel) = normalize_relative(Path::new(&path)) else {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    };
+    let combined = state.rel.join(path_rel);
+    let full = state.root.join(combined);
+    if !full.starts_with(&state.root) {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    }
+    match std::fs::create_dir_all(&full) {
+        Ok(()) => write_unit_result(out_err, Ok(())),
+        Err(err) => write_unit_result(out_err, Err(map_fs_err(err))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_write_string(
+    dir: Handle,
+    path: *const CapString,
+    data: *const CapString,
+    out_err: *mut i32,
+) -> u8 {
+    let path = unsafe { read_cap_string(path) };
+    let data = unsafe { read_cap_string(data) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(path), Some(data)) = (state, path, data) else {
+        return write_unit_result(out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(path_rel) = normalize_relative(Path::new(&path)) else {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    };
+    let combined = state.rel.join(path_rel);
+    let full = state.root.join(combined);
+    if !full.starts_with(&state.root) {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    }
+    match std::fs::write(&full, data) {
+        Ok(()) => write_unit_result(out_err, Ok(())),
+        Err(err) => write_unit_result(out_err, Err(map_fs_err(err))),
     }
 }
 

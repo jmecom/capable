@@ -216,6 +216,34 @@ fn run_path_helpers() {
 }
 
 #[test]
+fn run_static_site_example() {
+    let build_dir = make_out_dir("static_site_build");
+    let generated_dir = make_out_dir("static_site_generated");
+    let build_dir = build_dir.to_str().expect("utf8 build dir");
+    let generated_dir_str = generated_dir.to_str().expect("utf8 output dir");
+    let (code, stdout, stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        build_dir,
+        "examples/static_site/sitegen.cap",
+        "examples/static_site/content",
+        generated_dir_str,
+    ]);
+    assert_eq!(code, 0, "stderr was: {stderr:?}");
+    assert!(
+        stdout.contains("generated pages: 4"),
+        "stdout was: {stdout:?}"
+    );
+
+    let index = std::fs::read_to_string(generated_dir.join("index.html")).expect("read index");
+    let post =
+        std::fs::read_to_string(generated_dir.join("posts").join("hello.html")).expect("read post");
+
+    assert!(index.contains("<h1>Capable Static Site</h1>"), "index was: {index:?}");
+    assert!(post.contains("<h1>Hello World</h1>"), "post was: {post:?}");
+}
+
+#[test]
 fn run_defer_free() {
     let out_dir = make_out_dir("defer_free");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

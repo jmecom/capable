@@ -1,0 +1,266 @@
+package safe
+module sitegen
+
+use sys::console
+use sys::fs
+use sys::path
+use sys::string
+use sys::system
+use sys::vec
+
+enum GenErr {
+  Fs(fs::FsErr),
+  Alloc
+}
+
+fn slice_after(s: string, count: i32) -> string {
+  return match (s.slice_range(count, s.len())) {
+    Ok(out) => { out }
+    Err(_) => { "" }
+  }
+}
+
+fn join_rel(base: string, name: string) -> string {
+  if (base.is_empty()) {
+    return name
+  }
+  return path::join(base, name)
+}
+
+fn push_text(out: string::Text, value: string) -> bool {
+  match (out.push_str(value)) {
+    Ok(_) => { return true }
+    Err(_) => { return false }
+  }
+}
+
+fn push_byte(out: string::Text, value: u8) -> bool {
+  match (out.push_byte(value)) {
+    Ok(_) => { return true }
+    Err(_) => { return false }
+  }
+}
+
+fn push_html_escaped(out: string::Text, value: string) -> bool {
+  let i = 0
+  while (i < value.len()) {
+    let b = value.byte_at(i)
+    match (b) {
+      '&' => {
+        if (!push_text(out, "&amp;")) {
+          return false
+        }
+      }
+      '<' => {
+        if (!push_text(out, "&lt;")) {
+          return false
+        }
+      }
+      '>' => {
+        if (!push_text(out, "&gt;")) {
+          return false
+        }
+      }
+      '"' => {
+        if (!push_text(out, "&quot;")) {
+          return false
+        }
+      }
+      _ => {
+        if (!push_byte(out, b)) {
+          return false
+        }
+      }
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn push_wrapped(out: string::Text, open: string, body: string, close: string) -> bool {
+  if (!push_text(out, open)) {
+    return false
+  }
+  if (!push_html_escaped(out, body)) {
+    return false
+  }
+  if (!push_text(out, close)) {
+    return false
+  }
+  return true
+}
+
+fn fallback_title(rel: string) -> string {
+  return path::replace_extension(path::basename_view(rel), "")
+}
+
+fn extract_title(rel: string, markdown: string) -> string {
+  let lines = markdown.lines_view()
+  defer lines.free()
+  for line in lines {
+    let trimmed = line.trim_view()
+    if (trimmed.starts_with("# ")) {
+      return slice_after(trimmed, 2).trim_view()
+    }
+  }
+  return fallback_title(rel)
+}
+
+fn render_page(rel: string, markdown: string) -> string {
+  let title = extract_title(rel, markdown)
+  let out = string::text_new()
+  defer out.free()
+
+  if (!push_text(out, "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>")) {
+    return ""
+  }
+  if (!push_html_escaped(out, title)) {
+    return ""
+  }
+  if (!push_text(out, "</title>\n<style>body{font:16px/1.6 Georgia,serif;max-width:720px;margin:40px auto;padding:0 16px;}h1,h2{line-height:1.2;}code{background:#f3f3f3;padding:2px 4px;}a{color:#0f5cbd;}</style>\n</head>\n<body>\n")) {
+    return ""
+  }
+
+  let lines = markdown.lines_view()
+  defer lines.free()
+  for line in lines {
+    let trimmed = line.trim_view()
+    if (trimmed.is_empty()) {
+      continue
+    }
+    if (trimmed.starts_with("# ")) {
+      if (!push_wrapped(out, "<h1>", slice_after(trimmed, 2).trim_view(), "</h1>\n")) {
+        return ""
+      }
+      continue
+    }
+    if (trimmed.starts_with("## ")) {
+      if (!push_wrapped(out, "<h2>", slice_after(trimmed, 3).trim_view(), "</h2>\n")) {
+        return ""
+      }
+      continue
+    }
+    if (!push_wrapped(out, "<p>", trimmed, "</p>\n")) {
+      return ""
+    }
+  }
+
+  if (!push_text(out, "</body>\n</html>\n")) {
+    return ""
+  }
+  match (out.copy_string()) {
+    Ok(html) => { return html }
+    Err(_) => { return "" }
+  }
+}
+
+fn generate_tree(c: Console, src: &ReadFS, out: &Dir, rel: string) -> i32 {
+  if (src.is_dir(rel)) {
+    try let entries = src.list_dir(rel) else err {
+      c.print("failed to list ")
+      c.println(rel)
+      print_error(c, GenErr::Fs(err))
+      return -1
+    }
+    defer entries.free()
+    let generated = 0
+    for entry in entries {
+      let child = join_rel(rel, entry)
+      let count = generate_tree(c, src, out, child)
+      if (count < 0) {
+        return -1
+      }
+      generated = generated + count
+    }
+    return generated
+  }
+
+  if (!rel.ends_with(".md")) {
+    return 0
+  }
+
+  try let markdown = src.read_to_string(rel) else err {
+    c.print("failed to read ")
+    c.println(rel)
+    print_error(c, GenErr::Fs(err))
+    return -1
+  }
+  let html = render_page(rel, markdown)
+  if (html.is_empty()) {
+    c.print("failed to render ")
+    c.println(rel)
+    print_error(c, GenErr::Alloc)
+    return -1
+  }
+  let out_path = path::replace_extension(rel, "html")
+  let out_dir = path::dirname_view(out_path)
+  if (!out_dir.is_empty()) {
+    try out.create_dir_all(out_dir) else err {
+      c.print("failed to create output dir for ")
+      c.println(out_path)
+      print_error(c, GenErr::Fs(err))
+      return -1
+    }
+  }
+  try out.write_string(out_path, html) else err {
+    c.print("failed to write ")
+    c.println(out_path)
+    print_error(c, GenErr::Fs(err))
+    return -1
+  }
+
+  c.print("generated ")
+  c.println(out_path)
+  return 1
+}
+
+fn print_error(c: Console, err: GenErr) -> unit {
+  match (err) {
+    GenErr::Alloc => {
+      c.println("allocation failed")
+    }
+    GenErr::Fs(kind) => {
+      match (kind) {
+        fs::FsErr::NotFound => {
+          c.println("filesystem error: not found")
+        }
+        fs::FsErr::PermissionDenied => {
+          c.println("filesystem error: permission denied")
+        }
+        fs::FsErr::InvalidPath => {
+          c.println("filesystem error: invalid path")
+        }
+        fs::FsErr::IoError => {
+          c.println("filesystem error: io error")
+        }
+      }
+    }
+  }
+  return ()
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let args = rc.mint_args()
+  let src_root = args.at_or(1, "examples/static_site/content")
+  let out_root = args.at_or(2, "examples/static_site/out")
+
+  let src = rc.mint_readfs(src_root)
+  let out_fs = rc.mint_filesystem(out_root)
+  let out = out_fs.root_dir()
+  let src_ref: &ReadFS = src
+  let out_ref: &Dir = out
+
+  defer src.close()
+  defer out.close()
+
+  let generated = generate_tree(c, src_ref, out_ref, "")
+  if (generated < 0) {
+    c.println("site generation failed")
+    return 1
+  }
+
+  c.print("generated pages: ")
+  c.println_i32(generated)
+  return 0
+}
