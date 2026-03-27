@@ -5,6 +5,44 @@ impl Parser {
         match self.peek_kind() {
             Some(TokenKind::Int) => {
                 let token = self.bump().unwrap();
+                if let Some(next) = self.peek_token(0) {
+                    if next.kind == TokenKind::Ident && next.span.start == token.span.end {
+                        match next.text.as_str() {
+                            "u8" => {
+                                let value = token.text.parse::<u64>().map_err(|_| {
+                                    self.error_at(
+                                        token.span,
+                                        "invalid integer literal".to_string(),
+                                    )
+                                })?;
+                                let suffix_end = next.span.end;
+                                self.bump();
+                                if value > 255 {
+                                    return Err(self.error_at(
+                                        Span::new(token.span.start, suffix_end),
+                                        "u8 literal out of range".to_string(),
+                                    ));
+                                }
+                                return Ok(Pattern::Literal(Literal::U8(value as u8)));
+                            }
+                            "i64" => {
+                                let value = token.text.parse::<i64>().map_err(|_| {
+                                    self.error_at(token.span, "invalid i64 literal".to_string())
+                                })?;
+                                self.bump();
+                                return Ok(Pattern::Literal(Literal::I64(value)));
+                            }
+                            "u64" => {
+                                let value = token.text.parse::<u64>().map_err(|_| {
+                                    self.error_at(token.span, "invalid u64 literal".to_string())
+                                })?;
+                                self.bump();
+                                return Ok(Pattern::Literal(Literal::U64(value)));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 let value = token.text.parse::<i64>().map_err(|_| {
                     self.error_at(token.span, "invalid integer literal".to_string())
                 })?;

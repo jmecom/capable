@@ -243,6 +243,7 @@ pub(super) fn mangle_type(ty: &Ty) -> String {
             crate::typeck::BuiltinType::I32 => "i32".to_string(),
             crate::typeck::BuiltinType::I64 => "i64".to_string(),
             crate::typeck::BuiltinType::U32 => "u32".to_string(),
+            crate::typeck::BuiltinType::U64 => "u64".to_string(),
             crate::typeck::BuiltinType::U8 => "u8".to_string(),
             crate::typeck::BuiltinType::Bool => "bool".to_string(),
             crate::typeck::BuiltinType::Unit => "unit".to_string(),

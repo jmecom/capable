@@ -181,6 +181,8 @@ pub(super) fn check_expr(
     let ty = match expr {
         Expr::Literal(lit) => match &lit.value {
             Literal::Int(_) => Ok(Ty::Builtin(BuiltinType::I32)),
+            Literal::I64(_) => Ok(Ty::Builtin(BuiltinType::I64)),
+            Literal::U64(_) => Ok(Ty::Builtin(BuiltinType::U64)),
             Literal::U8(_) => Ok(Ty::Builtin(BuiltinType::U8)),
             Literal::String(_) => Ok(stdlib_string_ty(stdlib)),
             Literal::Bool(_) => Ok(Ty::Builtin(BuiltinType::Bool)),
@@ -372,10 +374,7 @@ pub(super) fn check_expr(
             )?;
             match binary.op {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    if left == right
-                        && (left == Ty::Builtin(BuiltinType::I32)
-                            || left == Ty::Builtin(BuiltinType::I64))
-                    {
+                    if left == right && is_numeric_type(&left) {
                         Ok(left)
                     } else if left == right
                         && matches!(left, Ty::Param(_))

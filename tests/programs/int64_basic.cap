@@ -1,0 +1,47 @@
+module int64_basic
+use sys::system
+
+fn add_i64(a: i64, b: i64) -> i64 {
+  return a + b
+}
+
+fn add_u64(a: u64, b: u64) -> u64 {
+  return a + b
+}
+
+fn classify(n: u64) -> string {
+  return match (n) {
+    0u64 => { "zero" }
+    1099511627776u64 => { "tera" }
+    _ => { "other" }
+  }
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  let signed = add_i64(5000000000i64, -2i64)
+  let unsigned = add_u64(1099511627776u64, 24u64)
+
+  c.assert(signed == 4999999998i64)
+  c.assert(unsigned == 1099511627800u64)
+  c.assert((1099511627776u64 >> 4u64) == 68719476736u64)
+  c.assert(5000000000i64 > 4000000000i64)
+  c.assert(1099511627776u64 > 255u64)
+  c.assert(classify(1099511627776u64) == "tera")
+
+  try let narrowed_signed = 42i64.try_i32() else {
+    c.assert(false)
+    return 1
+  }
+  try let narrowed_unsigned = 42u64.try_i32() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(narrowed_signed == 42)
+  c.assert(narrowed_unsigned == 42)
+  c.println_i64(signed)
+  c.println_u64(unsigned)
+  c.println("int64 ok")
+  return 0
+}

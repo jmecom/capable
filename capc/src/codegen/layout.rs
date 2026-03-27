@@ -276,6 +276,7 @@ pub(super) fn type_layout_for_abi(
     match ty {
         AbiType::Unit => Ok(TypeLayout { size: 0, align: 1 }),
         AbiType::I32 | AbiType::U32 => Ok(TypeLayout { size: 4, align: 4 }),
+        AbiType::I64 | AbiType::U64 => Ok(TypeLayout { size: 8, align: 8 }),
         AbiType::U8 | AbiType::Bool => Ok(TypeLayout { size: 1, align: 1 }),
         AbiType::Handle => Ok(TypeLayout { size: 8, align: 8 }),
         AbiType::Ptr => Ok(TypeLayout {

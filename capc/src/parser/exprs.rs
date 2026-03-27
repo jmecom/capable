@@ -288,28 +288,58 @@ impl Parser {
         match self.peek_kind() {
             Some(TokenKind::Int) => {
                 let token = self.bump().unwrap();
+                if let Some(next) = self.peek_token(0) {
+                    if next.kind == TokenKind::Ident && next.span.start == token.span.end {
+                        match next.text.as_str() {
+                            "u8" => {
+                                let value = token.text.parse::<u64>().map_err(|_| {
+                                    self.error_at(
+                                        token.span,
+                                        "invalid integer literal".to_string(),
+                                    )
+                                })?;
+                                let suffix = self.bump().unwrap();
+                                if value > 255 {
+                                    return Err(self.error_at(
+                                        Span::new(token.span.start, suffix.span.end),
+                                        "u8 literal out of range".to_string(),
+                                    ));
+                                }
+                                return Ok(Expr::Literal(LiteralExpr {
+                                    id: self.fresh_expr_id(),
+                                    value: Literal::U8(value as u8),
+                                    span: Span::new(token.span.start, suffix.span.end),
+                                }));
+                            }
+                            "i64" => {
+                                let value = token.text.parse::<i64>().map_err(|_| {
+                                    self.error_at(token.span, "invalid i64 literal".to_string())
+                                })?;
+                                let suffix = self.bump().unwrap();
+                                return Ok(Expr::Literal(LiteralExpr {
+                                    id: self.fresh_expr_id(),
+                                    value: Literal::I64(value),
+                                    span: Span::new(token.span.start, suffix.span.end),
+                                }));
+                            }
+                            "u64" => {
+                                let value = token.text.parse::<u64>().map_err(|_| {
+                                    self.error_at(token.span, "invalid u64 literal".to_string())
+                                })?;
+                                let suffix = self.bump().unwrap();
+                                return Ok(Expr::Literal(LiteralExpr {
+                                    id: self.fresh_expr_id(),
+                                    value: Literal::U64(value),
+                                    span: Span::new(token.span.start, suffix.span.end),
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 let value = token.text.parse::<i64>().map_err(|_| {
                     self.error_at(token.span, "invalid integer literal".to_string())
                 })?;
-                if let Some(next) = self.peek_token(0) {
-                    if next.kind == TokenKind::Ident
-                        && next.text == "u8"
-                        && next.span.start == token.span.end
-                    {
-                        let suffix = self.bump().unwrap();
-                        if !(0..=255).contains(&value) {
-                            return Err(self.error_at(
-                                Span::new(token.span.start, suffix.span.end),
-                                "u8 literal out of range".to_string(),
-                            ));
-                        }
-                        return Ok(Expr::Literal(LiteralExpr {
-                            id: self.fresh_expr_id(),
-                            value: Literal::U8(value as u8),
-                            span: Span::new(token.span.start, suffix.span.end),
-                        }));
-                    }
-                }
                 Ok(Expr::Literal(LiteralExpr {
                     id: self.fresh_expr_id(),
                     value: Literal::Int(value),

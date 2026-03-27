@@ -26,6 +26,26 @@ impl Console {
     return ()
   }
 
+  /// Print an i64 without a newline.
+  pub fn print_i64(self, v: i64) -> unit {
+    return ()
+  }
+
+  /// Print an i64 with a newline.
+  pub fn println_i64(self, v: i64) -> unit {
+    return ()
+  }
+
+  /// Print a u64 without a newline.
+  pub fn print_u64(self, v: u64) -> unit {
+    return ()
+  }
+
+  /// Print a u64 with a newline.
+  pub fn println_u64(self, v: u64) -> unit {
+    return ()
+  }
+
   /// Trap if condition is false.
   pub fn assert(self, cond: bool) -> unit {
     return ()

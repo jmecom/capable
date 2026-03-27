@@ -34,7 +34,7 @@ pub(super) fn path_to_string(path: &Path) -> String {
 }
 
 /// Resolve a method receiver type to (module, type name, type args).
-/// Builtins with methods (string/u8) are mapped to their stdlib modules.
+/// Builtins with methods are mapped to their stdlib modules.
 pub(super) fn resolve_method_target(
     receiver_ty: &Ty,
     module_name: &str,
@@ -50,6 +50,12 @@ pub(super) fn resolve_method_target(
         Ty::Path(name, args) => (name.as_str(), args),
         Ty::Builtin(BuiltinType::U8) => {
             return Ok(("sys.bytes".to_string(), "u8".to_string(), Vec::new()));
+        }
+        Ty::Builtin(BuiltinType::I64) => {
+            return Ok(("sys.ints".to_string(), "i64".to_string(), Vec::new()));
+        }
+        Ty::Builtin(BuiltinType::U64) => {
+            return Ok(("sys.ints".to_string(), "u64".to_string(), Vec::new()));
         }
         _ => {
             return Err(TypeError::new(
@@ -166,6 +172,8 @@ pub(super) fn resolve_impl_target(
         }
         Ty::Builtin(BuiltinType::I32) => (module_name.to_string(), "i32".to_string()),
         Ty::Builtin(BuiltinType::U32) => (module_name.to_string(), "u32".to_string()),
+        Ty::Builtin(BuiltinType::I64) => (module_name.to_string(), "i64".to_string()),
+        Ty::Builtin(BuiltinType::U64) => (module_name.to_string(), "u64".to_string()),
         Ty::Builtin(BuiltinType::U8) => (module_name.to_string(), "u8".to_string()),
         Ty::Builtin(BuiltinType::Bool) => (module_name.to_string(), "bool".to_string()),
         _ => {
@@ -498,6 +506,7 @@ pub(super) fn lower_type(
                     "i32" => Some(BuiltinType::I32),
                     "i64" => Some(BuiltinType::I64),
                     "u32" => Some(BuiltinType::U32),
+                    "u64" => Some(BuiltinType::U64),
                     "u8" => Some(BuiltinType::U8),
                     "bool" => Some(BuiltinType::Bool),
                     "unit" => Some(BuiltinType::Unit),

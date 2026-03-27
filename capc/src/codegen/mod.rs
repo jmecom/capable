@@ -600,7 +600,9 @@ fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
         AbiType::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
         AbiType::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        AbiType::I64 => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::U32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        AbiType::U64 => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::U8 => signature.params.push(AbiParam::new(ir::types::I8)),
         AbiType::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
         AbiType::Result(ok, err) => {
@@ -624,7 +626,9 @@ fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
         AbiType::Unit => {}
         AbiType::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        AbiType::I64 => signature.returns.push(AbiParam::new(ir::types::I64)),
         AbiType::U32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        AbiType::U64 => signature.returns.push(AbiParam::new(ir::types::I64)),
         AbiType::U8 => signature.returns.push(AbiParam::new(ir::types::I8)),
         AbiType::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
         AbiType::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),

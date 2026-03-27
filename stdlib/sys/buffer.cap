@@ -28,7 +28,9 @@ pub enum AllocErr {
 /// Slice errors.
 pub enum SliceErr {
   /// Index is out of range.
-  OutOfRange
+  OutOfRange,
+  /// Value does not fit in i32.
+  DoesNotFitI32
 }
 
 /// Copy a slice into a new owned slice using the provided allocator.
@@ -237,6 +239,94 @@ impl Slice<u8> {
     }
     let ptr = unsafe_ptr::ptr_add<u8>(self.ptr, i)
     return unsafe_ptr::ptr_read<u8>(ptr)
+  }
+
+  /// Checked index into the slice.
+  pub fn at_checked(self, i: i32) -> Result<u8, SliceErr> {
+    if (i < 0 || i >= self.len) {
+      return Err(SliceErr::OutOfRange)
+    }
+    return Ok(self.at(i))
+  }
+
+  /// Read a single byte at an offset.
+  pub fn read_u8(self, offset: i32) -> Result<u8, SliceErr> {
+    return self.at_checked(offset)
+  }
+
+  /// Compare four bytes at an offset.
+  pub fn matches4(self, offset: i32, a: u8, b: u8, c: u8, d: u8) -> bool {
+    if (offset < 0) {
+      return false
+    }
+    if (self.len - offset < 4) {
+      return false
+    }
+    return
+      self.at(offset) == a &&
+      self.at(offset + 1) == b &&
+      self.at(offset + 2) == c &&
+      self.at(offset + 3) == d
+  }
+
+  /// Read a little-endian 16-bit word into i32.
+  pub fn read_u16_le(self, offset: i32) -> Result<i32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a big-endian 16-bit word into i32.
+  pub fn read_u16_be(self, offset: i32) -> Result<i32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a little-endian 32-bit word into u32.
+  pub fn read_u32_le(self, offset: i32) -> Result<u32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a big-endian 32-bit word into u32.
+  pub fn read_u32_be(self, offset: i32) -> Result<u32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a little-endian 64-bit word into u64.
+  pub fn read_u64_le(self, offset: i32) -> Result<u64, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a big-endian 64-bit word into u64.
+  pub fn read_u64_be(self, offset: i32) -> Result<u64, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a little-endian 32-bit word into i32.
+  pub fn read_i32_le(self, offset: i32) -> Result<i32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a big-endian 32-bit word into i32.
+  pub fn read_i32_be(self, offset: i32) -> Result<i32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a little-endian 64-bit word into i64.
+  pub fn read_i64_le(self, offset: i32) -> Result<i64, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a big-endian 64-bit word into i64.
+  pub fn read_i64_be(self, offset: i32) -> Result<i64, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a little-endian 64-bit word if it fits in i32.
+  pub fn read_u64_fit_i32_le(self, offset: i32) -> Result<i32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
+  }
+
+  /// Read a big-endian 64-bit word if it fits in i32.
+  pub fn read_u64_fit_i32_be(self, offset: i32) -> Result<i32, SliceErr> {
+    return Err(SliceErr::OutOfRange)
   }
 }
 

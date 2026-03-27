@@ -250,6 +250,25 @@ fn run_static_site_example() {
 }
 
 #[test]
+fn run_elfdump_example() {
+    let out_dir = make_out_dir("elfdump");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "examples/elfdump/elfdump.cap",
+        "examples/elfdump/minimal64.elf",
+    ]);
+    assert_eq!(code, 0, "stderr was: {stderr:?}");
+    assert!(stdout.contains("class: ELF64"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("machine: x86-64"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("entry: 0x0000000000401000"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("phdr[0] type=LOAD"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("flags=R-X"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_defer_free() {
     let out_dir = make_out_dir("defer_free");
     let out_dir = out_dir.to_str().expect("utf8 out dir");
@@ -336,6 +355,28 @@ fn run_unsigned_compare() {
         stdout.contains("unsigned compare ok"),
         "stdout was: {stdout:?}"
     );
+}
+
+#[test]
+fn run_u8_match() {
+    let out_dir = make_out_dir("u8_match");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/u8_match.cap"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("u8 match ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
+fn run_int64_basic() {
+    let out_dir = make_out_dir("int64_basic");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) =
+        run_capc(&["run", "--out-dir", out_dir, "tests/programs/int64_basic.cap"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("4999999998"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("1099511627800"), "stdout was: {stdout:?}");
+    assert!(stdout.contains("int64 ok"), "stdout was: {stdout:?}");
 }
 
 #[test]

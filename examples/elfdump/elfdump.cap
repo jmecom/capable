@@ -1,0 +1,552 @@
+package safe
+module elfdump
+
+use sys::buffer
+use sys::console
+use sys::fs
+use sys::string
+use sys::system
+
+copy struct ElfHeader {
+  class: i32,
+  little: bool,
+  kind: i32,
+  machine: i32,
+  version: i32,
+  phoff: i32,
+  shoff: i32,
+  phentsize: i32,
+  phnum: i32,
+  shentsize: i32,
+  shnum: i32
+}
+
+fn push_text(out: string::Text, value: string) -> bool {
+  match (out.push_str(value)) {
+    Ok(_) => { return true }
+    Err(_) => { return false }
+  }
+}
+
+fn hex_digit(n: u8) -> string {
+  match (n) {
+    0u8 => { return "0" }
+    1u8 => { return "1" }
+    2u8 => { return "2" }
+    3u8 => { return "3" }
+    4u8 => { return "4" }
+    5u8 => { return "5" }
+    6u8 => { return "6" }
+    7u8 => { return "7" }
+    8u8 => { return "8" }
+    9u8 => { return "9" }
+    10u8 => { return "a" }
+    11u8 => { return "b" }
+    12u8 => { return "c" }
+    13u8 => { return "d" }
+    14u8 => { return "e" }
+    15u8 => { return "f" }
+    _ => { return "?" }
+  }
+}
+
+fn parse_class(value: u8) -> Result<i32, unit> {
+  match (value) {
+    1u8 => { return Ok(1) }
+    2u8 => { return Ok(2) }
+    _ => { return Err(()) }
+  }
+}
+
+fn parse_endianness(value: u8) -> Result<bool, unit> {
+  match (value) {
+    1u8 => { return Ok(true) }
+    2u8 => { return Ok(false) }
+    _ => { return Err(()) }
+  }
+}
+
+fn header_size_for_class(class: i32) -> i32 {
+  if (class == 1) {
+    return 52
+  }
+  return 64
+}
+
+fn push_hex_byte(out: string::Text, value: u8) -> bool {
+  let shift: u8 = 4u8
+  let mask: u8 = 15u8
+  let hi = value >> shift
+  let lo = value & mask
+  if (!push_text(out, hex_digit(hi))) {
+    return false
+  }
+  return push_text(out, hex_digit(lo))
+}
+
+fn append_hex_field(
+  out: string::Text,
+  data: buffer::Slice<u8>,
+  offset: i32,
+  count: i32,
+  little: bool
+) -> bool {
+  if (!push_text(out, "0x")) {
+    return false
+  }
+  let i = 0
+  while (i < count) {
+    let index = offset + i
+    if (little) {
+      index = offset + (count - 1 - i)
+    }
+    try let byte = data.at_checked(index) else {
+      return false
+    }
+    if (!push_hex_byte(out, byte)) {
+      return false
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn format_hex_field(
+  data: buffer::Slice<u8>,
+  offset: i32,
+  count: i32,
+  little: bool
+) -> string {
+  let out = string::text_new()
+  defer out.free()
+  if (!append_hex_field(out, data, offset, count, little)) {
+    return "<truncated>"
+  }
+  match (out.copy_string()) {
+    Ok(s) => { return s }
+    Err(_) => { return "<oom>" }
+  }
+}
+
+fn read_u16(data: buffer::Slice<u8>, little: bool, offset: i32) -> Result<i32, buffer::SliceErr> {
+  if (little) {
+    return data.read_u16_le(offset)
+  }
+  return data.read_u16_be(offset)
+}
+
+fn read_i32(data: buffer::Slice<u8>, little: bool, offset: i32) -> Result<i32, buffer::SliceErr> {
+  if (little) {
+    return data.read_i32_le(offset)
+  }
+  return data.read_i32_be(offset)
+}
+
+fn read_u64(data: buffer::Slice<u8>, little: bool, offset: i32) -> Result<u64, buffer::SliceErr> {
+  if (little) {
+    return data.read_u64_le(offset)
+  }
+  return data.read_u64_be(offset)
+}
+
+fn parse_header(data: buffer::Slice<u8>) -> Result<ElfHeader, unit> {
+  if (data.len() < 16 || !data.matches4(0, 127u8, 'E', 'L', 'F')) {
+    return Err(())
+  }
+
+  try let class_byte = data.read_u8(4) else {
+    return Err(())
+  }
+  try let little_byte = data.read_u8(5) else {
+    return Err(())
+  }
+  try let class = parse_class(class_byte) else {
+    return Err(())
+  }
+  try let little = parse_endianness(little_byte) else {
+    return Err(())
+  }
+
+  let min_header = header_size_for_class(class)
+  if (data.len() < min_header) {
+    return Err(())
+  }
+
+  try let kind = read_u16(data, little, 16) else {
+    return Err(())
+  }
+  try let machine = read_u16(data, little, 18) else {
+    return Err(())
+  }
+  try let version = read_i32(data, little, 20) else {
+    return Err(())
+  }
+
+  if (class == 1) {
+    try let phoff = read_i32(data, little, 28) else {
+      return Err(())
+    }
+    try let shoff = read_i32(data, little, 32) else {
+      return Err(())
+    }
+    try let phentsize = read_u16(data, little, 42) else {
+      return Err(())
+    }
+    try let phnum = read_u16(data, little, 44) else {
+      return Err(())
+    }
+    try let shentsize = read_u16(data, little, 46) else {
+      return Err(())
+    }
+    try let shnum = read_u16(data, little, 48) else {
+      return Err(())
+    }
+    return Ok(ElfHeader {
+      class: class,
+      little: little,
+      kind: kind,
+      machine: machine,
+      version: version,
+      phoff: phoff,
+      shoff: shoff,
+      phentsize: phentsize,
+      phnum: phnum,
+      shentsize: shentsize,
+      shnum: shnum
+    })
+  }
+
+  try let phoff64 = read_u64(data, little, 32) else {
+    return Err(())
+  }
+  try let phoff = phoff64.try_i32() else {
+    return Err(())
+  }
+  try let shoff64 = read_u64(data, little, 40) else {
+    return Err(())
+  }
+  try let shoff = shoff64.try_i32() else {
+    return Err(())
+  }
+  try let phentsize = read_u16(data, little, 54) else {
+    return Err(())
+  }
+  try let phnum = read_u16(data, little, 56) else {
+    return Err(())
+  }
+  try let shentsize = read_u16(data, little, 58) else {
+    return Err(())
+  }
+  try let shnum = read_u16(data, little, 60) else {
+    return Err(())
+  }
+  return Ok(ElfHeader {
+    class: class,
+    little: little,
+    kind: kind,
+    machine: machine,
+    version: version,
+    phoff: phoff,
+    shoff: shoff,
+    phentsize: phentsize,
+    phnum: phnum,
+    shentsize: shentsize,
+    shnum: shnum
+  })
+}
+
+fn class_name(class: i32) -> string {
+  match (class) {
+    1 => { return "ELF32" }
+    2 => { return "ELF64" }
+    _ => { return "unknown" }
+  }
+}
+
+fn endian_name(little: bool) -> string {
+  if (little) {
+    return "little-endian"
+  }
+  return "big-endian"
+}
+
+fn file_type_name(kind: i32) -> string {
+  match (kind) {
+    0 => { return "NONE" }
+    1 => { return "REL" }
+    2 => { return "EXEC" }
+    3 => { return "DYN" }
+    4 => { return "CORE" }
+    _ => { return "OTHER" }
+  }
+}
+
+fn machine_name(machine: i32) -> string {
+  match (machine) {
+    3 => { return "x86" }
+    40 => { return "ARM" }
+    62 => { return "x86-64" }
+    183 => { return "AArch64" }
+    _ => { return "other" }
+  }
+}
+
+fn ph_type_name(kind: i32) -> string {
+  match (kind) {
+    0 => { return "NULL" }
+    1 => { return "LOAD" }
+    2 => { return "DYNAMIC" }
+    3 => { return "INTERP" }
+    4 => { return "NOTE" }
+    5 => { return "SHLIB" }
+    6 => { return "PHDR" }
+    7 => { return "TLS" }
+    _ => { return "OTHER" }
+  }
+}
+
+fn sh_type_name(kind: i32) -> string {
+  match (kind) {
+    0 => { return "NULL" }
+    1 => { return "PROGBITS" }
+    2 => { return "SYMTAB" }
+    3 => { return "STRTAB" }
+    4 => { return "RELA" }
+    8 => { return "NOBITS" }
+    9 => { return "REL" }
+    11 => { return "DYNSYM" }
+    _ => { return "OTHER" }
+  }
+}
+
+fn ph_flag_text(flags: i32) -> string {
+  let out = string::text_new()
+  defer out.free()
+  let read = 4
+  let write = 2
+  let exec = 1
+  if ((flags & read) == read) {
+    if (!push_text(out, "R")) {
+      return "R??"
+    }
+  } else {
+    if (!push_text(out, "-")) {
+      return "---"
+    }
+  }
+  if ((flags & write) == write) {
+    if (!push_text(out, "W")) {
+      return "-W-"
+    }
+  } else {
+    if (!push_text(out, "-")) {
+      return "---"
+    }
+  }
+  if ((flags & exec) == exec) {
+    if (!push_text(out, "X")) {
+      return "--X"
+    }
+  } else {
+    if (!push_text(out, "-")) {
+      return "---"
+    }
+  }
+  match (out.copy_string()) {
+    Ok(s) => { return s }
+    Err(_) => { return "---" }
+  }
+}
+
+fn print_header(c: Console, path: string, data: buffer::Slice<u8>, header: ElfHeader) -> unit {
+  c.print("file: ")
+  c.println(path)
+  c.print("class: ")
+  c.println(class_name(header.class))
+  c.print("endianness: ")
+  c.println(endian_name(header.little))
+  c.print("type: ")
+  c.println(file_type_name(header.kind))
+  c.print("machine: ")
+  c.println(machine_name(header.machine))
+  c.print("version: ")
+  c.println_i32(header.version)
+  c.print("entry: ")
+  if (header.class == 1) {
+    c.println(format_hex_field(data, 24, 4, header.little))
+  } else {
+    c.println(format_hex_field(data, 24, 8, header.little))
+  }
+  c.print("program headers: ")
+  c.println_i32(header.phnum)
+  c.print("section headers: ")
+  c.println_i32(header.shnum)
+  return ()
+}
+
+fn dump_program_headers(c: Console, data: buffer::Slice<u8>, header: ElfHeader) -> bool {
+  if (header.phnum == 0) {
+    return true
+  }
+  let required = 0
+  if (header.class == 1) {
+    required = 32
+  } else {
+    required = 56
+  }
+  if (required > header.phentsize) {
+    c.println("program header entries are smaller than expected")
+    return false
+  }
+
+  let i = 0
+  while (i < header.phnum) {
+    let base = header.phoff + (i * header.phentsize)
+    if (base < 0 || base + required > data.len()) {
+      c.println("program headers truncated")
+      return false
+    }
+    let kind = 0
+    let flags = 0
+    if (header.class == 1) {
+      try let k = read_i32(data, header.little, base) else {
+        c.println("program headers truncated")
+        return false
+      }
+      kind = k
+      try let f = read_i32(data, header.little, base + 24) else {
+        c.println("program headers truncated")
+        return false
+      }
+      flags = f
+    } else {
+      try let k = read_i32(data, header.little, base) else {
+        c.println("program headers truncated")
+        return false
+      }
+      kind = k
+      try let f = read_i32(data, header.little, base + 4) else {
+        c.println("program headers truncated")
+        return false
+      }
+      flags = f
+    }
+
+    c.print("phdr[")
+    c.print_i32(i)
+    c.print("] type=")
+    c.print(ph_type_name(kind))
+    c.print(" flags=")
+    c.print(ph_flag_text(flags))
+    c.print(" offset=")
+    if (header.class == 1) {
+      c.print(format_hex_field(data, base + 4, 4, header.little))
+      c.print(" vaddr=")
+      c.print(format_hex_field(data, base + 8, 4, header.little))
+      c.print(" filesz=")
+      c.print(format_hex_field(data, base + 16, 4, header.little))
+      c.print(" memsz=")
+      c.print(format_hex_field(data, base + 20, 4, header.little))
+      c.print(" align=")
+      c.println(format_hex_field(data, base + 28, 4, header.little))
+    } else {
+      c.print(format_hex_field(data, base + 8, 8, header.little))
+      c.print(" vaddr=")
+      c.print(format_hex_field(data, base + 16, 8, header.little))
+      c.print(" filesz=")
+      c.print(format_hex_field(data, base + 32, 8, header.little))
+      c.print(" memsz=")
+      c.print(format_hex_field(data, base + 40, 8, header.little))
+      c.print(" align=")
+      c.println(format_hex_field(data, base + 48, 8, header.little))
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn dump_section_headers(c: Console, data: buffer::Slice<u8>, header: ElfHeader) -> bool {
+  if (header.shnum == 0) {
+    return true
+  }
+  let required = 0
+  if (header.class == 1) {
+    required = 40
+  } else {
+    required = 64
+  }
+  if (required > header.shentsize) {
+    c.println("section header entries are smaller than expected")
+    return false
+  }
+
+  let i = 0
+  while (i < header.shnum) {
+    let base = header.shoff + (i * header.shentsize)
+    if (base < 0 || base + required > data.len()) {
+      c.println("section headers truncated")
+      return false
+    }
+    try let kind = read_i32(data, header.little, base + 4) else {
+      c.println("section headers truncated")
+      return false
+    }
+    c.print("shdr[")
+    c.print_i32(i)
+    c.print("] type=")
+    c.print(sh_type_name(kind))
+    c.print(" offset=")
+    if (header.class == 1) {
+      c.print(format_hex_field(data, base + 16, 4, header.little))
+      c.print(" size=")
+      c.println(format_hex_field(data, base + 20, 4, header.little))
+    } else {
+      c.print(format_hex_field(data, base + 24, 8, header.little))
+      c.print(" size=")
+      c.println(format_hex_field(data, base + 32, 8, header.little))
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn print_fs_err(c: Console, err: fs::FsErr) -> unit {
+  match (err) {
+    fs::FsErr::NotFound => { c.println("filesystem error: not found") }
+    fs::FsErr::PermissionDenied => { c.println("filesystem error: permission denied") }
+    fs::FsErr::InvalidPath => { c.println("filesystem error: invalid path") }
+    fs::FsErr::IoError => { c.println("filesystem error: io error") }
+  }
+  return ()
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let args = rc.mint_args()
+  let path = args.at_or(1, "examples/elfdump/minimal64.elf")
+  let readfs = rc.mint_readfs(".")
+
+  try let bytes = readfs.read_bytes(path) else err {
+    readfs.close()
+    c.println("failed to read ELF file")
+    print_fs_err(c, err)
+    return 1
+  }
+  readfs.close()
+  defer bytes.free()
+
+  let data = bytes.as_slice()
+  try let header = parse_header(data) else {
+    c.println("invalid or unsupported ELF file")
+    return 1
+  }
+
+  print_header(c, path, data, header)
+  if (!dump_program_headers(c, data, header)) {
+    return 1
+  }
+  if (!dump_section_headers(c, data, header)) {
+    return 1
+  }
+  return 0
+}

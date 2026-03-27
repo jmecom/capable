@@ -991,6 +991,22 @@ fn typecheck_bytes_helpers_ok() {
 }
 
 #[test]
+fn typecheck_u8_match_ok() {
+    let source = load_program("u8_match.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_int64_basic_ok() {
+    let source = load_program("int64_basic.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app

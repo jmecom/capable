@@ -358,6 +358,8 @@ pub struct GroupingExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     Int(i64),
+    I64(i64),
+    U64(u64),
     U8(u8),
     String(String),
     Bool(bool),

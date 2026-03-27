@@ -833,6 +833,12 @@ fn emit_hir_expr_inner(
             Literal::Int(value) => Ok(ValueRepr::Single(
                 builder.ins().iconst(ir::types::I32, *value as i64),
             )),
+            Literal::I64(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I64, *value),
+            )),
+            Literal::U64(value) => Ok(ValueRepr::Single(
+                builder.ins().iconst(ir::types::I64, *value as i64),
+            )),
             Literal::U8(value) => Ok(ValueRepr::Single(
                 builder.ins().iconst(ir::types::I8, *value as i64),
             )),
@@ -2122,7 +2128,9 @@ fn store_out_value(
     }
     match ty.abi {
         AbiType::I32
+        | AbiType::I64
         | AbiType::U32
+        | AbiType::U64
         | AbiType::U8
         | AbiType::Bool
         | AbiType::Handle
@@ -2164,6 +2172,13 @@ fn store_value_by_ty(
                 builder.ins().store(MemFlags::new(), val, addr, 0);
                 Ok(())
             }
+            BuiltinType::I64 | BuiltinType::U64 => {
+                let ValueRepr::Single(val) = value else {
+                    return Err(CodegenError::Unsupported("store i64".to_string()));
+                };
+                builder.ins().store(MemFlags::new(), val, addr, 0);
+                Ok(())
+            }
             BuiltinType::U8 | BuiltinType::Bool => {
                 let ValueRepr::Single(val) = value else {
                     return Err(CodegenError::Unsupported("store u8".to_string()));
@@ -2171,9 +2186,6 @@ fn store_value_by_ty(
                 builder.ins().store(MemFlags::new(), val, addr, 0);
                 Ok(())
             }
-            BuiltinType::I64 => Err(CodegenError::Unsupported(
-                "i64 not yet supported".to_string(),
-            )),
         },
         Ty::Ptr(_) => {
             let ValueRepr::Single(val) = value else {
@@ -2304,7 +2316,9 @@ fn store_value_by_tykind(
     };
     match ty {
         AbiType::I32
+        | AbiType::I64
         | AbiType::U32
+        | AbiType::U64
         | AbiType::U8
         | AbiType::Bool
         | AbiType::Handle
@@ -2341,15 +2355,18 @@ fn load_value_by_ty(
                 addr,
                 0,
             ))),
+            BuiltinType::I64 | BuiltinType::U64 => Ok(ValueRepr::Single(builder.ins().load(
+                ir::types::I64,
+                MemFlags::new(),
+                addr,
+                0,
+            ))),
             BuiltinType::U8 | BuiltinType::Bool => Ok(ValueRepr::Single(builder.ins().load(
                 ir::types::I8,
                 MemFlags::new(),
                 addr,
                 0,
             ))),
-            BuiltinType::I64 => Err(CodegenError::Unsupported(
-                "i64 not yet supported".to_string(),
-            )),
         },
         Ty::Ptr(_) => Ok(ValueRepr::Single(builder.ins().load(
             ptr_ty,
@@ -2443,6 +2460,7 @@ fn load_value_by_tykind(
 ) -> Result<ValueRepr, CodegenError> {
     let load_ty = match ty {
         AbiType::I32 | AbiType::U32 => ir::types::I32,
+        AbiType::I64 | AbiType::U64 => ir::types::I64,
         AbiType::U8 | AbiType::Bool => ir::types::I8,
         AbiType::Handle => ir::types::I64,
         AbiType::Ptr => ptr_ty,
@@ -2703,6 +2721,7 @@ fn load_local(builder: &mut FunctionBuilder, local: &LocalValue, ptr_ty: Type) -
 fn value_type_for_result_out(ty: &AbiType, ptr_ty: Type) -> Result<ir::Type, CodegenError> {
     match ty {
         AbiType::I32 | AbiType::U32 => Ok(ir::types::I32),
+        AbiType::I64 | AbiType::U64 => Ok(ir::types::I64),
         AbiType::U8 | AbiType::Bool => Ok(ir::types::I8),
         AbiType::Handle => Ok(ir::types::I64),
         AbiType::Ptr => Ok(ptr_ty),
@@ -2723,6 +2742,9 @@ fn zero_value_for_tykind(
         AbiType::Unit => Ok(ValueRepr::Unit),
         AbiType::I32 | AbiType::U32 => {
             Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I32, 0)))
+        }
+        AbiType::I64 | AbiType::U64 => {
+            Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I64, 0)))
         }
         AbiType::U8 | AbiType::Bool => {
             Ok(ValueRepr::Single(builder.ins().iconst(ir::types::I8, 0)))
@@ -2857,7 +2879,9 @@ pub(super) fn value_from_params(
     match ty {
         AbiType::Unit => Ok(ValueRepr::Unit),
         AbiType::I32
+        | AbiType::I64
         | AbiType::U32
+        | AbiType::U64
         | AbiType::U8
         | AbiType::Bool
         | AbiType::Handle
@@ -2895,7 +2919,9 @@ fn value_from_results(
     match ty {
         AbiType::Unit => Ok(ValueRepr::Unit),
         AbiType::I32
+        | AbiType::I64
         | AbiType::U32
+        | AbiType::U64
         | AbiType::U8
         | AbiType::Bool
         | AbiType::Handle

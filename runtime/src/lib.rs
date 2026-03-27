@@ -326,6 +326,145 @@ fn write_unit_result(out_err: *mut i32, result: Result<(), FsErr>) -> u8 {
     }
 }
 
+fn write_i32_result(out_ok: *mut i32, out_err: *mut i32, result: Result<i32, i32>) -> u8 {
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_i32_unit_result(out_ok: *mut i32, result: Result<i32, ()>) -> u8 {
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+            }
+            0
+        }
+        Err(()) => 1,
+    }
+}
+
+fn write_u32_result(out_ok: *mut u32, out_err: *mut i32, result: Result<u32, i32>) -> u8 {
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_i64_result(out_ok: *mut i64, out_err: *mut i32, result: Result<i64, i32>) -> u8 {
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_u64_result(out_ok: *mut u64, out_err: *mut i32, result: Result<u64, i32>) -> u8 {
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn cap_slice_window(ptr: *const CapSlice, offset: i32, width: usize) -> Result<*const u8, i32> {
+    if ptr.is_null() || offset < 0 {
+        return Err(0);
+    }
+    let slice = unsafe { *ptr };
+    if slice.len < 0 {
+        return Err(0);
+    }
+    let len = slice.len as usize;
+    let start = offset as usize;
+    if start.checked_add(width).is_none_or(|end| end > len) {
+        return Err(0);
+    }
+    if width > 0 && slice.ptr.is_null() {
+        return Err(0);
+    }
+    Ok(unsafe { slice.ptr.add(start) as *const u8 })
+}
+
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
@@ -889,7 +1028,52 @@ pub extern "C" fn capable_rt_console_println_i32(_console: Handle, value: i32) {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_console_print_i64(_console: Handle, value: i64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = write!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_console_println_i64(_console: Handle, value: i64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = writeln!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_console_print_u64(_console: Handle, value: u64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = write!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_console_println_u64(_console: Handle, value: u64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = writeln!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_add_wrap_i32(a: i32, b: i32) -> i32 {
+    a.wrapping_add(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_add_wrap_i64(a: i64, b: i64) -> i64 {
     a.wrapping_add(b)
 }
 
@@ -899,7 +1083,17 @@ pub extern "C" fn capable_rt_math_sub_wrap_i32(a: i32, b: i32) -> i32 {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_math_sub_wrap_i64(a: i64, b: i64) -> i64 {
+    a.wrapping_sub(b)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_mul_wrap_i32(a: i32, b: i32) -> i32 {
+    a.wrapping_mul(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_mul_wrap_i64(a: i64, b: i64) -> i64 {
     a.wrapping_mul(b)
 }
 
@@ -909,12 +1103,27 @@ pub extern "C" fn capable_rt_math_add_wrap_u32(a: u32, b: u32) -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_math_add_wrap_u64(a: u64, b: u64) -> u64 {
+    a.wrapping_add(b)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_sub_wrap_u32(a: u32, b: u32) -> u32 {
     a.wrapping_sub(b)
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_math_sub_wrap_u64(a: u64, b: u64) -> u64 {
+    a.wrapping_sub(b)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_mul_wrap_u32(a: u32, b: u32) -> u32 {
+    a.wrapping_mul(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_mul_wrap_u64(a: u64, b: u64) -> u64 {
     a.wrapping_mul(b)
 }
 
@@ -931,6 +1140,248 @@ pub extern "C" fn capable_rt_math_sub_wrap_u8(a: u8, b: u8) -> u8 {
 #[no_mangle]
 pub extern "C" fn capable_rt_math_mul_wrap_u8(a: u8, b: u8) -> u8 {
     a.wrapping_mul(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u16_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 2) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 2) };
+    write_i32_result(out_ok, out_err, Ok(u16::from_le_bytes([bytes[0], bytes[1]]) as i32))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u16_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 2) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 2) };
+    write_i32_result(out_ok, out_err, Ok(u16::from_be_bytes([bytes[0], bytes[1]]) as i32))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u32_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_u32_result(
+        out_ok,
+        out_err,
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u32_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_u32_result(
+        out_ok,
+        out_err,
+        Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_u64_result(
+        out_ok,
+        out_err,
+        Ok(u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_u64_result(
+        out_ok,
+        out_err,
+        Ok(u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i32_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_i32_result(
+        out_ok,
+        out_err,
+        Ok(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i32_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_i32_result(
+        out_ok,
+        out_err,
+        Ok(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i64_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_i64_result(
+        out_ok,
+        out_err,
+        Ok(i64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i64_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_i64_result(
+        out_ok,
+        out_err,
+        Ok(i64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_fit_i32_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    let value = u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]);
+    match i32::try_from(value) {
+        Ok(value) => write_i32_result(out_ok, out_err, Ok(value)),
+        Err(_) => write_i32_result(out_ok, out_err, Err(1)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_fit_i32_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    let value = u64::from_be_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]);
+    match i32::try_from(value) {
+        Ok(value) => write_i32_result(out_ok, out_err, Ok(value)),
+        Err(_) => write_i32_result(out_ok, out_err, Err(1)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_i64_try_i32(value: i64, out_ok: *mut i32) -> u8 {
+    write_i32_unit_result(out_ok, i32::try_from(value).map_err(|_| ()))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_u64_try_i32(value: u64, out_ok: *mut i32) -> u8 {
+    write_i32_unit_result(out_ok, i32::try_from(value).map_err(|_| ()))
 }
 
 #[no_mangle]

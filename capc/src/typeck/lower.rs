@@ -746,11 +746,9 @@ fn abi_type_for(ty: &Ty, ctx: &LoweringCtx, span: Span) -> Result<AbiType, TypeE
     match ty {
         Ty::Builtin(b) => match b {
             BuiltinType::I32 => Ok(AbiType::I32),
-            BuiltinType::I64 => Err(TypeError::new(
-                "i64 is not supported by the current codegen backend".to_string(),
-                span,
-            )),
+            BuiltinType::I64 => Ok(AbiType::I64),
             BuiltinType::U32 => Ok(AbiType::U32),
+            BuiltinType::U64 => Ok(AbiType::U64),
             BuiltinType::U8 => Ok(AbiType::U8),
             BuiltinType::Bool => Ok(AbiType::Bool),
             BuiltinType::Unit => Ok(AbiType::Unit),

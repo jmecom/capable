@@ -286,6 +286,30 @@ fn runtime_binding_list() -> Vec<RuntimeBinding> {
         ),
         binding(
             "sys.console",
+            "Console__print_i64",
+            "capable_rt_console_print_i64",
+            sig(vec![AbiType::Handle, AbiType::I64], AbiType::Unit),
+        ),
+        binding(
+            "sys.console",
+            "Console__println_i64",
+            "capable_rt_console_println_i64",
+            sig(vec![AbiType::Handle, AbiType::I64], AbiType::Unit),
+        ),
+        binding(
+            "sys.console",
+            "Console__print_u64",
+            "capable_rt_console_print_u64",
+            sig(vec![AbiType::Handle, AbiType::U64], AbiType::Unit),
+        ),
+        binding(
+            "sys.console",
+            "Console__println_u64",
+            "capable_rt_console_println_u64",
+            sig(vec![AbiType::Handle, AbiType::U64], AbiType::Unit),
+        ),
+        binding(
+            "sys.console",
             "Console__assert",
             "capable_rt_assert",
             sig(vec![AbiType::Handle, AbiType::Bool, AbiType::Ptr], AbiType::Unit),
@@ -298,9 +322,21 @@ fn runtime_binding_list() -> Vec<RuntimeBinding> {
         ),
         binding(
             "sys.math",
+            "add_wrap_i64",
+            "capable_rt_math_add_wrap_i64",
+            sig(vec![AbiType::I64, AbiType::I64], AbiType::I64),
+        ),
+        binding(
+            "sys.math",
             "sub_wrap_i32",
             "capable_rt_math_sub_wrap_i32",
             sig(vec![AbiType::I32, AbiType::I32], AbiType::I32),
+        ),
+        binding(
+            "sys.math",
+            "sub_wrap_i64",
+            "capable_rt_math_sub_wrap_i64",
+            sig(vec![AbiType::I64, AbiType::I64], AbiType::I64),
         ),
         binding(
             "sys.math",
@@ -310,9 +346,21 @@ fn runtime_binding_list() -> Vec<RuntimeBinding> {
         ),
         binding(
             "sys.math",
+            "mul_wrap_i64",
+            "capable_rt_math_mul_wrap_i64",
+            sig(vec![AbiType::I64, AbiType::I64], AbiType::I64),
+        ),
+        binding(
+            "sys.math",
             "add_wrap_u32",
             "capable_rt_math_add_wrap_u32",
             sig(vec![AbiType::U32, AbiType::U32], AbiType::U32),
+        ),
+        binding(
+            "sys.math",
+            "add_wrap_u64",
+            "capable_rt_math_add_wrap_u64",
+            sig(vec![AbiType::U64, AbiType::U64], AbiType::U64),
         ),
         binding(
             "sys.math",
@@ -322,9 +370,21 @@ fn runtime_binding_list() -> Vec<RuntimeBinding> {
         ),
         binding(
             "sys.math",
+            "sub_wrap_u64",
+            "capable_rt_math_sub_wrap_u64",
+            sig(vec![AbiType::U64, AbiType::U64], AbiType::U64),
+        ),
+        binding(
+            "sys.math",
             "mul_wrap_u32",
             "capable_rt_math_mul_wrap_u32",
             sig(vec![AbiType::U32, AbiType::U32], AbiType::U32),
+        ),
+        binding(
+            "sys.math",
+            "mul_wrap_u64",
+            "capable_rt_math_mul_wrap_u64",
+            sig(vec![AbiType::U64, AbiType::U64], AbiType::U64),
         ),
         binding(
             "sys.math",
@@ -605,6 +665,242 @@ fn runtime_binding_list() -> Vec<RuntimeBinding> {
             "Alloc__cast_u32_to_u8",
             "capable_rt_cast_u32_to_u8",
             sig(vec![AbiType::Handle, AbiType::Ptr], AbiType::Ptr),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u16_le",
+            "capable_rt_slice_u8_read_u16_le",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u16_be",
+            "capable_rt_slice_u8_read_u16_be",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u32_le",
+            "capable_rt_slice_u8_read_u32_le",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::U32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::U32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::U32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u32_be",
+            "capable_rt_slice_u8_read_u32_be",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::U32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::U32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::U32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u64_le",
+            "capable_rt_slice_u8_read_u64_le",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::U64), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::U64), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::U64), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u64_be",
+            "capable_rt_slice_u8_read_u64_be",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::U64), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::U64), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::U64), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_i32_le",
+            "capable_rt_slice_u8_read_i32_le",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_i32_be",
+            "capable_rt_slice_u8_read_i32_be",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_i64_le",
+            "capable_rt_slice_u8_read_i64_le",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I64), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I64), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I64), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_i64_be",
+            "capable_rt_slice_u8_read_i64_be",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I64), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I64), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I64), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u64_fit_i32_le",
+            "capable_rt_slice_u8_read_u64_fit_i32_le",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.buffer",
+            "Slice__u8__read_u64_fit_i32_be",
+            "capable_rt_slice_u8_read_u64_fit_i32_be",
+            sig(
+                vec![AbiType::Ptr, AbiType::I32],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+            sig(
+                vec![
+                    AbiType::Ptr,
+                    AbiType::I32,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::I32)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.ints",
+            "i64__try_i32",
+            "capable_rt_i64_try_i32",
+            sig(
+                vec![AbiType::I64],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::Unit)),
+            ),
+            sig(
+                vec![
+                    AbiType::I64,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::Unit)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::Unit)),
+            ),
+        ),
+        binding_with_abi(
+            "sys.ints",
+            "u64__try_i32",
+            "capable_rt_u64_try_i32",
+            sig(
+                vec![AbiType::U64],
+                AbiType::Result(Box::new(AbiType::I32), Box::new(AbiType::Unit)),
+            ),
+            sig(
+                vec![
+                    AbiType::U64,
+                    AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::Unit)),
+                ],
+                AbiType::ResultOut(Box::new(AbiType::I32), Box::new(AbiType::Unit)),
+            ),
         ),
         binding(
             "sys.bytes",

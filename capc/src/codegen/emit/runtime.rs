@@ -530,12 +530,9 @@ fn hir_type_from_ty(
     let abi = match ty {
         Ty::Builtin(b) => match b {
             BuiltinType::I32 => AbiType::I32,
-            BuiltinType::I64 => {
-                return Err(CodegenError::Unsupported(
-                    "i64 is not supported by the current codegen backend".to_string(),
-                ))
-            }
+            BuiltinType::I64 => AbiType::I64,
             BuiltinType::U32 => AbiType::U32,
+            BuiltinType::U64 => AbiType::U64,
             BuiltinType::U8 => AbiType::U8,
             BuiltinType::Bool => AbiType::Bool,
             BuiltinType::Unit | BuiltinType::Never => AbiType::Unit,

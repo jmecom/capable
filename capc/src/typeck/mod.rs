@@ -49,8 +49,8 @@ use type_params::{
     build_type_param_bounds, build_type_params, merge_type_params, type_param_names,
 };
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] =
-    ["i32", "i64", "u32", "u8", "bool", "unit", "never", "Self"];
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 9] =
+    ["i32", "i64", "u32", "u64", "u8", "bool", "unit", "never", "Self"];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +71,7 @@ pub enum BuiltinType {
     I32,
     I64,
     U32,
+    U64,
     U8,
     Bool,
     Unit,
@@ -88,6 +89,7 @@ pub fn is_numeric_type(ty: &Ty) -> bool {
         Ty::Builtin(BuiltinType::I32)
             | Ty::Builtin(BuiltinType::I64)
             | Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U64)
             | Ty::Builtin(BuiltinType::U8)
     )
 }
@@ -101,7 +103,9 @@ pub fn is_orderable_type(ty: &Ty) -> bool {
 pub fn is_unsigned_type(ty: &Ty) -> bool {
     matches!(
         ty,
-        Ty::Builtin(BuiltinType::U32) | Ty::Builtin(BuiltinType::U8)
+        Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U64)
+            | Ty::Builtin(BuiltinType::U8)
     )
 }
 

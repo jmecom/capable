@@ -64,6 +64,7 @@ Key syntax:
 - Modules + imports: `module ...` and `use ...` (alias by last path segment).
 - `for { ... }` is an infinite loop; `for i in a..b` is a range loop.
 - Integer arithmetic traps on overflow.
+- Built-in integer types are `i32`, `i64`, `u32`, `u64`, and `u8`.
 - Variable shadowing is not allowed.
 
 ## 3) Control flow and pattern matching
@@ -349,6 +350,9 @@ Helpers:
 - `Text.as_string()` borrows cheaply; `Text.copy_string()` allocates a copy.
 - `Vec<u8>.as_string()` borrows bytes as text; `Vec<u8>.copy_string()` allocates a copy.
 - `Text.slice_range` returns a `string` view into its buffer.
+
+For binary parsing, `Slice<u8>` also exposes checked endian readers like
+`read_u16_le`, `read_u32_be`, `read_u64_le`, and `read_i64_be`.
 
 ## 11) Slices and indexing
 

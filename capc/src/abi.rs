@@ -5,7 +5,9 @@
 pub enum AbiType {
     Unit,
     I32,
+    I64,
     U32,
+    U64,
     U8,
     Bool,
     Handle,

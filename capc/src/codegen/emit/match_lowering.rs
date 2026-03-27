@@ -434,6 +434,14 @@ fn hir_match_pattern_cond(
                 let rhs = builder.ins().iconst(ir::types::I32, *n);
                 Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
             }
+            Literal::I64(n) => {
+                let rhs = builder.ins().iconst(ir::types::I64, *n);
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
+            Literal::U64(n) => {
+                let rhs = builder.ins().iconst(ir::types::I64, *n as i64);
+                Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
+            }
             Literal::U8(n) => {
                 let rhs = builder.ins().iconst(ir::types::I8, i64::from(*n));
                 Ok(builder.ins().icmp(IntCC::Equal, match_val, rhs))
