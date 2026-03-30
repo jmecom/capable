@@ -6,11 +6,11 @@ syntax case match
 
 syntax keyword capKeyword package module use pub extern fn let if else while for in return struct enum impl match break continue defer try unsafe safe opaque linear copy capability true false
 syntax keyword capBuiltin unit
-syntax keyword capType i32 u32 u8 bool string Result
+syntax keyword capType i32 i64 u32 u64 u8 bool string Result
 
 syntax match capComment "//.*$"
 syntax region capString start=+"+ skip=+\\\\\|\\"+ end=+"+
-syntax match capNumber "\<\d\+u8\>\|\<\d\+\>"
+syntax match capNumber "\<\d\+\%(u8\|i64\|u64\)\>\|\<\d\+\>"
 
 syntax match capFunctionDecl "\<fn\>\s\+\zs[A-Za-z_][A-Za-z0-9_]*"
 syntax match capTypeDecl "\<\(struct\|enum\|impl\)\>\s\+\zs[A-Za-z_][A-Za-z0-9_:]*"

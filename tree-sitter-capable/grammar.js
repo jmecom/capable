@@ -257,6 +257,8 @@ module.exports = grammar({
       choice(
         $.int_lit,
         $.u8_lit,
+        $.i64_lit,
+        $.u64_lit,
         $.string_lit,
         "true",
         "false",
@@ -265,6 +267,8 @@ module.exports = grammar({
 
     int_lit: ($) => /[0-9]+/,
     u8_lit: ($) => /[0-9]+u8/,
+    i64_lit: ($) => /[0-9]+i64/,
+    u64_lit: ($) => /[0-9]+u64/,
     string_lit: ($) => /"([^"\\]|\\.)*"/,
 
     identifier: ($) => /[a-zA-Z_][a-zA-Z0-9_]*/,

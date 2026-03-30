@@ -23,6 +23,31 @@ local function plugin_root()
   return vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(source)))
 end
 
+local function parser_candidates()
+  local root = plugin_root()
+  local data = vim.fn.stdpath("data")
+  return {
+    data .. "/site/parser/capable.so",
+    root .. "/parser/capable.so",
+    root .. "/tree-sitter-capable/capable.so",
+  }
+end
+
+local function register_compiled_parser()
+  if not (vim.treesitter and vim.treesitter.language and vim.treesitter.language.add) then
+    return false
+  end
+
+  for _, path in ipairs(parser_candidates()) do
+    if vim.uv.fs_stat(path) then
+      pcall(vim.treesitter.language.add, "capable", { path = path })
+      return true
+    end
+  end
+
+  return false
+end
+
 local function normalize_cmd(cmd)
   if type(cmd) == "string" then
     return { cmd }
@@ -37,6 +62,8 @@ local function resolve_root(bufnr, markers)
 end
 
 function M.register_treesitter()
+  register_compiled_parser()
+
   local ok, parsers = pcall(require, "nvim-treesitter.parsers")
   if not ok then
     return false
@@ -54,6 +81,8 @@ function M.register_treesitter()
   if vim.treesitter and vim.treesitter.language and vim.treesitter.language.register then
     pcall(vim.treesitter.language.register, "capable", "cap")
   end
+
+  register_compiled_parser()
 
   return true
 end

@@ -11,12 +11,6 @@
   "if"
   "else"
   "while"
-  "for"
-  "in"
-  "break"
-  "continue"
-  "defer"
-  "try"
   "return"
   "struct"
   "enum"
@@ -35,7 +29,12 @@
 [
   (int_lit)
   (u8_lit)
+  (i64_lit)
+  (u64_lit)
 ] @number
+
+((type_path (identifier) @type.builtin)
+ (#match? @type.builtin "^(i32|i64|u32|u64|u8|bool|string|Result)$"))
 
 (string_lit) @string
 
@@ -50,5 +49,5 @@
 (struct_decl name: (identifier) @type)
 (enum_decl name: (identifier) @type)
 
-(field name: (identifier) @property)
-(struct_field name: (identifier) @property)
+(field (identifier) @property)
+(struct_field (identifier) @property)

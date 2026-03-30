@@ -37,7 +37,7 @@
       "patterns": [
         {
           "name": "constant.numeric.cap",
-          "match": "\\b\\d+u8\\b|\\b\\d+\\b"
+          "match": "\\b\\d+(?:u8|i64|u64)\\b|\\b\\d+\\b"
         }
       ]
     },
@@ -57,7 +57,7 @@
       "patterns": [
         {
           "name": "storage.type.cap",
-          "match": "\\b(i32|u32|u8|bool|string|Result)\\b"
+          "match": "\\b(i32|i64|u32|u64|u8|bool|string|Result)\\b"
         }
       ]
     }

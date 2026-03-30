@@ -423,11 +423,19 @@
       "required": false,
       "types": [
         {
+          "type": "i64_lit",
+          "named": true
+        },
+        {
           "type": "int_lit",
           "named": true
         },
         {
           "type": "string_lit",
+          "named": true
+        },
+        {
+          "type": "u64_lit",
           "named": true
         },
         {
@@ -1076,6 +1084,10 @@
     "named": false
   },
   {
+    "type": "i64_lit",
+    "named": true
+  },
+  {
     "type": "identifier",
     "named": true
   },
@@ -1142,6 +1154,10 @@
   {
     "type": "true",
     "named": false
+  },
+  {
+    "type": "u64_lit",
+    "named": true
   },
   {
     "type": "u8_lit",
