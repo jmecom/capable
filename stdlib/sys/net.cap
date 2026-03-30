@@ -45,13 +45,23 @@ impl TcpListener {
 }
 
 impl TcpConn {
-  /// Read all available data into a string.
-  pub fn read_to_string(self: &TcpConn, alloc: buffer::Alloc) -> Result<string, NetErr> {
+  /// Read all available data into a string using the process default allocator.
+  pub fn read_to_string(self: &TcpConn) -> Result<string, NetErr> {
+    return self.read_to_string_with_alloc(buffer::default_alloc())
+  }
+
+  /// Read all available data into a string using the provided allocator.
+  pub fn read_to_string_with_alloc(self: &TcpConn, alloc: buffer::Alloc) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 
-  /// Read up to max_size bytes into a string.
-  pub fn read(self: &TcpConn, alloc: buffer::Alloc, max_size: i32) -> Result<string, NetErr> {
+  /// Read up to max_size bytes into a string using the process default allocator.
+  pub fn read(self: &TcpConn, max_size: i32) -> Result<string, NetErr> {
+    return self.read_with_alloc(buffer::default_alloc(), max_size)
+  }
+
+  /// Read up to max_size bytes into a string using the provided allocator.
+  pub fn read_with_alloc(self: &TcpConn, alloc: buffer::Alloc, max_size: i32) -> Result<string, NetErr> {
     return Err(NetErr::IoError)
   }
 

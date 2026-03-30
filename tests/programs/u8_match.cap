@@ -1,0 +1,21 @@
+module u8_match
+use sys::system
+
+fn nibble_name(n: u8) -> string {
+  return match (n) {
+    0u8 => { "zero" }
+    10u8 => { "ten" }
+    15u8 => { "fifteen" }
+    _ => { "other" }
+  }
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  c.assert(nibble_name(0u8) == "zero")
+  c.assert(nibble_name(10u8) == "ten")
+  c.assert(nibble_name(15u8) == "fifteen")
+  c.assert(nibble_name(7u8) == "other")
+  c.println("u8 match ok")
+  return 0
+}

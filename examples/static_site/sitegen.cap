@@ -1,0 +1,754 @@
+package safe
+module sitegen
+
+use sys::console
+use sys::fs
+use sys::path
+use sys::string
+use sys::system
+use sys::vec
+
+enum GenErr {
+  Fs(fs::FsErr),
+  Alloc
+}
+
+copy struct PageInfo {
+  title: string,
+  summary: string,
+  date: string,
+  url: string
+}
+
+
+fn empty_page_info() -> PageInfo {
+  return PageInfo {
+    title: "",
+    summary: "",
+    date: "",
+    url: ""
+  }
+}
+
+fn fallback_title(rel: string) -> string {
+  return path::stem_view(rel)
+}
+
+fn is_post_path(rel: string) -> bool {
+  return rel.starts_with("posts/") && rel.ends_with(".md")
+}
+
+fn parse_page_info(rel: string, url: string, markdown: string) -> PageInfo {
+  let title = ""
+  let summary = ""
+  let date = ""
+  let phase = 0
+  let lines = markdown.lines_view()
+  defer lines.free()
+
+  for line in lines {
+    let trimmed = line.trim_view()
+    if (phase == 0) {
+      if (trimmed.is_empty()) {
+        continue
+      }
+      if (trimmed.eq("---")) {
+        phase = 1
+        continue
+      }
+      phase = 2
+    }
+
+    if (phase == 1) {
+      if (trimmed.eq("---")) {
+        phase = 2
+        continue
+      }
+      if (trimmed.starts_with("title:")) {
+        title = trimmed.trim_prefix_view("title:").trim_view()
+        continue
+      }
+      if (trimmed.starts_with("summary:")) {
+        summary = trimmed.trim_prefix_view("summary:").trim_view()
+        continue
+      }
+      if (trimmed.starts_with("date:")) {
+        date = trimmed.trim_prefix_view("date:").trim_view()
+        continue
+      }
+      continue
+    }
+
+    if (title.is_empty() && trimmed.starts_with("# ")) {
+      title = trimmed.trim_prefix_view("# ").trim_view()
+      continue
+    }
+    if (summary.is_empty() && !trimmed.is_empty() && !trimmed.starts_with("#") && !trimmed.starts_with("- ") && !trimmed.starts_with("> ") && !trimmed.starts_with("```")) {
+      summary = trimmed
+    }
+  }
+
+  if (title.is_empty()) {
+    title = fallback_title(rel)
+  }
+
+  return PageInfo {
+    title: title,
+    summary: summary,
+    date: date,
+    url: url
+  }
+}
+
+fn push_text(out: string::Text, value: string) -> bool {
+  match (out.push_str(value)) {
+    Ok(_) => { return true }
+    Err(_) => { return false }
+  }
+}
+
+fn push_byte(out: string::Text, value: u8) -> bool {
+  match (out.push_byte(value)) {
+    Ok(_) => { return true }
+    Err(_) => { return false }
+  }
+}
+
+fn push_html_escaped(out: string::Text, value: string) -> bool {
+  let i = 0
+  while (i < value.len()) {
+    let b = value.byte_at(i)
+    match (b) {
+      '&' => {
+        if (!push_text(out, "&amp;")) {
+          return false
+        }
+      }
+      '<' => {
+        if (!push_text(out, "&lt;")) {
+          return false
+        }
+      }
+      '>' => {
+        if (!push_text(out, "&gt;")) {
+          return false
+        }
+      }
+      '"' => {
+        if (!push_text(out, "&quot;")) {
+          return false
+        }
+      }
+      _ => {
+        if (!push_byte(out, b)) {
+          return false
+        }
+      }
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn push_wrapped(out: string::Text, open: string, body: string, close: string) -> bool {
+  if (!push_text(out, open)) {
+    return false
+  }
+  if (!push_html_escaped(out, body)) {
+    return false
+  }
+  if (!push_text(out, close)) {
+    return false
+  }
+  return true
+}
+
+fn path_depth(page_rel: string) -> i32 {
+  let dir = path::dirname_view(page_rel)
+  if (dir.is_empty()) {
+    return 0
+  }
+  let parts = path::segments_view(dir)
+  defer parts.free()
+  return parts.len()
+}
+
+fn push_site_href(out: string::Text, page_rel: string, target_rel: string) -> bool {
+  let depth = path_depth(page_rel)
+  for i in 0..depth {
+    if (!push_text(out, "../")) {
+      return false
+    }
+  }
+  return push_text(out, target_rel)
+}
+
+fn push_nav_link(out: string::Text, page_rel: string, target_rel: string, label: string) -> bool {
+  if (!push_text(out, "<a href=\"")) {
+    return false
+  }
+  if (!push_site_href(out, page_rel, target_rel)) {
+    return false
+  }
+  if (!push_text(out, "\">")) {
+    return false
+  }
+  if (!push_html_escaped(out, label)) {
+    return false
+  }
+  if (!push_text(out, "</a>")) {
+    return false
+  }
+  return true
+}
+
+fn render_layout_open(out: string::Text, page: PageInfo, page_rel: string) -> bool {
+  if (!push_text(out, "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>")) {
+    return false
+  }
+  if (!push_html_escaped(out, page.title)) {
+    return false
+  }
+  if (!push_text(out, "</title>\n<link rel=\"stylesheet\" href=\"")) {
+    return false
+  }
+  if (!push_site_href(out, page_rel, "site.css")) {
+    return false
+  }
+  if (!push_text(out, "\">\n</head>\n<body>\n<header class=\"site-header\">\n<div class=\"site-shell\">\n<div class=\"brand-row\">")) {
+    return false
+  }
+  if (!push_nav_link(out, page_rel, "index.html", "Capable Static")) {
+    return false
+  }
+  if (!push_text(out, "<nav class=\"site-nav\">")) {
+    return false
+  }
+  if (!push_nav_link(out, page_rel, "about.html", "About")) {
+    return false
+  }
+  if (!push_text(out, " ")) {
+    return false
+  }
+  if (!push_nav_link(out, page_rel, "posts/index.html", "Posts")) {
+    return false
+  }
+  if (!push_text(out, "</nav>\n</div>\n</div>\n</header>\n<main class=\"site-shell\">\n")) {
+    return false
+  }
+  return true
+}
+
+fn render_layout_close(out: string::Text) -> bool {
+  return push_text(out, "</main>\n<footer class=\"site-footer\"><div class=\"site-shell\">Generated with Capable.</div></footer>\n</body>\n</html>\n")
+}
+
+fn render_markdown(out: string::Text, markdown: string) -> bool {
+  let phase = 0
+  let in_list = false
+  let in_code = false
+  let lines = markdown.lines_view()
+  defer lines.free()
+
+  for line in lines {
+    let trimmed = line.trim_view()
+    if (phase == 0) {
+      if (trimmed.is_empty()) {
+        continue
+      }
+      if (trimmed.eq("---")) {
+        phase = 1
+        continue
+      }
+      phase = 2
+    }
+
+    if (phase == 1) {
+      if (trimmed.eq("---")) {
+        phase = 2
+      }
+      continue
+    }
+
+    if (in_code) {
+      if (trimmed.starts_with("```")) {
+        if (!push_text(out, "</code></pre>\n")) {
+          return false
+        }
+        in_code = false
+        continue
+      }
+      if (!push_html_escaped(out, line)) {
+        return false
+      }
+      if (!push_byte(out, '\n')) {
+        return false
+      }
+      continue
+    }
+
+    if (trimmed.starts_with("```")) {
+      if (in_list) {
+        if (!push_text(out, "</ul>\n")) {
+          return false
+        }
+        in_list = false
+      }
+      if (!push_text(out, "<pre><code>")) {
+        return false
+      }
+      in_code = true
+      continue
+    }
+
+    if (trimmed.is_empty()) {
+      if (in_list) {
+        if (!push_text(out, "</ul>\n")) {
+          return false
+        }
+        in_list = false
+      }
+      continue
+    }
+
+    if (trimmed.starts_with("- ")) {
+      if (!in_list) {
+        if (!push_text(out, "<ul>\n")) {
+          return false
+        }
+        in_list = true
+      }
+      if (!push_wrapped(out, "<li>", trimmed.trim_prefix_view("- ").trim_view(), "</li>\n")) {
+        return false
+      }
+      continue
+    }
+
+    if (in_list) {
+      if (!push_text(out, "</ul>\n")) {
+        return false
+      }
+      in_list = false
+    }
+
+    if (trimmed.starts_with("# ")) {
+      if (!push_wrapped(out, "<h1>", trimmed.trim_prefix_view("# ").trim_view(), "</h1>\n")) {
+        return false
+      }
+      continue
+    }
+
+    if (trimmed.starts_with("## ")) {
+      if (!push_wrapped(out, "<h2>", trimmed.trim_prefix_view("## ").trim_view(), "</h2>\n")) {
+        return false
+      }
+      continue
+    }
+
+    if (trimmed.starts_with("> ")) {
+      if (!push_wrapped(out, "<blockquote>", trimmed.trim_prefix_view("> ").trim_view(), "</blockquote>\n")) {
+        return false
+      }
+      continue
+    }
+
+    if (!push_wrapped(out, "<p>", trimmed, "</p>\n")) {
+      return false
+    }
+  }
+
+  if (in_list) {
+    if (!push_text(out, "</ul>\n")) {
+      return false
+    }
+  }
+
+  if (in_code) {
+    if (!push_text(out, "</code></pre>\n")) {
+      return false
+    }
+  }
+
+  return true
+}
+
+fn render_recent_posts(out: string::Text, page_rel: string, posts: vec::Vec<PageInfo>) -> bool {
+  if (posts.is_empty()) {
+    return true
+  }
+  if (!push_text(out, "<section class=\"post-list\">\n<h2>Recent Posts</h2>\n")) {
+    return false
+  }
+
+  let shown = 0
+  for post in posts {
+    if (shown >= 3) {
+      break
+    }
+    if (!push_text(out, "<article class=\"post-card\">\n<h3><a href=\"")) {
+      return false
+    }
+    if (!push_site_href(out, page_rel, post.url)) {
+      return false
+    }
+    if (!push_text(out, "\">")) {
+      return false
+    }
+    if (!push_html_escaped(out, post.title)) {
+      return false
+    }
+    if (!push_text(out, "</a></h3>\n")) {
+      return false
+    }
+    if (!post.date.is_empty()) {
+      if (!push_wrapped(out, "<p class=\"meta\">", post.date, "</p>\n")) {
+        return false
+      }
+    }
+    if (!post.summary.is_empty()) {
+      if (!push_wrapped(out, "<p>", post.summary, "</p>\n")) {
+        return false
+      }
+    }
+    if (!push_text(out, "</article>\n")) {
+      return false
+    }
+    shown = shown + 1
+  }
+
+  if (!push_text(out, "<p class=\"archive-link\">")) {
+    return false
+  }
+  if (!push_nav_link(out, page_rel, "posts/index.html", "Browse all posts")) {
+    return false
+  }
+  if (!push_text(out, "</p>\n</section>\n")) {
+    return false
+  }
+  return true
+}
+
+fn render_page(rel: string, out_path: string, markdown: string, posts: vec::Vec<PageInfo>) -> string {
+  let page = parse_page_info(rel, out_path, markdown)
+  let out = string::text_new()
+  defer out.free()
+
+  if (!render_layout_open(out, page, out_path)) {
+    return ""
+  }
+  if (!push_text(out, "<article class=\"page\">\n")) {
+    return ""
+  }
+  if (!page.date.is_empty()) {
+    if (!push_wrapped(out, "<p class=\"meta\">", page.date, "</p>\n")) {
+      return ""
+    }
+  }
+  if (!render_markdown(out, markdown)) {
+    return ""
+  }
+  if (out_path.eq("index.html")) {
+    if (!render_recent_posts(out, out_path, posts)) {
+      return ""
+    }
+  }
+  if (!push_text(out, "</article>\n")) {
+    return ""
+  }
+  if (!render_layout_close(out)) {
+    return ""
+  }
+  match (out.copy_string()) {
+    Ok(html) => { return html }
+    Err(_) => { return "" }
+  }
+}
+
+fn render_archive(posts: vec::Vec<PageInfo>) -> string {
+  let page = PageInfo {
+    title: "Post Archive",
+    summary: "",
+    date: "",
+    url: "posts/index.html"
+  }
+  let out = string::text_new()
+  defer out.free()
+
+  if (!render_layout_open(out, page, "posts/index.html")) {
+    return ""
+  }
+  if (!push_text(out, "<article class=\"page\">\n<h1>Post Archive</h1>\n<p>Every generated post, sorted by date.</p>\n<section class=\"post-list\">\n")) {
+    return ""
+  }
+
+  for post in posts {
+    if (!push_text(out, "<article class=\"post-card\">\n<h2><a href=\"")) {
+      return ""
+    }
+    if (!push_site_href(out, "posts/index.html", post.url)) {
+      return ""
+    }
+    if (!push_text(out, "\">")) {
+      return ""
+    }
+    if (!push_html_escaped(out, post.title)) {
+      return ""
+    }
+    if (!push_text(out, "</a></h2>\n")) {
+      return ""
+    }
+    if (!post.date.is_empty()) {
+      if (!push_wrapped(out, "<p class=\"meta\">", post.date, "</p>\n")) {
+        return ""
+      }
+    }
+    if (!post.summary.is_empty()) {
+      if (!push_wrapped(out, "<p>", post.summary, "</p>\n")) {
+        return ""
+      }
+    }
+    if (!push_text(out, "</article>\n")) {
+      return ""
+    }
+  }
+
+  if (!push_text(out, "</section>\n</article>\n")) {
+    return ""
+  }
+  if (!render_layout_close(out)) {
+    return ""
+  }
+  match (out.copy_string()) {
+    Ok(html) => { return html }
+    Err(_) => { return "" }
+  }
+}
+
+fn write_site_css(c: Console, out: &Dir) -> bool {
+  let css = "html{background:#f5efe7;color:#1a1714;}body{margin:0;font:16px/1.7 Georgia,serif;}a{color:#8b2f23;text-decoration:none;}a:hover{text-decoration:underline;}code,pre{font:14px/1.6 Menlo,monospace;}pre{background:#1f1a17;color:#f8efe4;padding:16px;border-radius:14px;overflow:auto;}blockquote{border-left:4px solid #d58b61;margin:1.2rem 0;padding:0.2rem 0 0.2rem 1rem;color:#5d4636;}ul{padding-left:1.2rem;}.site-shell{max-width:860px;margin:0 auto;padding:0 24px;}.site-header{background:#1f1a17;color:#f8efe4;border-bottom:1px solid #3e332c;}.brand-row{display:flex;justify-content:space-between;align-items:center;padding:20px 0;gap:16px;}.brand-row a{color:#f8efe4;}.site-nav{display:flex;gap:16px;}.site-footer{border-top:1px solid #d8cec3;color:#6d6054;padding:24px 0 40px;}.page{padding:40px 0 56px;}.page h1,.page h2,.post-card h2,.post-card h3{line-height:1.15;margin-bottom:0.5rem;}.meta{font:13px/1.5 Menlo,monospace;color:#6d6054;text-transform:uppercase;letter-spacing:0.08em;}.post-list{display:grid;gap:20px;}.post-card{background:#fffdf9;border:1px solid #e0d4c8;border-radius:18px;padding:20px 22px;box-shadow:0 10px 30px rgba(31,26,23,0.05);}.archive-link{margin-top:1rem;}.page p,.page li,.post-card p{max-width:70ch;}"
+  try out.write_string("site.css", css) else err {
+    c.println("failed to write site.css")
+    print_error(c, GenErr::Fs(err))
+    return false
+  }
+  c.println("generated site.css")
+  return true
+}
+
+fn collect_posts(c: Console, src: &ReadFS, rel: string, posts: vec::Vec<PageInfo>) -> bool {
+  if (src.is_dir(rel)) {
+    try let entries = src.list_dir(rel) else err {
+      c.print("failed to list ")
+      c.println(rel)
+      print_error(c, GenErr::Fs(err))
+      return false
+    }
+    defer entries.free()
+    for entry in entries {
+      let child = path::join(rel, entry)
+      if (!collect_posts(c, src, child, posts)) {
+        return false
+      }
+    }
+    return true
+  }
+
+  if (!is_post_path(rel)) {
+    return true
+  }
+
+  try let markdown = src.read_to_string(rel) else err {
+    c.print("failed to read ")
+    c.println(rel)
+    print_error(c, GenErr::Fs(err))
+    return false
+  }
+
+  let info = parse_page_info(rel, path::replace_extension(rel, "html"), markdown)
+  try posts.push(info) else {
+    c.println("failed to record post metadata")
+    print_error(c, GenErr::Alloc)
+    return false
+  }
+  return true
+}
+
+fn post_before(posts: vec::Vec<PageInfo>, i: i32, j: i32) -> bool {
+  let left = posts.get_or(i, empty_page_info())
+  let right = posts.get_or(j, empty_page_info())
+  if (!left.date.eq(right.date)) {
+    return left.date.compare(right.date) > 0
+  }
+  return left.title.compare(right.title) < 0
+}
+
+fn sort_posts(posts: vec::Vec<PageInfo>) -> bool {
+  let n = posts.len()
+  for i in 1..n {
+    let j = i
+    while (j > 0) {
+      if (post_before(posts, j, j - 1)) {
+        try posts.swap(j, j - 1) else {
+          return false
+        }
+        j = j - 1
+      } else {
+        break
+      }
+    }
+  }
+  return true
+}
+
+fn generate_tree(c: Console, src: &ReadFS, out: &Dir, rel: string, posts: vec::Vec<PageInfo>) -> i32 {
+  if (src.is_dir(rel)) {
+    try let entries = src.list_dir(rel) else err {
+      c.print("failed to list ")
+      c.println(rel)
+      print_error(c, GenErr::Fs(err))
+      return -1
+    }
+    defer entries.free()
+    let generated = 0
+    for entry in entries {
+      let child = path::join(rel, entry)
+      let count = generate_tree(c, src, out, child, posts)
+      if (count < 0) {
+        return -1
+      }
+      generated = generated + count
+    }
+    return generated
+  }
+
+  if (!rel.ends_with(".md")) {
+    return 0
+  }
+
+  try let markdown = src.read_to_string(rel) else err {
+    c.print("failed to read ")
+    c.println(rel)
+    print_error(c, GenErr::Fs(err))
+    return -1
+  }
+
+  let out_path = path::replace_extension(rel, "html")
+  let html = render_page(rel, out_path, markdown, posts)
+  if (html.is_empty()) {
+    c.print("failed to render ")
+    c.println(rel)
+    print_error(c, GenErr::Alloc)
+    return -1
+  }
+
+  let out_dir = path::dirname_view(out_path)
+  if (!out_dir.is_empty()) {
+    try out.create_dir_all(out_dir) else err {
+      c.print("failed to create output dir for ")
+      c.println(out_path)
+      print_error(c, GenErr::Fs(err))
+      return -1
+    }
+  }
+  try out.write_string(out_path, html) else err {
+    c.print("failed to write ")
+    c.println(out_path)
+    print_error(c, GenErr::Fs(err))
+    return -1
+  }
+
+  c.print("generated ")
+  c.println(out_path)
+  return 1
+}
+
+fn generate_archive(c: Console, out: &Dir, posts: vec::Vec<PageInfo>) -> bool {
+  try out.create_dir_all("posts") else err {
+    c.println("failed to create posts archive dir")
+    print_error(c, GenErr::Fs(err))
+    return false
+  }
+  let html = render_archive(posts)
+  if (html.is_empty()) {
+    c.println("failed to render posts archive")
+    print_error(c, GenErr::Alloc)
+    return false
+  }
+  try out.write_string("posts/index.html", html) else err {
+    c.println("failed to write posts archive")
+    print_error(c, GenErr::Fs(err))
+    return false
+  }
+  c.println("generated posts/index.html")
+  return true
+}
+
+fn print_error(c: Console, err: GenErr) -> unit {
+  match (err) {
+    GenErr::Alloc => {
+      c.println("allocation failed")
+    }
+    GenErr::Fs(kind) => {
+      match (kind) {
+        fs::FsErr::NotFound => {
+          c.println("filesystem error: not found")
+        }
+        fs::FsErr::PermissionDenied => {
+          c.println("filesystem error: permission denied")
+        }
+        fs::FsErr::InvalidPath => {
+          c.println("filesystem error: invalid path")
+        }
+        fs::FsErr::IoError => {
+          c.println("filesystem error: io error")
+        }
+      }
+    }
+  }
+  return ()
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let args = rc.mint_args()
+  let src_root = args.at_or(1, "examples/static_site/content")
+  let out_root = args.at_or(2, "examples/static_site/out")
+
+  let src = rc.mint_readfs(src_root)
+  let out_fs = rc.mint_filesystem(out_root)
+  let out = out_fs.root_dir()
+  let src_ref: &ReadFS = src
+  let out_ref: &Dir = out
+  let posts = vec::new<PageInfo>()
+
+  defer posts.free()
+  defer src.close()
+  defer out.close()
+
+  if (!collect_posts(c, src_ref, "", posts)) {
+    c.println("site generation failed")
+    return 1
+  }
+  if (!sort_posts(posts)) {
+    c.println("failed to sort posts")
+    return 1
+  }
+
+  let generated = generate_tree(c, src_ref, out_ref, "", posts)
+  if (generated < 0) {
+    c.println("site generation failed")
+    return 1
+  }
+  if (!generate_archive(c, out_ref, posts)) {
+    c.println("site generation failed")
+    return 1
+  }
+  if (!write_site_css(c, out_ref)) {
+    c.println("site generation failed")
+    return 1
+  }
+
+  c.print("generated pages: ")
+  c.println_i32(generated + 1)
+  return 0
+}

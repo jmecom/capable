@@ -1,18 +1,20 @@
 package safe
 module vec_helpers
 use sys::system
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let v = alloc.vec_u8_new()
-  let with_cap = alloc.vec_with_capacity<u8>(8)
-  let extra = alloc.vec_u8_new()
+  let v = vec::new<u8>()
+  defer v.free()
+  let with_cap = vec::with_capacity<u8>(8)
+  let extra = vec::new<u8>()
+  defer extra.free()
   match (with_cap) {
     Ok(vc) => {
+      defer vc.free()
       c.assert(vc.capacity() >= 8)
       vc.clear()
-      alloc.vec_u8_free(vc)
     }
     Err(_) => { c.println("vec bad"); return 1 }
   }
@@ -40,6 +42,8 @@ pub fn main(rc: RootCap) -> i32 {
   let b = v.get(1)
   let filtered = v.filter('B')
   let mapped = v.map_add('\x01')
+  defer filtered.free()
+  defer mapped.free()
   let slice = v.slice_range(1, 3)
   match (b) {
     Ok(x) => {
@@ -54,16 +58,10 @@ pub fn main(rc: RootCap) -> i32 {
         Err(e) => { c.println("vec bad"); return 1 }
       }
       c.println("vec ok")
-      alloc.vec_u8_free(filtered)
-      alloc.vec_u8_free(mapped)
-      alloc.vec_u8_free(v)
-      alloc.vec_u8_free(extra)
       return 0
     }
     Err(e) => {}
   }
   c.println("vec bad")
-  alloc.vec_u8_free(v)
-  alloc.vec_u8_free(extra)
   return 1
 }

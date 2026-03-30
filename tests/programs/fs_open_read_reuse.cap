@@ -1,0 +1,28 @@
+module fs_open_read_reuse
+use sys::system
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let fs = rc.mint_filesystem("./config")
+  let dir = fs.root_dir()
+
+  let first = dir.open_read("app.txt")
+  try let left = first.read_to_string() else {
+    c.println("first read failed")
+    return 1
+  }
+
+  let second = dir.open_read("app.txt")
+  try let right = second.read_to_string() else {
+    c.println("second read failed")
+    return 1
+  }
+
+  if (left == right) {
+    c.println("same")
+    return 0
+  }
+
+  c.println("different")
+  return 1
+}

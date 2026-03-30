@@ -37,6 +37,118 @@ fn typecheck_fs_read_ok() {
 }
 
 #[test]
+fn typecheck_fs_reuse_ok() {
+    let source = load_program("fs_reuse.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_fs_dir_reuse_ok() {
+    let source = load_program("fs_dir_reuse.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_fs_open_read_reuse_ok() {
+    let source = load_program("fs_open_read_reuse.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_let_else_ok() {
+    let source = load_program("let_else.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_try_let_ok() {
+    let source = load_program("try_let.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_try_let_continue_ok() {
+    let source = load_program("try_let_continue.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_try_let_continue_linear_ok() {
+    let source = load_program("try_let_continue_linear.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_expr_else_ok() {
+    let source = load_program("expr_else.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_expr_else_empty_ok() {
+    let source = load_program("expr_else_empty.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_expr_else_break_ok() {
+    let source = load_program("expr_else_break.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_path_helpers_ok() {
+    let source = load_program("path_helpers.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_defer_free_ok() {
+    let source = load_program("defer_free.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_for_each_ok() {
+    let source = load_program("for_each.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_for_each_complex_source_ok() {
+    let source = load_program("for_each_complex_source.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_fs_close_ok() {
     let source = load_program("should_pass_fs_close.cap");
     let module = parse_module(&source).expect("parse module");
@@ -145,44 +257,50 @@ fn typecheck_match_result_non_exhaustive_fails() {
 }
 
 #[test]
-fn typecheck_result_unwrap_or_ok() {
-    let source = load_program("should_pass_result_unwrap_or.cap");
-    let module = parse_module(&source).expect("parse module");
-    let stdlib = load_stdlib().expect("load stdlib");
-    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
-}
-
-#[test]
-fn typecheck_result_unwrap_err_or_ok() {
-    let source = load_program("should_pass_result_unwrap_err_or.cap");
-    let module = parse_module(&source).expect("parse module");
-    let stdlib = load_stdlib().expect("load stdlib");
-    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
-}
-
-#[test]
-fn typecheck_result_unwrap_or_mismatch_fails() {
-    let source = load_program("should_fail_result_unwrap_or_mismatch.cap");
+fn typecheck_result_ok_helper_removed() {
+    let source = load_program("should_fail_result_ok_removed.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("argument type mismatch"));
+    assert!(err
+        .to_string()
+        .contains("unknown method `sys.result.Result__ok`"));
 }
 
 #[test]
-fn typecheck_result_is_ok_is_err() {
-    let source = load_program("should_pass_result_is_ok_is_err.cap");
+fn typecheck_result_unwrap_or_helper_removed() {
+    let source = load_program("should_fail_result_unwrap_or_removed.cap");
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
-    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
+    assert!(err
+        .to_string()
+        .contains("unknown method `sys.result.Result__unwrap_or`"));
 }
 
 #[test]
-fn typecheck_result_ok_err() {
-    let source = load_program("should_pass_result_ok_err.cap");
-    let module = parse_module(&source).expect("parse module");
-    let stdlib = load_stdlib().expect("load stdlib");
-    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+fn parse_if_let_fails() {
+    let source = load_program("should_fail_if_let.cap");
+    let err = parse_module(&source).expect_err("expected parse error");
+    assert!(err.to_string().contains("unexpected token in expression"));
+}
+
+#[test]
+fn parse_expr_else_without_try_fails() {
+    let source = load_program("should_fail_expr_else_without_try.cap");
+    let err = parse_module(&source).expect_err("expected parse error");
+    assert!(err
+        .to_string()
+        .contains("`expr else` now requires a leading `try`"));
+}
+
+#[test]
+fn parse_try_let_pattern_fails() {
+    let source = load_program("should_fail_try_let_pattern.cap");
+    let err = parse_module(&source).expect_err("expected parse error");
+    assert!(err
+        .to_string()
+        .contains("`try let` requires a plain binding name"));
 }
 
 #[test]
@@ -254,7 +372,9 @@ fn typecheck_alloc_as_console_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("unknown method `sys.buffer.Alloc__println`"));
+    assert!(err
+        .to_string()
+        .contains("unknown method `sys.buffer.Alloc__println`"));
 }
 
 #[test]
@@ -324,9 +444,7 @@ fn typecheck_try_question_err_mismatch_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err
-        .to_string()
-        .contains("mismatched error type for `?`"));
+    assert!(err.to_string().contains("mismatched error type for `?`"));
 }
 
 #[test]
@@ -566,6 +684,14 @@ fn typecheck_opaque_returns_capability_ok() {
 }
 
 #[test]
+fn typecheck_capability_borrow_return_linear_ok() {
+    let source = load_program("should_pass_capability_borrow_return_linear.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_borrow_return_fails() {
     let source = load_program("should_fail_borrow_return.cap");
     let module = parse_module(&source).expect("parse module");
@@ -584,7 +710,7 @@ fn typecheck_capability_borrow_return_fails() {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     assert!(err
         .to_string()
-        .contains("methods returning capabilities must take `self` by value"));
+        .contains("borrowed capability receivers may only return linear child capabilities"));
 }
 
 #[test]
@@ -595,7 +721,7 @@ fn typecheck_capability_borrow_return_result_fails() {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     assert!(err
         .to_string()
-        .contains("methods returning capabilities must take `self` by value"));
+        .contains("borrowed capability receivers may only return linear child capabilities"));
 }
 
 #[test]
@@ -606,7 +732,7 @@ fn typecheck_capability_borrow_return_helper_fails() {
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
     assert!(err
         .to_string()
-        .contains("methods returning capabilities must take `self` by value"));
+        .contains("borrowed capability receivers may only return linear child capabilities"));
 }
 
 #[test]
@@ -665,7 +791,9 @@ fn typecheck_affine_loop_move_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("move-only value `c` moved inside loop"));
+    assert!(err
+        .to_string()
+        .contains("move-only value `c` moved inside loop"));
 }
 
 #[test]
@@ -693,7 +821,9 @@ fn typecheck_extern_requires_unsafe_package() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("extern declarations require `package unsafe`"));
+    assert!(err
+        .to_string()
+        .contains("extern declarations require `package unsafe`"));
 }
 
 #[test]
@@ -718,7 +848,9 @@ fn typecheck_pointer_requires_unsafe_package() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("raw pointer types require `package unsafe`"));
+    assert!(err
+        .to_string()
+        .contains("raw pointer types require `package unsafe`"));
 }
 
 #[test]
@@ -859,6 +991,22 @@ fn typecheck_bytes_helpers_ok() {
 }
 
 #[test]
+fn typecheck_u8_match_ok() {
+    let source = load_program("u8_match.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
+fn typecheck_int64_basic_ok() {
+    let source = load_program("int64_basic.cap");
+    let module = parse_module(&source).expect("parse module");
+    let stdlib = load_stdlib().expect("load stdlib");
+    type_check_program(&module, &stdlib, &[]).expect("typecheck module");
+}
+
+#[test]
 fn typecheck_error_on_missing_return() {
     let source = r#"
 module app
@@ -993,7 +1141,9 @@ fn typecheck_continue_outside_loop_fails() {
     let module = parse_module(&source).expect("parse module");
     let stdlib = load_stdlib().expect("load stdlib");
     let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err.to_string().contains("continue statement outside of loop"));
+    assert!(err
+        .to_string()
+        .contains("continue statement outside of loop"));
 }
 
 #[test]

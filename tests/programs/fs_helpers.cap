@@ -3,11 +3,10 @@ module fs_helpers
 
 use sys::system
 use sys::fs
-use sys::buffer
+use sys::path
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
 
   let rfs = rc.mint_readfs("./config")
   if !rfs.exists("app.txt") {
@@ -16,10 +15,10 @@ pub fn main(rc: RootCap) -> i32 {
   }
 
   let rfs2 = rc.mint_readfs("./config")
-  match rfs2.read_bytes(alloc, "app.txt") {
+  match rfs2.read_bytes("app.txt") {
     Ok(bytes) => {
+      defer bytes.free()
       c.assert(bytes.len() > 0)
-      alloc.vec_u8_free(bytes)
     }
     Err(_) => {
       c.println("read_bytes failed")
@@ -28,10 +27,10 @@ pub fn main(rc: RootCap) -> i32 {
   }
 
   let rfs3 = rc.mint_readfs("./config")
-  match rfs3.list_dir(alloc, ".") {
+  match rfs3.list_dir(".") {
     Ok(entries) => {
+      defer entries.free()
       c.assert(entries.len() > 0)
-      alloc.vec_string_free(entries)
     }
     Err(_) => {
       c.println("list_dir failed")
@@ -39,7 +38,7 @@ pub fn main(rc: RootCap) -> i32 {
     }
   }
 
-  let joined = fs::join(alloc, "config", "app.txt")
+  let joined = path::join("config", "app.txt")
   if !joined.starts_with("config") {
     c.println("join failed")
     return 1

@@ -11,6 +11,15 @@ This tutorial is a cohesive walk-through of the language as it exists today.
 It focuses on how to write real programs, how the capability model works, and
 how memory is managed.
 
+Capable is easiest to understand if you divide values into three groups:
+
+- plain data: numbers, bools, and ordinary structs/enums
+- resources: owned handles such as buffers, files, and sockets
+- capabilities: resources that also carry permission
+
+Most code works with plain data. The resource model exists so ownership and
+authority stay explicit where they matter.
+
 ## 1) Hello, console
 
 ```cap
@@ -55,6 +64,7 @@ Key syntax:
 - Modules + imports: `module ...` and `use ...` (alias by last path segment).
 - `for { ... }` is an infinite loop; `for i in a..b` is a range loop.
 - Integer arithmetic traps on overflow.
+- Built-in integer types are `i32`, `i64`, `u32`, `u64`, and `u8`.
 - Variable shadowing is not allowed.
 
 ## 3) Control flow and pattern matching
@@ -72,13 +82,11 @@ pub fn main(rc: RootCap) -> i32 {
 }
 ```
 
-Matches must be exhaustive; use `_` to cover the rest. `if let` is a
-single-arm match:
+Matches must be exhaustive; use `_` to cover the rest. `let ... else` is for
+general pattern matching on enums and similar values:
 
 ```cap
-if let Ok(x) = make() {
-  return x
-} else {
+let Maybe::Some(v) = from_flag(true) else {
   return 0
 }
 ```
@@ -101,7 +109,8 @@ impl Pair {
 
 - Structs and enums are nominal types.
 - Methods are defined in `impl` blocks and lower to `Type__method` in codegen.
-- Method receivers can be `self` (move) or `self: &T` (borrow-lite, read-only).
+- Method receivers can be `self` (value receiver) or `self: &T` (short-lived
+  read-only borrow).
 
 ## 5) Results and error flow
 
@@ -121,12 +130,35 @@ fn use_value() -> Result<i32, i32> {
 }
 ```
 
-Other helpers:
+Common forms:
 
 ```cap
-let v = make().unwrap_or(0)
-let e = make().unwrap_err_or(0)
+fn send() -> Result<unit, i32> {
+  return Ok(())
+}
+
+fn bind_value() -> i32 {
+  try let v = parse() else {
+    return 0
+  }
+  return v
+}
+
+fn write_value() -> Result<unit, i32> {
+  try send() else err {
+    return Err(err)
+  }
+  return Ok(())
+}
 ```
+
+The intended split is:
+
+- `?` for propagation
+- `try let ... else` when a `Result` success value needs to be bound
+- `try expr else` for statement-style error flow
+- `let ... else` for non-`Result` pattern matching
+- `match` for real branching
 
 ## 6) Capabilities and attenuation
 
@@ -147,8 +179,7 @@ use sys::fs
 
 pub fn main(rc: RootCap) -> i32 {
   let fs = rc.mint_readfs("./config")
-  let alloc = rc.mint_alloc_default()
-  match fs.read_to_string(alloc, "app.txt") {
+  match fs.read_to_string("app.txt") {
     Ok(s) => { rc.mint_console().println(s); return 0 }
     Err(_) => { return 1 }
   }
@@ -166,11 +197,29 @@ risk: it can forge or corrupt capability values, violate attenuation, or reach
 privileged operations directly. Treat unsafe dependencies as highly trusted
 code and use auditing/`--safe-only` to keep the boundary tight.
 
-Attenuation is one-way: methods that return capabilities must take `self` by
-value, so you give up the more powerful capability when you derive a narrower
-one. This is enforced by the compiler.
+In practice, capability APIs fall into three shapes:
 
-## 7) Kinds: copy, affine, linear
+- use operations: perform an effect with existing authority
+- attenuation operations: derive a narrower capability from a stronger one
+- child-handle operations: create a fresh child handle from an existing parent
+
+That distinction matters more than "everything moves." A read-only filesystem
+capability being used to read a file is different from a directory capability
+being narrowed to a subdirectory, and different again from a directory or
+listener producing a fresh linear child handle.
+
+The current rule is:
+
+- reusable use operations borrow
+- attenuation to a reusable capability consumes `self`
+- child-handle operations may borrow when they return a fresh linear capability
+
+That is why `ReadFS.read_to_string` and `Dir.read_to_string` can be called
+multiple times on the same capability value, `Dir.subdir` still consumes
+`Dir`, and both `Dir.open_read` and `TcpListener.accept` can borrow while
+returning `FileRead`/`TcpConn`.
+
+## 7) Resources and kinds
 
 Types can declare how they move:
 
@@ -185,10 +234,14 @@ Kinds:
 - **Affine**: move-only, dropping is allowed.
 - **Linear**: move-only and must be consumed on all paths.
 
-## 8) Borrow-lite references: `&T`
+Most plain data does not require thinking about this section. These rules matter
+primarily for resources, capabilities, and values that contain them.
 
-Capable has a minimal borrow system for read-only access. The goal is to make
-non-consuming reads ergonomic without a full borrow checker.
+## 8) Short borrows: `&T`
+
+Capable has a narrow borrow system for read-only access. The goal is to make
+resource use ergonomic without turning the language into a full borrow-checking
+model.
 
 ```cap
 impl Thing {
@@ -212,9 +265,30 @@ This keeps the language simple without a full borrow checker. It also keeps
 lifetimes simple: a borrow is only valid within the current scope, so you never
 have to reason about aliasing across function boundaries.
 
-Borrow-lite is intentionally conservative. If you need shared ownership across
-functions, pass the value by move (and return it), or design your API to do the
-read inside the callee.
+Borrow-lite is intentionally conservative. In most public APIs, the important
+case is a short-lived borrowed parameter or receiver on a resource/capability
+type.
+
+For loops support both ranges and borrowed `Vec` iteration:
+
+```cap
+for i in 0..5 {
+  c.println_i32(i)
+}
+
+for item in values {
+  c.println_i32(item)
+}
+
+for i, item in values {
+  c.print_i32(i)
+  c.print(": ")
+  c.println_i32(item)
+}
+```
+
+Borrowed `Vec` iteration also accepts complex expressions. The source is
+evaluated once before the loop body runs.
 
 ## 9) Memory model
 
@@ -234,41 +308,51 @@ lifetimes local until a full lifetime model exists.
 
 ### Allocators
 
-Allocation is explicit. Functions that allocate accept an `Alloc` handle:
+Most ordinary code uses the process default allocator. Reach for explicit
+`Alloc` handles when you need low-level control or budgeted allocation:
 
 ```cap
-let alloc = rc.mint_alloc_default()
-let v = alloc.vec_u8_new()
+let v = vec::new<u8>()
+defer v.free()
 ...
-alloc.vec_u8_free(v)
 ```
 
-Use `defer` to simplify cleanup.
+The intended style for plain heap owners is: allocate, then immediately
+schedule cleanup with `defer x.free()`. Keep plain `free()` for early release
+inside longer scopes.
 
 ## 10) Strings: `string` vs `Text`
 
-`string` is a view. `Text` is owned.
+`string` is the ordinary string type in most code. It is a borrowed view.
+`Text` is the owned builder type you use when you need to construct or mutate
+text.
 
 ```cap
-fn build_greeting(alloc: Alloc) -> Result<string, buffer::AllocErr> {
+fn build_greeting() -> Result<string, buffer::AllocErr> {
   let s = "hello"
   let _bytes = s.as_slice()
   let _sub = s.slice_range(0, 5)?
 
-  let t = alloc.text_new()
-  defer t.free(alloc)
+  let t = string::text_new()
+  defer t.free()
   t.push_str("hello")?
   t.push_byte(' ')?
   t.append("text")?
-  let out = t.to_string()?
+  let out = t.copy_string()?
   return Ok(out)
 }
 ```
 
 Helpers:
 - `string.split`, `split_once`, `trim_*`, `contains`, `index_of_*`.
-- `string.concat(alloc, other)` creates a new owned string view.
+- `string.concat(other)` creates a new owned string view.
+- `string.copy_text()` makes an owned `Text` builder when you need one.
+- `Text.as_string()` borrows cheaply; `Text.copy_string()` allocates a copy.
+- `Vec<u8>.as_string()` borrows bytes as text; `Vec<u8>.copy_string()` allocates a copy.
 - `Text.slice_range` returns a `string` view into its buffer.
+
+For binary parsing, `Slice<u8>` also exposes checked endian readers like
+`read_u16_le`, `read_u32_be`, `read_u64_le`, and `read_i64_be`.
 
 ## 11) Slices and indexing
 
@@ -291,11 +375,10 @@ fn use_tail(s: string) -> Result<unit, buffer::SliceErr> {
 
 ```cap
 let c = rc.mint_console()
-let alloc = rc.mint_alloc_default()
-let v = alloc.vec_u8_new()
+let v = vec::new<u8>()
 
 // ensure we free on all paths
- defer alloc.vec_u8_free(v)
+defer v.free()
 ```
 
 Deferred expressions must be calls; arguments are evaluated at the defer site.
@@ -325,7 +408,7 @@ reports unsafe packages.
 ```cap
 enum ParseErr { MissingEq, OutOfRange, Oom }
 
-fn parse_key_value(line: string, alloc: Alloc) -> Result<string, ParseErr> {
+fn parse_key_value(line: string) -> Result<string, ParseErr> {
   let eq = match (line.index_of_byte('=')) {
     Ok(i) => { i }
     Err(_) => { return Err(ParseErr::MissingEq) }
@@ -339,24 +422,21 @@ fn parse_key_value(line: string, alloc: Alloc) -> Result<string, ParseErr> {
     Err(_) => { return Err(ParseErr::OutOfRange) }
   }
 
-  let t = alloc.text_new()
-  defer t.free(alloc)
-  match (t.push_str(key)) {
-    Ok(_) => { }
-    Err(_) => { return Err(ParseErr::Oom) }
+  let t = string::text_new()
+  defer t.free()
+  try t.push_str(key) else {
+    return Err(ParseErr::Oom)
   }
-  match (t.push_byte('=')) {
-    Ok(_) => { }
-    Err(_) => { return Err(ParseErr::Oom) }
+  try t.push_byte('=') else {
+    return Err(ParseErr::Oom)
   }
-  match (t.push_str(val)) {
-    Ok(_) => { }
-    Err(_) => { return Err(ParseErr::Oom) }
+  try t.push_str(val) else {
+    return Err(ParseErr::Oom)
   }
-  match (t.to_string()) {
-    Ok(out) => { return Ok(out) }
-    Err(_) => { return Err(ParseErr::Oom) }
+  try let out = t.copy_string() else {
+    return Err(ParseErr::Oom)
   }
+  return Ok(out)
 }
 ```
 

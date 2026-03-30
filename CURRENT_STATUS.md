@@ -18,12 +18,17 @@ repository. It is based on code and tests, not older design docs.
 
 ## Types and ownership
 
-- Built-in types: i32, u32, u8, bool, unit, never.
+- Built-in types: i32, i64, u32, u64, u8, bool, unit, never.
 - `string` is a stdlib struct (a view over bytes), not a compiler builtin.
 - Pointers (`*T`) and borrows (`&T`) are supported in the type system.
-- Affine/linear ownership rules are enforced for non-copy values (including
-  capability and linear types).
-- Integer literals type as i32; char literals are u8.
+- Plain data is unrestricted by default.
+- `opaque struct` and `capability struct` are the main move-tracked categories.
+- Structs/enums become move-tracked by containment when they contain
+  move-tracked fields.
+- Borrows are deliberately narrow: refs cannot be stored in structs/enums or
+  returned, and ref locals must be initialized from another local.
+- Unsuffixed integer literals type as i32; suffixed integer literals currently
+  support `u8`, `i64`, and `u64`. Char literals are `u8`.
 
 ## Standard library and runtime
 
@@ -42,6 +47,31 @@ repository. It is based on code and tests, not older design docs.
   - Buffer/Alloc malloc/free/casts.
   - Math wrap helpers and byte whitespace checks.
 
+## Current capability algebra
+
+- Reusable use operations borrow the capability/resource where possible:
+  - `ReadFS.read_to_string/read_bytes/list_dir/exists`
+  - `Dir.read_to_string/read_bytes/list_dir/exists`
+  - `Stdin.read_to_string`
+  - `TcpConn.read_to_string/read/write`
+  - `TcpListener.accept`
+- Attenuation operations still consume the stronger capability:
+  - `Filesystem.root_dir`
+  - `Dir.subdir`
+- Child handles remain linear where appropriate:
+  - `FileRead`
+  - `TcpConn`
+- On move-tracked capabilities, borrowed receivers can return fresh linear
+  child capabilities, but they cannot return reusable capabilities. This is
+  why `Dir.open_read` can borrow `Dir`, while attenuation like `Dir.subdir`
+  still consumes `self`.
+- Deliberately copyable capabilities currently include:
+  - `RootCap`
+  - `Console`
+  - `Args`
+  - `Net`
+  - `TcpListener`
+
 ## ABI and codegen
 
 - Codegen targets native code via Cranelift.
@@ -51,8 +81,6 @@ repository. It is based on code and tests, not older design docs.
 
 ## Known limitations and gaps
 
-- i64 is parsed but rejected by the current backend; only 32-bit integer types
-  are supported.
 - Inline-by-value struct returns are not implemented (sret only).
 - Vec element types are restricted to u8, i32, string, or type parameters.
 - Variable shadowing is not currently modeled in lowering.

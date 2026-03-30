@@ -1,40 +1,18 @@
+mod support;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::abi::AbiType;
+use crate::ast::Span;
 use crate::error::TypeError;
 use crate::hir::*;
 use crate::typeck::Ty;
-use crate::ast::Span;
+use support::{
+    build_substitution, find_type_in_all_modules, function_symbol, mangle_name, match_type_params,
+    qualify, substitute_ty, FunctionInstance, GenericSig, ModuleOut,
+};
 
 const DUMMY_SPAN: Span = Span { start: 0, end: 0 };
-
-#[derive(Clone)]
-struct ModuleOut {
-    name: String,
-    functions: Vec<HirFunction>,
-    extern_functions: Vec<HirExternFunction>,
-    structs: Vec<HirStruct>,
-    enums: Vec<HirEnum>,
-}
-
-impl ModuleOut {
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            functions: Vec::new(),
-            extern_functions: Vec::new(),
-            structs: Vec::new(),
-            enums: Vec::new(),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct FunctionInstance {
-    module: String,
-    base_name: String,
-    type_args: Vec<Ty>,
-}
 
 struct MonoCtx {
     program: HirProgram,
@@ -169,7 +147,10 @@ impl MonoCtx {
             let key = qualify(&instance.module, &instance.base_name);
             if let Some(func) = self.functions.get(&key).cloned() {
                 let new_name = mangle_name(&instance.base_name, &instance.type_args);
-                if self.generated_functions.contains(&qualify(&instance.module, &new_name)) {
+                if self
+                    .generated_functions
+                    .contains(&qualify(&instance.module, &new_name))
+                {
                     continue;
                 }
                 let subs = build_substitution(&func.type_params, &instance.type_args, DUMMY_SPAN)?;
@@ -179,7 +160,10 @@ impl MonoCtx {
             }
             if let Some(func) = self.externs.get(&key).cloned() {
                 let new_name = mangle_name(&instance.base_name, &instance.type_args);
-                if self.generated_externs.contains(&qualify(&instance.module, &new_name)) {
+                if self
+                    .generated_externs
+                    .contains(&qualify(&instance.module, &new_name))
+                {
                     continue;
                 }
                 let subs = build_substitution(&func.type_params, &instance.type_args, DUMMY_SPAN)?;
@@ -206,12 +190,7 @@ impl MonoCtx {
                 entry = Some(module);
                 continue;
             }
-            if self
-                .program
-                .stdlib
-                .iter()
-                .any(|m| m.name == module.name)
-            {
+            if self.program.stdlib.iter().any(|m| m.name == module.name) {
                 stdlib.push(module);
             } else {
                 user_modules.push(module);
@@ -247,7 +226,8 @@ impl MonoCtx {
     fn push_struct(&mut self, module: &str, decl: HirStruct) {
         let key = qualify(module, &decl.name);
         if self.generated_structs.insert(key) {
-            self.structs.insert(qualify(module, &decl.name), decl.clone());
+            self.structs
+                .insert(qualify(module, &decl.name), decl.clone());
             if let Some(out) = self.out_modules.get_mut(module) {
                 out.structs.push(decl);
             }
@@ -547,7 +527,14 @@ impl MonoCtx {
                                 continue;
                             }
                             let mut inferred = HashMap::new();
-                            if match_type_params(&impl_info.target_ty, actual, &mut inferred, DUMMY_SPAN).is_ok() {
+                            if match_type_params(
+                                &impl_info.target_ty,
+                                actual,
+                                &mut inferred,
+                                DUMMY_SPAN,
+                            )
+                            .is_ok()
+                            {
                                 matches.push(impl_info.clone());
                             }
                         }
@@ -596,13 +583,8 @@ impl MonoCtx {
                     ResolvedCallee::Function { module, name, .. } => {
                         let key = qualify(module, name);
                         if let Some(func) = self.functions.get(&key).cloned() {
-                            let (new_name, symbol, type_args) = self.mono_callee(
-                                module,
-                                &func,
-                                &call.args,
-                                &call.type_args,
-                                subs,
-                            )?;
+                            let (new_name, symbol, type_args) =
+                                self.mono_callee(module, &func, &call.args, &call.type_args, subs)?;
                             let callee = ResolvedCallee::Function {
                                 module: module.clone(),
                                 name: new_name,
@@ -617,13 +599,8 @@ impl MonoCtx {
                             }));
                         }
                         if let Some(func) = self.externs.get(&key).cloned() {
-                            let (new_name, symbol, type_args) = self.mono_callee(
-                                module,
-                                &func,
-                                &call.args,
-                                &call.type_args,
-                                subs,
-                            )?;
+                            let (new_name, symbol, type_args) =
+                                self.mono_callee(module, &func, &call.args, &call.type_args, subs)?;
                             let callee = ResolvedCallee::Function {
                                 module: module.clone(),
                                 name: new_name,
@@ -802,10 +779,9 @@ impl MonoCtx {
         subs: &HashMap<String, Ty>,
     ) -> Result<Ty, TypeError> {
         match ty {
-            Ty::Param(name) => subs
-                .get(name)
-                .cloned()
-                .ok_or_else(|| TypeError::new(format!("unbound type parameter `{name}`"), DUMMY_SPAN)),
+            Ty::Param(name) => subs.get(name).cloned().ok_or_else(|| {
+                TypeError::new(format!("unbound type parameter `{name}`"), DUMMY_SPAN)
+            }),
             Ty::Builtin(_) => Ok(ty.clone()),
             Ty::Ptr(inner) => Ok(Ty::Ptr(Box::new(self.mono_ty(module, inner, subs)?))),
             Ty::Ref(inner) => Ok(Ty::Ref(Box::new(self.mono_ty(module, inner, subs)?))),
@@ -829,7 +805,8 @@ impl MonoCtx {
                     let qualified = name.contains('.');
                     if let Some(struct_def) = self.structs.get(&qualified_key).cloned() {
                         if !struct_def.type_params.is_empty() {
-                            let new_name = self.ensure_struct_instance(&type_module, &struct_def, &args)?;
+                            let new_name =
+                                self.ensure_struct_instance(&type_module, &struct_def, &args)?;
                             let name = if qualified {
                                 qualify(&type_module, &new_name)
                             } else {
@@ -842,7 +819,8 @@ impl MonoCtx {
                     }
                     if let Some(enum_def) = self.enums.get(&qualified_key).cloned() {
                         if !enum_def.type_params.is_empty() {
-                            let new_name = self.ensure_enum_instance(&type_module, &enum_def, &args)?;
+                            let new_name =
+                                self.ensure_enum_instance(&type_module, &enum_def, &args)?;
                             let name = if qualified {
                                 qualify(&type_module, &new_name)
                             } else {
@@ -927,11 +905,9 @@ impl MonoCtx {
         match ty {
             Ty::Builtin(b) => match b {
                 BuiltinType::I32 => Ok(AbiType::I32),
-                BuiltinType::I64 => Err(TypeError::new(
-                    "i64 is not supported by the current codegen backend".to_string(),
-                    DUMMY_SPAN,
-                )),
+                BuiltinType::I64 => Ok(AbiType::I64),
                 BuiltinType::U32 => Ok(AbiType::U32),
+                BuiltinType::U64 => Ok(AbiType::U64),
                 BuiltinType::U8 => Ok(AbiType::U8),
                 BuiltinType::Bool => Ok(AbiType::Bool),
                 BuiltinType::Unit => Ok(AbiType::Unit),
@@ -961,7 +937,10 @@ impl MonoCtx {
                         });
                     }
                     if let Some(info) = self.enums.get(&qualified_key) {
-                        let has_payload = info.variants.iter().any(|variant| variant.payload.is_some());
+                        let has_payload = info
+                            .variants
+                            .iter()
+                            .any(|variant| variant.payload.is_some());
                         if has_payload {
                             return Ok(AbiType::Ptr);
                         }
@@ -973,251 +952,6 @@ impl MonoCtx {
                     DUMMY_SPAN,
                 ))
             }
-        }
-    }
-}
-
-impl From<ModuleOut> for HirModule {
-    fn from(module: ModuleOut) -> Self {
-        Self {
-            name: module.name,
-            functions: module.functions,
-            extern_functions: module.extern_functions,
-            structs: module.structs,
-            enums: module.enums,
-        }
-    }
-}
-
-trait GenericSig {
-    fn name(&self) -> &str;
-    fn type_params(&self) -> &Vec<String>;
-    fn params(&self) -> &Vec<HirParam>;
-}
-
-impl GenericSig for HirFunction {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn type_params(&self) -> &Vec<String> {
-        &self.type_params
-    }
-
-    fn params(&self) -> &Vec<HirParam> {
-        &self.params
-    }
-}
-
-impl GenericSig for HirExternFunction {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn type_params(&self) -> &Vec<String> {
-        &self.type_params
-    }
-
-    fn params(&self) -> &Vec<HirParam> {
-        &self.params
-    }
-}
-
-fn split_name(module: &str, name: &str) -> (String, String, bool) {
-    if let Some((mod_part, type_part)) = name.rsplit_once('.') {
-        (mod_part.to_string(), type_part.to_string(), true)
-    } else {
-        (module.to_string(), name.to_string(), false)
-    }
-}
-
-/// Find the qualified name and module for a type, searching all modules if needed.
-/// Returns (module, qualified_name) or None if not found.
-fn find_type_in_all_modules<'a>(
-    name: &str,
-    current_module: &str,
-    structs: &'a HashMap<String, HirStruct>,
-    enums: &'a HashMap<String, HirEnum>,
-) -> Option<(String, String)> {
-    // First try the direct qualified lookup
-    let (type_module, base_name, qualified) = split_name(current_module, name);
-    let qualified_key = qualify(&type_module, &base_name);
-    if structs.contains_key(&qualified_key) || enums.contains_key(&qualified_key) {
-        return Some((type_module, qualified_key));
-    }
-
-    // If the name was already qualified or we found it, we're done
-    if qualified {
-        return None;
-    }
-
-    // Search all modules for this unqualified type name
-    for key in structs.keys() {
-        if key.ends_with(&format!(".{}", base_name)) {
-            let mod_part = key.rsplit_once('.').map(|(m, _)| m).unwrap_or("");
-            return Some((mod_part.to_string(), key.clone()));
-        }
-    }
-    for key in enums.keys() {
-        if key.ends_with(&format!(".{}", base_name)) {
-            let mod_part = key.rsplit_once('.').map(|(m, _)| m).unwrap_or("");
-            return Some((mod_part.to_string(), key.clone()));
-        }
-    }
-
-    None
-}
-
-fn qualify(module: &str, name: &str) -> String {
-    format!("{module}.{name}")
-}
-
-fn function_symbol(module: &str, name: &str) -> String {
-    format!("capable_{}", qualify(module, name).replace('.', "_"))
-}
-
-fn build_substitution(
-    params: &[String],
-    args: &[Ty],
-    span: Span,
-) -> Result<HashMap<String, Ty>, TypeError> {
-    if params.len() != args.len() {
-        return Err(TypeError::new(
-            format!(
-                "expected {} type argument(s), found {}",
-                params.len(),
-                args.len()
-            ),
-            span,
-        ));
-    }
-    let mut map = HashMap::new();
-    for (param, arg) in params.iter().zip(args.iter()) {
-        map.insert(param.clone(), arg.clone());
-    }
-    Ok(map)
-}
-
-fn substitute_ty(ty: &Ty, subs: &HashMap<String, Ty>) -> Ty {
-    match ty {
-        Ty::Param(name) => subs.get(name).cloned().unwrap_or_else(|| ty.clone()),
-        Ty::Builtin(_) => ty.clone(),
-        Ty::Ptr(inner) => Ty::Ptr(Box::new(substitute_ty(inner, subs))),
-        Ty::Ref(inner) => Ty::Ref(Box::new(substitute_ty(inner, subs))),
-        Ty::Path(name, args) => Ty::Path(
-            name.clone(),
-            args.iter().map(|arg| substitute_ty(arg, subs)).collect(),
-        ),
-    }
-}
-
-fn match_type_params(
-    expected: &Ty,
-    actual: &Ty,
-    subs: &mut HashMap<String, Ty>,
-    span: Span,
-) -> Result<(), TypeError> {
-    match expected {
-        Ty::Param(name) => {
-            if let Some(existing) = subs.get(name) {
-                if existing != actual {
-                    return Err(TypeError::new(
-                        format!(
-                            "conflicting type arguments for `{}`: {existing:?} vs {actual:?}",
-                            name
-                        ),
-                        span,
-                    ));
-                }
-            } else {
-                subs.insert(name.clone(), actual.clone());
-            }
-            Ok(())
-        }
-        Ty::Builtin(_) => {
-            if expected != actual {
-                return Err(TypeError::new(
-                    format!("type mismatch: expected {expected:?}, found {actual:?}"),
-                    span,
-                ));
-            }
-            Ok(())
-        }
-        Ty::Ptr(inner) => match actual {
-            Ty::Ptr(actual_inner) => match_type_params(inner, actual_inner, subs, span),
-            _ => Err(TypeError::new(
-                format!("type mismatch: expected {expected:?}, found {actual:?}"),
-                span,
-            )),
-        },
-        Ty::Ref(inner) => match actual {
-            Ty::Ref(actual_inner) => match_type_params(inner, actual_inner, subs, span),
-            _ => Err(TypeError::new(
-                format!("type mismatch: expected {expected:?}, found {actual:?}"),
-                span,
-            )),
-        },
-        Ty::Path(name, args) => match actual {
-            Ty::Path(actual_name, actual_args) => {
-                if name != actual_name || args.len() != actual_args.len() {
-                    return Err(TypeError::new(
-                        format!("type mismatch: expected {expected:?}, found {actual:?}"),
-                        span,
-                    ));
-                }
-                for (arg, actual_arg) in args.iter().zip(actual_args.iter()) {
-                    match_type_params(arg, actual_arg, subs, span)?;
-                }
-                Ok(())
-            }
-            _ => Err(TypeError::new(
-                format!("type mismatch: expected {expected:?}, found {actual:?}"),
-                span,
-            )),
-        },
-    }
-}
-
-fn mangle_name(base: &str, args: &[Ty]) -> String {
-    if args.is_empty() {
-        return base.to_string();
-    }
-    let suffix = args
-        .iter()
-        .map(mangle_type)
-        .collect::<Vec<_>>()
-        .join("__");
-    format!("{base}__{suffix}")
-}
-
-fn mangle_type(ty: &Ty) -> String {
-    match ty {
-        Ty::Builtin(b) => match b {
-            crate::typeck::BuiltinType::I32 => "i32".to_string(),
-            crate::typeck::BuiltinType::I64 => "i64".to_string(),
-            crate::typeck::BuiltinType::U32 => "u32".to_string(),
-            crate::typeck::BuiltinType::U8 => "u8".to_string(),
-            crate::typeck::BuiltinType::Bool => "bool".to_string(),
-            crate::typeck::BuiltinType::Unit => "unit".to_string(),
-            crate::typeck::BuiltinType::Never => "never".to_string(),
-        },
-        Ty::Ptr(inner) => format!("ptr_{}", mangle_type(inner)),
-        Ty::Ref(inner) => format!("ref_{}", mangle_type(inner)),
-        Ty::Param(name) => format!("param_{name}"),
-        Ty::Path(name, args) => {
-            if name == "sys.string.string" || name == "string" {
-                return "string".to_string();
-            }
-            let mut base = name.replace('.', "_");
-            if !args.is_empty() {
-                let suffix = args
-                    .iter()
-                    .map(mangle_type)
-                    .collect::<Vec<_>>()
-                    .join("__");
-                base = format!("{base}__{suffix}");
-            }
-            base
         }
     }
 }

@@ -1,0 +1,17 @@
+/// Integer helper methods for fixed-width ints.
+package safe
+module sys::ints
+
+impl i64 {
+  /// Convert to i32 if the value fits.
+  pub fn try_i32(self) -> Result<i32, unit> {
+    return Err(())
+  }
+}
+
+impl u64 {
+  /// Convert to i32 if the value fits.
+  pub fn try_i32(self) -> Result<i32, unit> {
+    return Err(())
+  }
+}

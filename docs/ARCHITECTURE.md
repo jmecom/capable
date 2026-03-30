@@ -74,6 +74,7 @@ lexer ──> parser ──> AST
 ## Useful References
 
 - `TUTORIAL.md` for a quick language tour.
-- `PLAN.md` for the current roadmap.
+- `CURRENT_STATUS.md` for the implemented language/runtime behavior.
+- `PROBLEMS.md` for the current design wrinkles.
 - `docs/POLICY.md` for safety and invariants.
-- `docs/SAMPLES.md` for golden program outputs.
+- `capc/tests/run.rs` for golden output expectations.

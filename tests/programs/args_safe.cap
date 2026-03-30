@@ -5,25 +5,13 @@ use sys::system
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
   let args = rc.mint_args()
-  let n = args.len()
-  c.assert(n >= 1)
-  if (n < 1) {
+  let s = args.at_or(0, "")
+  let m = s.len()
+  c.assert(m >= 0)
+  if (m < 0) {
     c.println("args bad")
     return 1
   }
-  let code = match args.at(0) {
-    Ok(s) => {
-      let m = s.len()
-      c.assert(m >= 0)
-      if (m >= 0) {
-        c.println("args ok")
-      }
-      0
-    }
-    Err(e) => {
-      c.println("args err")
-      1
-    }
-  }
-  return code
+  c.println("args ok")
+  return 0
 }

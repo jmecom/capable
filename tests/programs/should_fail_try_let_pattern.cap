@@ -1,0 +1,18 @@
+package safe
+module should_fail_try_let_pattern
+
+enum Maybe {
+  Some(i32),
+  None
+}
+
+fn from_flag() -> Maybe {
+  return Maybe::Some(7)
+}
+
+pub fn main() -> i32 {
+  try let Maybe::Some(v) = from_flag() else {
+    return 1
+  }
+  return 0
+}

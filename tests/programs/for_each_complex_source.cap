@@ -1,0 +1,31 @@
+package safe
+module for_each_complex_source
+use sys::system
+use sys::console
+use sys::vec
+
+fn build(c: Console) -> Vec<i32> {
+  c.println("build")
+  let values = vec::new<i32>()
+  try values.push(2) else {
+    panic()
+  }
+  try values.push(4) else {
+    panic()
+  }
+  try values.push(7) else {
+    panic()
+  }
+  return values
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+  let sum = 0
+  for item in build(c) {
+    sum = sum + item
+  }
+  c.assert(sum == 13)
+  c.println("for each complex ok")
+  return 0
+}

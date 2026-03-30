@@ -1,4 +1,4 @@
-/// Result enum and helpers.
+/// Result enum for fallible operations.
 package safe
 module sys::result
 
@@ -8,54 +8,4 @@ pub enum Result<T, E> {
   Ok(T),
   /// Error value.
   Err(E)
-}
-
-impl<T, E> Result<T, E> {
-  /// True if Ok.
-  pub fn is_ok(self) -> bool {
-    match self {
-      Result::Ok(_) => { return true }
-      Result::Err(_) => { return false }
-    }
-  }
-
-  /// True if Err.
-  pub fn is_err(self) -> bool {
-    match self {
-      Result::Ok(_) => { return false }
-      Result::Err(_) => { return true }
-    }
-  }
-
-  /// Return Ok value or a default.
-  pub fn unwrap_or(self, default: T) -> T {
-    match self {
-      Result::Ok(val) => { return val }
-      Result::Err(_) => { return default }
-    }
-  }
-
-  /// Return Err value or a default.
-  pub fn unwrap_err_or(self, default: E) -> E {
-    match self {
-      Result::Ok(_) => { return default }
-      Result::Err(err) => { return err }
-    }
-  }
-
-  /// Unwrap Ok or panic.
-  pub fn ok(self) -> T {
-    match self {
-      Result::Ok(val) => { return val }
-      Result::Err(_) => { panic() }
-    }
-  }
-
-  /// Unwrap Err or panic.
-  pub fn err(self) -> E {
-    match self {
-      Result::Ok(_) => { panic() }
-      Result::Err(err) => { return err }
-    }
-  }
 }

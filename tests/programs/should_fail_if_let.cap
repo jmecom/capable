@@ -1,0 +1,13 @@
+module should_fail_if_let
+
+fn make() -> Result<i32, i32> {
+  return Ok(7)
+}
+
+pub fn main() -> i32 {
+  if let Ok(x) = make() {
+    return x
+  } else {
+    return 0
+  }
+}

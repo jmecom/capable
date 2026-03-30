@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capability-Scoped Generation</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<header class="site-header">
+<div class="site-shell">
+<div class="brand-row"><a href="../index.html">Capable Static</a><nav class="site-nav"><a href="../about.html">About</a> <a href="../posts/index.html">Posts</a></nav>
+</div>
+</div>
+</header>
+<main class="site-shell">
+<article class="page">
+<p class="meta">2026-03-24</p>
+<h1>Capability-Scoped Generation</h1>
+<p>The generator can only read from the delegated content root.</p>
+<p>The generator can only write inside the delegated output root.</p>
+<h2>Why That Matters</h2>
+<ul>
+<li>content reads are rooted</li>
+<li>output writes are rooted</li>
+<li>the program cannot escape either subtree in safe code</li>
+</ul>
+<blockquote>This is the part that makes the example more interesting than a plain scripting demo.</blockquote>
+</article>
+</main>
+<footer class="site-footer"><div class="site-shell">Generated with Capable.</div></footer>
+</body>
+</html>

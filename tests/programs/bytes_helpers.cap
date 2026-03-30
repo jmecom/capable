@@ -1,6 +1,8 @@
 package safe
 module bytes_helpers
+use sys::buffer
 use sys::system
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
@@ -14,6 +16,99 @@ pub fn main(rc: RootCap) -> i32 {
     Err(_) => { c.assert(false) }
   }
   c.assert(b0.is_whitespace() && b1.is_whitespace())
+
+  let raw = vec::new<u8>()
+  defer raw.free()
+  try raw.push(1u8) else { c.assert(false) }
+  try raw.push(2u8) else { c.assert(false) }
+  try raw.push(3u8) else { c.assert(false) }
+  try raw.push(4u8) else { c.assert(false) }
+  let data = raw.as_slice()
+  c.assert(data.matches4(0, 1u8, 2u8, 3u8, 4u8))
+  c.assert(!data.matches4(1, 1u8, 2u8, 3u8, 4u8))
+
+  try let byte2 = data.read_u8(2) else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(byte2 == 3u8)
+
+  try let le16 = data.read_u16_le(0) else {
+    c.assert(false)
+    return 1
+  }
+  try let be16 = data.read_u16_be(0) else {
+    c.assert(false)
+    return 1
+  }
+  try let le32 = data.read_u32_le(0) else {
+    c.assert(false)
+    return 1
+  }
+  try let be32 = data.read_u32_be(0) else {
+    c.assert(false)
+    return 1
+  }
+  try let signed = data.read_i32_le(0) else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(le16 == 513)
+  c.assert(be16 == 258)
+  c.assert(le32 != be32)
+  c.assert(le32 > be32)
+  c.assert(signed == 67305985)
+  match (data.read_u32_le(1)) {
+    Ok(_) => {
+      c.assert(false)
+      return 1
+    }
+    Err(_) => {}
+  }
+
+  let wide = vec::new<u8>()
+  defer wide.free()
+  try wide.push(120u8) else { c.assert(false) }
+  try wide.push(86u8) else { c.assert(false) }
+  try wide.push(52u8) else { c.assert(false) }
+  try wide.push(18u8) else { c.assert(false) }
+  try wide.push(0u8) else { c.assert(false) }
+  try wide.push(0u8) else { c.assert(false) }
+  try wide.push(0u8) else { c.assert(false) }
+  try wide.push(0u8) else { c.assert(false) }
+  let wide_data = wide.as_slice()
+  try let wide64 = wide_data.read_u64_le(0) else {
+    c.assert(false)
+    return 1
+  }
+  try let fit64 = wide64.try_i32() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(fit64 == 305419896)
+
+  let too_wide = vec::new<u8>()
+  defer too_wide.free()
+  try too_wide.push(0u8) else { c.assert(false) }
+  try too_wide.push(0u8) else { c.assert(false) }
+  try too_wide.push(0u8) else { c.assert(false) }
+  try too_wide.push(0u8) else { c.assert(false) }
+  try too_wide.push(1u8) else { c.assert(false) }
+  try too_wide.push(0u8) else { c.assert(false) }
+  try too_wide.push(0u8) else { c.assert(false) }
+  try too_wide.push(0u8) else { c.assert(false) }
+  try let too_wide_value = too_wide.as_slice().read_u64_le(0) else {
+    c.assert(false)
+    return 1
+  }
+  match (too_wide_value.try_i32()) {
+    Ok(_) => {
+      c.assert(false)
+      return 1
+    }
+    Err(_) => {}
+  }
+
   c.println("bytes ok")
   return 0
 }

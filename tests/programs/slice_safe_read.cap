@@ -1,14 +1,15 @@
 package safe
 module slice_safe_read
 use sys::system
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let v = alloc.vec_u8_new()
+  let v = vec::new<u8>()
+  defer v.free()
   match (v.push('\x00')) {
     Ok(_) => { }
-    Err(_) => { c.assert(false); alloc.vec_u8_free(v); return 1 }
+    Err(_) => { c.assert(false); return 1 }
   }
   let slice = v.as_slice()
   let b = slice.at(0)
@@ -18,6 +19,5 @@ pub fn main(rc: RootCap) -> i32 {
   } else {
     c.println("slice read bad")
   }
-  alloc.vec_u8_free(v)
   return 0
 }

@@ -1,12 +1,14 @@
 package safe
 module vec_i32_helpers
 use sys::system
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let v = alloc.vec_i32_new()
-  let extra = alloc.vec_i32_new()
+  let v = vec::new<i32>()
+  let extra = vec::new<i32>()
+  defer v.free()
+  defer extra.free()
   match v.push(3) {
     Ok(_) => { }
     Err(_) => { c.assert(false); return 1 }
@@ -37,15 +39,13 @@ pub fn main(rc: RootCap) -> i32 {
   }
   let filtered = v.filter(3)
   let mapped = v.map_add(1)
+  defer filtered.free()
+  defer mapped.free()
   match mapped.get(0) {
     Ok(x) => { c.assert(x == 4) }
     Err(_) => { c.assert(false); return 1 }
   }
   c.assert(filtered.len() == 1)
   c.println("vec i32 ok")
-  alloc.vec_i32_free(filtered)
-  alloc.vec_i32_free(mapped)
-  alloc.vec_i32_free(v)
-  alloc.vec_i32_free(extra)
   return 0
 }

@@ -1,0 +1,33 @@
+package safe
+module try_let_continue_linear
+
+linear capability struct Token
+
+fn parse(i: i32) -> Result<i32, string> {
+  if (i == 0) {
+    return Err("skip")
+  }
+  return Ok(i)
+}
+
+pub fn main() -> i32 {
+  let i = 0
+  let sum = 0
+
+  while (i < 3) {
+    let token = Token{}
+    try let n = parse(i) else {
+      drop(token)
+      i = i + 1
+      continue
+    }
+    sum = sum + n
+    drop(token)
+    i = i + 1
+  }
+
+  if (sum != 3) {
+    return 1
+  }
+  return 0
+}

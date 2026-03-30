@@ -2,46 +2,26 @@ package safe
 module text_push_safe
 use sys::system
 use sys::string
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let text = string::text_new(alloc)
-  match text.push_byte('\x00') {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      text.free(alloc)
-      return 1
-    }
+  let text = string::text_new()
+  defer text.free()
+  try text.push_byte('\x00') else {
+    panic()
   }
-  match text.push_byte('\x07') {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      text.free(alloc)
-      return 1
-    }
+  try text.push_byte('\x07') else {
+    panic()
   }
-  let v = alloc.vec_u8_new()
-  match v.push('\t') {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      alloc.vec_u8_free(v)
-      text.free(alloc)
-      return 1
-    }
+  let v = vec::new<u8>()
+  defer v.free()
+  try v.push('\t') else {
+    panic()
   }
   let slice = v.as_slice()
-  match text.extend_slice(slice) {
-    Ok(u) => { u }
-    Err(e) => {
-      c.assert(false)
-      alloc.vec_u8_free(v)
-      text.free(alloc)
-      return 1
-    }
+  try text.extend_slice(slice) else {
+    panic()
   }
   let len = text.len()
   c.assert(len == 3)
@@ -51,7 +31,5 @@ pub fn main(rc: RootCap) -> i32 {
   } else {
     c.println("push bad")
   }
-  alloc.vec_u8_free(v)
-  text.free(alloc)
   return 0
 }

@@ -28,8 +28,7 @@ static STDIN_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static NET_CAPS: LazyLock<Mutex<HashMap<Handle, ()>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-static ALLOCS: LazyLock<Mutex<HashMap<Handle, ()>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static ALLOCS: LazyLock<Mutex<HashMap<Handle, ()>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static TCP_LISTENERS: LazyLock<Mutex<HashMap<Handle, TcpListener>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static TCP_CONNS: LazyLock<Mutex<HashMap<Handle, TcpStream>>> =
@@ -79,7 +78,6 @@ struct VecHeader {
     alloc: Handle,
 }
 
-
 fn new_handle() -> Handle {
     let mut buf = [0u8; 8];
     loop {
@@ -110,6 +108,14 @@ fn take_handle<T>(
 ) -> Option<T> {
     let mut table = table.lock().expect(label);
     table.remove(&handle)
+}
+
+fn clone_handle<T: Clone>(
+    table: &LazyLock<Mutex<HashMap<Handle, T>>>,
+    handle: Handle,
+    label: &'static str,
+) -> Option<T> {
+    with_table(table, label, |table| table.get(&handle).cloned())
 }
 
 fn has_handle<T>(
@@ -178,8 +184,7 @@ fn make_vec_header(
     elem_size: i32,
     alloc: Handle,
 ) -> Option<Handle> {
-    let header =
-        alloc_malloc(alloc, std::mem::size_of::<VecHeader>())? as *mut VecHeader;
+    let header = alloc_malloc(alloc, std::mem::size_of::<VecHeader>())? as *mut VecHeader;
     if header.is_null() {
         return None;
     }
@@ -302,6 +307,164 @@ fn write_handle_result_code(
     }
 }
 
+fn write_unit_result(out_err: *mut i32, result: Result<(), FsErr>) -> u8 {
+    unsafe {
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(()) => 0,
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err as i32;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_i32_result(out_ok: *mut i32, out_err: *mut i32, result: Result<i32, i32>) -> u8 {
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_i32_unit_result(out_ok: *mut i32, result: Result<i32, ()>) -> u8 {
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+            }
+            0
+        }
+        Err(()) => 1,
+    }
+}
+
+fn write_u32_result(out_ok: *mut u32, out_err: *mut i32, result: Result<u32, i32>) -> u8 {
+    unsafe {
+        if !out_ok.is_null() {
+            *out_ok = 0;
+        }
+        if !out_err.is_null() {
+            *out_err = 0;
+        }
+    }
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_i64_result(out_ok: *mut i64, out_err: *mut i32, result: Result<i64, i32>) -> u8 {
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn write_u64_result(out_ok: *mut u64, out_err: *mut i32, result: Result<u64, i32>) -> u8 {
+    match result {
+        Ok(value) => {
+            unsafe {
+                if !out_ok.is_null() {
+                    *out_ok = value;
+                }
+                if !out_err.is_null() {
+                    *out_err = 0;
+                }
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                if !out_err.is_null() {
+                    *out_err = err;
+                }
+            }
+            1
+        }
+    }
+}
+
+fn cap_slice_window(ptr: *const CapSlice, offset: i32, width: usize) -> Result<*const u8, i32> {
+    if ptr.is_null() || offset < 0 {
+        return Err(0);
+    }
+    let slice = unsafe { *ptr };
+    if slice.len < 0 {
+        return Err(0);
+    }
+    let len = slice.len as usize;
+    let start = offset as usize;
+    if start.checked_add(width).is_none_or(|end| end > len) {
+        return Err(0);
+    }
+    if width > 0 && slice.ptr.is_null() {
+        return Err(0);
+    }
+    Ok(unsafe { slice.ptr.add(start) as *const u8 })
+}
+
 #[no_mangle]
 pub extern "C" fn capable_rt_mint_console(_sys: Handle) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
@@ -343,10 +506,7 @@ pub extern "C" fn capable_rt_mint_net(_sys: Handle) -> Handle {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_mint_readfs(
-    _sys: Handle,
-    root: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_mint_readfs(_sys: Handle, root: *const CapString) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
         return 0;
     }
@@ -359,15 +519,17 @@ pub extern "C" fn capable_rt_mint_readfs(
         return 0;
     };
     let handle = new_handle();
-    insert_handle(&READ_FS, handle, ReadFsState { root: root_path }, "readfs table");
+    insert_handle(
+        &READ_FS,
+        handle,
+        ReadFsState { root: root_path },
+        "readfs table",
+    );
     handle
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_mint_filesystem(
-    _sys: Handle,
-    root: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_mint_filesystem(_sys: Handle, root: *const CapString) -> Handle {
     if !has_handle(&ROOT_CAPS, _sys, "root cap table") {
         return 0;
     }
@@ -414,10 +576,7 @@ pub extern "C" fn capable_rt_fs_filesystem_close(fs: Handle) {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_subdir(
-    dir: Handle,
-    name: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_fs_subdir(dir: Handle, name: *const CapString) -> Handle {
     let name = unsafe { read_cap_string(name) };
     let state = take_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
@@ -444,12 +603,9 @@ pub extern "C" fn capable_rt_fs_subdir(
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_open_read(
-    dir: Handle,
-    name: *const CapString,
-) -> Handle {
+pub extern "C" fn capable_rt_fs_open_read(dir: Handle, name: *const CapString) -> Handle {
     let name = unsafe { read_cap_string(name) };
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
     };
@@ -479,12 +635,9 @@ pub extern "C" fn capable_rt_fs_dir_close(dir: Handle) {
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_exists(
-    fs: Handle,
-    path: *const CapString,
-) -> u8 {
+pub extern "C" fn capable_rt_fs_exists(fs: Handle, path: *const CapString) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return 0;
     };
@@ -499,6 +652,22 @@ pub extern "C" fn capable_rt_fs_exists(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_fs_is_dir(fs: Handle, path: *const CapString) -> u8 {
+    let path = unsafe { read_cap_string(path) };
+    let state = clone_handle(&READ_FS, fs, "readfs table");
+    let (Some(state), Some(path)) = (state, path) else {
+        return 0;
+    };
+    let Some(relative) = normalize_relative(Path::new(&path)) else {
+        return 0;
+    };
+    match resolve_rooted_path(&state.root, &relative) {
+        Ok(path) => u8::from(path.is_dir()),
+        Err(_) => 0,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_fs_read_bytes(
     fs: Handle,
     _alloc: Handle,
@@ -507,7 +676,7 @@ pub extern "C" fn capable_rt_fs_read_bytes(
     out_err: *mut i32,
 ) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -536,7 +705,7 @@ pub extern "C" fn capable_rt_fs_list_dir(
     out_err: *mut i32,
 ) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
     let (Some(state), Some(path)) = (state, path) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -566,12 +735,9 @@ pub extern "C" fn capable_rt_fs_list_dir(
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_fs_dir_exists(
-    dir: Handle,
-    name: *const CapString,
-) -> u8 {
+pub extern "C" fn capable_rt_fs_dir_exists(dir: Handle, name: *const CapString) -> u8 {
     let name = unsafe { read_cap_string(name) };
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return 0;
     };
@@ -586,6 +752,23 @@ pub extern "C" fn capable_rt_fs_dir_exists(
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_is_dir(dir: Handle, name: *const CapString) -> u8 {
+    let name = unsafe { read_cap_string(name) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(name)) = (state, name) else {
+        return 0;
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return 0;
+    };
+    let combined = state.rel.join(name_rel);
+    match resolve_rooted_path(&state.root, &combined) {
+        Ok(path) => u8::from(path.is_dir()),
+        Err(_) => 0,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_fs_dir_read_bytes(
     dir: Handle,
     _alloc: Handle,
@@ -594,7 +777,7 @@ pub extern "C" fn capable_rt_fs_dir_read_bytes(
     out_err: *mut i32,
 ) -> u8 {
     let name = unsafe { read_cap_string(name) };
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let (Some(state), Some(name)) = (state, name) else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -622,7 +805,7 @@ pub extern "C" fn capable_rt_fs_dir_list_dir(
     out_ok: *mut Handle,
     out_err: *mut i32,
 ) -> u8 {
-    let state = take_handle(&DIRS, dir, "dir table");
+    let state = clone_handle(&DIRS, dir, "dir table");
     let Some(state) = state else {
         return write_handle_result(out_ok, out_err, Err(FsErr::PermissionDenied));
     };
@@ -645,6 +828,85 @@ pub extern "C" fn capable_rt_fs_dir_list_dir(
     match vec_from_strings(_alloc, names) {
         Some(handle) => write_handle_result(out_ok, out_err, Ok(handle)),
         None => write_handle_result(out_ok, out_err, Err(FsErr::IoError)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_read_to_string(
+    dir: Handle,
+    _alloc: Handle,
+    name: *const CapString,
+    out_ok: *mut CapString,
+    out_err: *mut i32,
+) -> u8 {
+    let name = unsafe { read_cap_string(name) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(name)) = (state, name) else {
+        return write_result_with_alloc(_alloc, out_ok, out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(name_rel) = normalize_relative(Path::new(&name)) else {
+        return write_result_with_alloc(_alloc, out_ok, out_err, Err(FsErr::InvalidPath));
+    };
+    let combined = state.rel.join(name_rel);
+    let full = match resolve_rooted_path(&state.root, &combined) {
+        Ok(path) => path,
+        Err(err) => return write_result_with_alloc(_alloc, out_ok, out_err, Err(err)),
+    };
+    match std::fs::read_to_string(&full) {
+        Ok(contents) => write_result_with_alloc(_alloc, out_ok, out_err, Ok(contents)),
+        Err(err) => write_result_with_alloc(_alloc, out_ok, out_err, Err(map_fs_err(err))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_create_dir_all(
+    dir: Handle,
+    path: *const CapString,
+    out_err: *mut i32,
+) -> u8 {
+    let path = unsafe { read_cap_string(path) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(path)) = (state, path) else {
+        return write_unit_result(out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(path_rel) = normalize_relative(Path::new(&path)) else {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    };
+    let combined = state.rel.join(path_rel);
+    let full = state.root.join(combined);
+    if !full.starts_with(&state.root) {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    }
+    match std::fs::create_dir_all(&full) {
+        Ok(()) => write_unit_result(out_err, Ok(())),
+        Err(err) => write_unit_result(out_err, Err(map_fs_err(err))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_fs_dir_write_string(
+    dir: Handle,
+    path: *const CapString,
+    data: *const CapString,
+    out_err: *mut i32,
+) -> u8 {
+    let path = unsafe { read_cap_string(path) };
+    let data = unsafe { read_cap_string(data) };
+    let state = clone_handle(&DIRS, dir, "dir table");
+    let (Some(state), Some(path), Some(data)) = (state, path, data) else {
+        return write_unit_result(out_err, Err(FsErr::PermissionDenied));
+    };
+    let Some(path_rel) = normalize_relative(Path::new(&path)) else {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    };
+    let combined = state.rel.join(path_rel);
+    let full = state.root.join(combined);
+    if !full.starts_with(&state.root) {
+        return write_unit_result(out_err, Err(FsErr::InvalidPath));
+    }
+    match std::fs::write(&full, data) {
+        Ok(()) => write_unit_result(out_err, Ok(())),
+        Err(err) => write_unit_result(out_err, Err(map_fs_err(err))),
     }
 }
 
@@ -766,7 +1028,52 @@ pub extern "C" fn capable_rt_console_println_i32(_console: Handle, value: i32) {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_console_print_i64(_console: Handle, value: i64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = write!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_console_println_i64(_console: Handle, value: i64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = writeln!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_console_print_u64(_console: Handle, value: u64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = write!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_console_println_u64(_console: Handle, value: u64) {
+    if !has_handle(&CONSOLES, _console, "console table") {
+        return;
+    }
+    let mut stdout = io::stdout().lock();
+    let _ = writeln!(stdout, "{value}");
+    let _ = stdout.flush();
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_add_wrap_i32(a: i32, b: i32) -> i32 {
+    a.wrapping_add(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_add_wrap_i64(a: i64, b: i64) -> i64 {
     a.wrapping_add(b)
 }
 
@@ -776,7 +1083,17 @@ pub extern "C" fn capable_rt_math_sub_wrap_i32(a: i32, b: i32) -> i32 {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_math_sub_wrap_i64(a: i64, b: i64) -> i64 {
+    a.wrapping_sub(b)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_mul_wrap_i32(a: i32, b: i32) -> i32 {
+    a.wrapping_mul(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_mul_wrap_i64(a: i64, b: i64) -> i64 {
     a.wrapping_mul(b)
 }
 
@@ -786,12 +1103,27 @@ pub extern "C" fn capable_rt_math_add_wrap_u32(a: u32, b: u32) -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_math_add_wrap_u64(a: u64, b: u64) -> u64 {
+    a.wrapping_add(b)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_sub_wrap_u32(a: u32, b: u32) -> u32 {
     a.wrapping_sub(b)
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_math_sub_wrap_u64(a: u64, b: u64) -> u64 {
+    a.wrapping_sub(b)
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_math_mul_wrap_u32(a: u32, b: u32) -> u32 {
+    a.wrapping_mul(b)
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_math_mul_wrap_u64(a: u64, b: u64) -> u64 {
     a.wrapping_mul(b)
 }
 
@@ -811,6 +1143,248 @@ pub extern "C" fn capable_rt_math_mul_wrap_u8(a: u8, b: u8) -> u8 {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u16_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 2) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 2) };
+    write_i32_result(out_ok, out_err, Ok(u16::from_le_bytes([bytes[0], bytes[1]]) as i32))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u16_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 2) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 2) };
+    write_i32_result(out_ok, out_err, Ok(u16::from_be_bytes([bytes[0], bytes[1]]) as i32))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u32_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_u32_result(
+        out_ok,
+        out_err,
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u32_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_u32_result(
+        out_ok,
+        out_err,
+        Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_u64_result(
+        out_ok,
+        out_err,
+        Ok(u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut u64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_u64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_u64_result(
+        out_ok,
+        out_err,
+        Ok(u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i32_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_i32_result(
+        out_ok,
+        out_err,
+        Ok(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i32_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 4) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 4) };
+    write_i32_result(
+        out_ok,
+        out_err,
+        Ok(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i64_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_i64_result(
+        out_ok,
+        out_err,
+        Ok(i64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_i64_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i64,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i64_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    write_i64_result(
+        out_ok,
+        out_err,
+        Ok(i64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_fit_i32_le(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    let value = u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]);
+    match i32::try_from(value) {
+        Ok(value) => write_i32_result(out_ok, out_err, Ok(value)),
+        Err(_) => write_i32_result(out_ok, out_err, Err(1)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_slice_u8_read_u64_fit_i32_be(
+    slice: *const CapSlice,
+    offset: i32,
+    out_ok: *mut i32,
+    out_err: *mut i32,
+) -> u8 {
+    let ptr = match cap_slice_window(slice, offset, 8) {
+        Ok(ptr) => ptr,
+        Err(err) => return write_i32_result(out_ok, out_err, Err(err)),
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, 8) };
+    let value = u64::from_be_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]);
+    match i32::try_from(value) {
+        Ok(value) => write_i32_result(out_ok, out_err, Ok(value)),
+        Err(_) => write_i32_result(out_ok, out_err, Err(1)),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_i64_try_i32(value: i64, out_ok: *mut i32) -> u8 {
+    write_i32_unit_result(out_ok, i32::try_from(value).map_err(|_| ()))
+}
+
+#[no_mangle]
+pub extern "C" fn capable_rt_u64_try_i32(value: u64, out_ok: *mut i32) -> u8 {
+    write_i32_unit_result(out_ok, i32::try_from(value).map_err(|_| ()))
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_fs_read_to_string(
     fs: Handle,
     _alloc: Handle,
@@ -819,7 +1393,7 @@ pub extern "C" fn capable_rt_fs_read_to_string(
     out_err: *mut i32,
 ) -> u8 {
     let path = unsafe { read_cap_string(path) };
-    let state = take_handle(&READ_FS, fs, "readfs table");
+    let state = clone_handle(&READ_FS, fs, "readfs table");
 
     let Some(state) = state else {
         return write_result_with_alloc(_alloc, out_ok, out_err, Err(FsErr::PermissionDenied));
@@ -1099,6 +1673,13 @@ pub extern "C" fn capable_rt_alloc_default(_sys: Handle) -> Handle {
 }
 
 #[no_mangle]
+pub extern "C" fn capable_rt_default_alloc() -> Handle {
+    let handle = new_handle();
+    insert_handle(&ALLOCS, handle, (), "alloc table");
+    handle
+}
+
+#[no_mangle]
 pub extern "C" fn capable_rt_args_len(_sys: Handle) -> i32 {
     if !has_handle(&ARGS_CAPS, _sys, "args table") {
         return 0;
@@ -1177,10 +1758,7 @@ pub extern "C" fn capable_rt_read_stdin_to_string(
 }
 
 #[no_mangle]
-pub extern "C" fn capable_rt_string_eq(
-    left: *const CapString,
-    right: *const CapString,
-) -> i8 {
+pub extern "C" fn capable_rt_string_eq(left: *const CapString, right: *const CapString) -> i8 {
     let left_slice = unsafe {
         if left.is_null() {
             CapSlice {

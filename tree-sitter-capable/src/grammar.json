@@ -1700,6 +1700,14 @@
         },
         {
           "type": "SYMBOL",
+          "name": "i64_lit"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "u64_lit"
+        },
+        {
+          "type": "SYMBOL",
           "name": "string_lit"
         },
         {
@@ -1723,6 +1731,14 @@
     "u8_lit": {
       "type": "PATTERN",
       "value": "[0-9]+u8"
+    },
+    "i64_lit": {
+      "type": "PATTERN",
+      "value": "[0-9]+i64"
+    },
+    "u64_lit": {
+      "type": "PATTERN",
+      "value": "[0-9]+u64"
     },
     "string_lit": {
       "type": "PATTERN",

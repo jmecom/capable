@@ -21,4 +21,12 @@ impl Args {
   pub fn at(self, index: i32) -> Result<string, ArgsErr> {
     return Err(ArgsErr::OutOfRange)
   }
+
+  /// Get an argument by index, or return a fallback string.
+  pub fn at_or(self, index: i32, fallback: string) -> string {
+    try let arg = self.at(index) else {
+      return fallback
+    }
+    return arg
+  }
 }

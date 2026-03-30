@@ -1,0 +1,27 @@
+package safe
+module should_pass_capability_borrow_return_linear
+
+capability struct Cap
+linear capability struct Child
+
+impl Cap {
+  pub fn child(self: &Cap) -> Child {
+    return Child{}
+  }
+
+  pub fn try_child(self: &Cap) -> Result<Child, i32> {
+    return Ok(Child{})
+  }
+}
+
+pub fn main() -> i32 {
+  let cap = Cap{}
+  let first = cap.child()
+  drop(first)
+
+  try let second = cap.try_child() else {
+    return 1
+  }
+  drop(second)
+  return 0
+}

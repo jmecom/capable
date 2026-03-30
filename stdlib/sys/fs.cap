@@ -18,23 +18,43 @@ pub linear capability struct FileRead
 pub enum FsErr { NotFound, PermissionDenied, InvalidPath, IoError }
 
 impl ReadFS {
-  /// Read an entire file into a string.
-  pub fn read_to_string(self, alloc: buffer::Alloc, path: string) -> Result<string, FsErr> {
+  /// Read an entire file into a string using the process default allocator.
+  pub fn read_to_string(self: &ReadFS, path: string) -> Result<string, FsErr> {
+    return self.read_to_string_with_alloc(buffer::default_alloc(), path)
+  }
+
+  /// Read an entire file into a string using the provided allocator.
+  pub fn read_to_string_with_alloc(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<string, FsErr> {
     return ()
   }
 
-  /// Read an entire file into a byte vec.
-  pub fn read_bytes(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<u8>, FsErr> {
+  /// Read an entire file into a byte vec using the process default allocator.
+  pub fn read_bytes(self: &ReadFS, path: string) -> Result<vec::Vec<u8>, FsErr> {
+    return self.read_bytes_with_alloc(buffer::default_alloc(), path)
+  }
+
+  /// Read an entire file into a byte vec using the provided allocator.
+  pub fn read_bytes_with_alloc(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  /// List directory contents as strings.
-  pub fn list_dir(self, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<string>, FsErr> {
+  /// List directory contents as strings using the process default allocator.
+  pub fn list_dir(self: &ReadFS, path: string) -> Result<vec::Vec<string>, FsErr> {
+    return self.list_dir_with_alloc(buffer::default_alloc(), path)
+  }
+
+  /// List directory contents as strings using the provided allocator.
+  pub fn list_dir_with_alloc(self: &ReadFS, alloc: buffer::Alloc, path: string) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// True if a path exists.
-  pub fn exists(self, path: string) -> bool {
+  pub fn exists(self: &ReadFS, path: string) -> bool {
+    return false
+  }
+
+  /// True if a path exists and is a directory.
+  pub fn is_dir(self: &ReadFS, path: string) -> bool {
     return false
   }
 
@@ -63,29 +83,58 @@ impl Dir {
   }
 
   /// Open a file for reading.
-  pub fn open_read(self, name: string) -> FileRead {
+  pub fn open_read(self: &Dir, name: string) -> FileRead {
     return ()
   }
 
-  /// Read a file into a byte vec.
-  pub fn read_bytes(self, alloc: buffer::Alloc, name: string) -> Result<vec::Vec<u8>, FsErr> {
+  /// Read a file into a byte vec using the process default allocator.
+  pub fn read_bytes(self: &Dir, name: string) -> Result<vec::Vec<u8>, FsErr> {
+    return self.read_bytes_with_alloc(buffer::default_alloc(), name)
+  }
+
+  /// Read a file into a byte vec using the provided allocator.
+  pub fn read_bytes_with_alloc(self: &Dir, alloc: buffer::Alloc, name: string) -> Result<vec::Vec<u8>, FsErr> {
     return Err(FsErr::IoError)
   }
 
-  /// List directory contents.
-  pub fn list_dir(self, alloc: buffer::Alloc) -> Result<vec::Vec<string>, FsErr> {
+  /// List directory contents using the process default allocator.
+  pub fn list_dir(self: &Dir) -> Result<vec::Vec<string>, FsErr> {
+    return self.list_dir_with_alloc(buffer::default_alloc())
+  }
+
+  /// List directory contents using the provided allocator.
+  pub fn list_dir_with_alloc(self: &Dir, alloc: buffer::Alloc) -> Result<vec::Vec<string>, FsErr> {
     return Err(FsErr::IoError)
   }
 
   /// True if a path exists.
-  pub fn exists(self, name: string) -> bool {
+  pub fn exists(self: &Dir, name: string) -> bool {
     return false
   }
 
-  /// Read a file into a string.
-  pub fn read_to_string(self, alloc: buffer::Alloc, name: string) -> Result<string, FsErr> {
-    let file = self.open_read(name)
-    return file.read_to_string(alloc)
+  /// True if a path exists and is a directory.
+  pub fn is_dir(self: &Dir, name: string) -> bool {
+    return false
+  }
+
+  /// Read a file into a string using the process default allocator.
+  pub fn read_to_string(self: &Dir, name: string) -> Result<string, FsErr> {
+    return self.read_to_string_with_alloc(buffer::default_alloc(), name)
+  }
+
+  /// Read a file into a string using the provided allocator.
+  pub fn read_to_string_with_alloc(self: &Dir, alloc: buffer::Alloc, name: string) -> Result<string, FsErr> {
+    return ()
+  }
+
+  /// Create a directory and any missing parents.
+  pub fn create_dir_all(self: &Dir, path: string) -> Result<unit, FsErr> {
+    return Err(FsErr::IoError)
+  }
+
+  /// Write a string to a file relative to this directory.
+  pub fn write_string(self: &Dir, path: string, data: string) -> Result<unit, FsErr> {
+    return Err(FsErr::IoError)
   }
 
   /// Close the capability.
@@ -95,8 +144,13 @@ impl Dir {
 }
 
 impl FileRead {
-  /// Read the file into a string.
-  pub fn read_to_string(self, alloc: buffer::Alloc) -> Result<string, FsErr> {
+  /// Read the file into a string using the process default allocator.
+  pub fn read_to_string(self) -> Result<string, FsErr> {
+    return self.read_to_string_with_alloc(buffer::default_alloc())
+  }
+
+  /// Read the file into a string using the provided allocator.
+  pub fn read_to_string_with_alloc(self, alloc: buffer::Alloc) -> Result<string, FsErr> {
     return ()
   }
 
@@ -106,7 +160,12 @@ impl FileRead {
   }
 }
 
-/// Join two path segments with a platform separator.
-pub fn join(alloc: buffer::Alloc, a: string, b: string) -> string {
+/// Join two path segments using the process default allocator.
+pub fn join(a: string, b: string) -> string {
+  return join_with_alloc(buffer::default_alloc(), a, b)
+}
+
+/// Join two path segments with a platform separator using the provided allocator.
+pub fn join_with_alloc(alloc: buffer::Alloc, a: string, b: string) -> string {
   return ""
 }

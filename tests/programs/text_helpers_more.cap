@@ -2,62 +2,57 @@ package safe
 module text_helpers_more
 use sys::system
 use sys::string
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let text = alloc.text_new()
-  match (text.push_str("hi")) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
+  let text = string::text_new()
+  defer text.free()
+  try text.push_str("hi") else {
+    panic()
   }
-  match (text.push_byte('\n')) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
+  try text.push_byte('\n') else {
+    panic()
   }
-  match (text.push_str("ok")) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
+  try text.push_str("ok") else {
+    panic()
   }
-  match (text.slice_range(0, 2)) {
-    Ok(view) => { c.assert(view.eq("hi")) }
-    Err(_) => { c.assert(false); return 1 }
+  try let prefix = text.slice_range(0, 2) else {
+    c.assert(false)
+    return 1
   }
-  let v = alloc.vec_u8_new()
-  match (v.push('!')) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
+  c.assert(prefix.eq("hi"))
+  let v = vec::new<u8>()
+  defer v.free()
+  try v.push('!') else {
+    panic()
   }
-  match (text.extend_vec(v)) {
-    Ok(_) => { }
-    Err(_) => { c.assert(false); return 1 }
+  try text.extend_vec(v) else {
+    panic()
   }
-  match (text.to_string()) {
-    Ok(s) => { c.assert(s.eq("hi\nok!")) }
-    Err(_) => { c.assert(false); return 1 }
+  try let owned = text.copy_string() else {
+    c.assert(false)
+    return 1
   }
-  match (alloc.text_from("cap")) {
-    Ok(t2) => {
-      match (t2.to_string()) {
-        Ok(s) => { c.assert(s.eq("cap")) }
-        Err(_) => { c.assert(false); return 1 }
-      }
-      t2.free(alloc)
-    }
-    Err(_) => { c.assert(false); return 1 }
+  c.assert(owned.eq("hi\nok!"))
+  try let t2 = string::text_from("cap") else {
+    panic()
   }
-  match ("owned".to_text(alloc)) {
-    Ok(t3) => {
-      match (t3.to_string()) {
-        Ok(s) => { c.assert(s.eq("owned")) }
-        Err(_) => { c.assert(false); return 1 }
-      }
-      t3.free(alloc)
-    }
-    Err(_) => { c.assert(false); return 1 }
+  defer t2.free()
+  try let owned2 = t2.copy_string() else {
+    c.assert(false)
+    return 1
   }
-  alloc.vec_u8_free(v)
-  text.free(alloc)
+  c.assert(owned2.eq("cap"))
+  try let t3 = "owned".copy_text() else {
+    panic()
+  }
+  defer t3.free()
+  try let owned3 = t3.copy_string() else {
+    c.assert(false)
+    return 1
+  }
+  c.assert(owned3.eq("owned"))
   c.println("text helpers ok")
   return 0
 }

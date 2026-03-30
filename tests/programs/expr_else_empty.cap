@@ -1,0 +1,12 @@
+package safe
+module expr_else_empty
+
+fn do_it() -> Result<unit, i32> {
+  return Err(1)
+}
+
+pub fn main() -> i32 {
+  try do_it() else {
+  }
+  return 0
+}

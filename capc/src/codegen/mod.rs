@@ -20,7 +20,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{Linkage, Module as ModuleTrait};
 use cranelift_native;
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use miette::{Diagnostic, SourceSpan};
+use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 
 mod emit;
@@ -42,6 +42,9 @@ pub enum CodegenError {
     Spanned {
         #[allow(dead_code)]
         message: String,
+        module_name: Option<String>,
+        #[source_code]
+        source_code: Option<NamedSource<String>>,
         #[label]
         span: SourceSpan,
         #[allow(dead_code)]
@@ -64,6 +67,8 @@ impl CodegenError {
         let source_span: SourceSpan = (span.start, span.end.saturating_sub(span.start)).into();
         CodegenError::Spanned {
             message: message.into(),
+            module_name: None,
+            source_code: None,
             span: source_span,
             span_raw: span,
         }
@@ -80,14 +85,73 @@ impl CodegenError {
         match self {
             CodegenError::Spanned {
                 message,
+                module_name,
+                source_code,
                 span,
                 span_raw,
             } => CodegenError::Spanned {
                 message: format_with_context(context, message),
+                module_name,
+                source_code,
                 span,
                 span_raw,
             },
             other => CodegenError::Codegen(format_with_context(context, other.to_string())),
+        }
+    }
+
+    pub fn in_module(self, module_name: impl Into<String>) -> Self {
+        match self {
+            CodegenError::Spanned {
+                message,
+                source_code,
+                span,
+                span_raw,
+                ..
+            } => CodegenError::Spanned {
+                message,
+                module_name: Some(module_name.into()),
+                source_code,
+                span,
+                span_raw,
+            },
+            other => other,
+        }
+    }
+
+    pub fn module_name(&self) -> Option<&str> {
+        match self {
+            CodegenError::Spanned { module_name, .. } => module_name.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn has_source(&self) -> bool {
+        matches!(
+            self,
+            CodegenError::Spanned {
+                source_code: Some(_),
+                ..
+            }
+        )
+    }
+
+    pub fn with_source(self, name: impl Into<String>, source: impl Into<String>) -> Self {
+        match self {
+            CodegenError::Spanned {
+                message,
+                module_name,
+                span,
+                span_raw,
+                ..
+            } => CodegenError::Spanned {
+                message,
+                module_name,
+                source_code: Some(NamedSource::new(name.into(), source.into())),
+                span,
+                span_raw,
+            },
+            other => other,
         }
     }
 }
@@ -194,10 +258,11 @@ struct ResultShape {
 }
 
 /// Result shape kinds for match-expression lowering.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ResultKind {
     Unit,
     Single,
+    Result(Box<ResultKind>, Box<ResultKind>),
 }
 
 /// Build and write the object file for a fully-checked HIR program.
@@ -233,7 +298,7 @@ pub fn build_object(
         module.isa().pointer_type(),
     )?;
 
-    let runtime_intrinsics = register_runtime_intrinsics(module.isa().pointer_type());
+    let runtime_intrinsics = register_runtime_intrinsics();
     let mut fn_map = HashMap::new();
     for module_ref in &program.stdlib {
         register_user_functions(
@@ -337,7 +402,11 @@ pub fn build_object(
                     &func.ret_ty,
                     &enum_index,
                     &struct_layouts,
-                )?;
+                )
+                .map_err(|err| {
+                    err.in_module(module_name.clone())
+                        .with_context(format!("in function `{}.{}`", module_name, func.name))
+                })?;
                 match value {
                     ValueRepr::Unit => builder.ins().return_(&[]),
                     ValueRepr::Single(val) => builder.ins().return_(&[val]),
@@ -350,11 +419,15 @@ pub fn build_object(
                 builder.finalize();
                 if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
                     eprintln!("=== IR for {} ===\n{}", func.name, ctx.func.display());
-                    return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
+                    return Err(CodegenError::Codegen(format!("verifier errors: {err}"))
+                        .with_context(format!("in function `{}.{}`", module_name, func.name)));
                 }
                 module
                     .define_function(func_id, &mut ctx)
-                    .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+                    .map_err(|err| {
+                        CodegenError::Codegen(err.to_string())
+                            .with_context(format!("in function `{}.{}`", module_name, func.name))
+                    })?;
                 continue;
             }
 
@@ -458,7 +531,11 @@ pub fn build_object(
                     None, // no loop context at function top level
                     &return_lowering,
                     &mut defer_stack,
-                )?;
+                )
+                .map_err(|err| {
+                    err.in_module(module_name.clone())
+                        .with_context(format!("in function `{}.{}`", module_name, func.name))
+                })?;
                 if flow == Flow::Terminated {
                     terminated = true;
                     break;
@@ -483,11 +560,15 @@ pub fn build_object(
             builder.finalize();
             if let Err(err) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
                 eprintln!("=== IR for {} ===\n{}", func.name, ctx.func.display());
-                return Err(CodegenError::Codegen(format!("verifier errors: {err}")));
+                return Err(CodegenError::Codegen(format!("verifier errors: {err}"))
+                    .with_context(format!("in function `{}.{}`", module_name, func.name)));
             }
             module
                 .define_function(func_id, &mut ctx)
-                .map_err(|err| CodegenError::Codegen(err.to_string()))?;
+                .map_err(|err| {
+                    CodegenError::Codegen(err.to_string())
+                        .with_context(format!("in function `{}.{}`", module_name, func.name))
+                })?;
         }
     }
 
@@ -519,7 +600,9 @@ fn append_ty_params(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
         AbiType::Handle => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::Ptr => signature.params.push(AbiParam::new(ptr_ty)),
         AbiType::I32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        AbiType::I64 => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::U32 => signature.params.push(AbiParam::new(ir::types::I32)),
+        AbiType::U64 => signature.params.push(AbiParam::new(ir::types::I64)),
         AbiType::U8 => signature.params.push(AbiParam::new(ir::types::I8)),
         AbiType::Bool => signature.params.push(AbiParam::new(ir::types::I8)),
         AbiType::Result(ok, err) => {
@@ -543,7 +626,9 @@ fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
     match ty {
         AbiType::Unit => {}
         AbiType::I32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        AbiType::I64 => signature.returns.push(AbiParam::new(ir::types::I64)),
         AbiType::U32 => signature.returns.push(AbiParam::new(ir::types::I32)),
+        AbiType::U64 => signature.returns.push(AbiParam::new(ir::types::I64)),
         AbiType::U8 => signature.returns.push(AbiParam::new(ir::types::I8)),
         AbiType::Bool => signature.returns.push(AbiParam::new(ir::types::I8)),
         AbiType::Handle => signature.returns.push(AbiParam::new(ir::types::I64)),
@@ -560,8 +645,8 @@ fn append_ty_returns(signature: &mut Signature, ty: &AbiType, ptr_ty: Type) {
 }
 
 /// Register runtime-backed intrinsics for stdlib symbols.
-fn register_runtime_intrinsics(ptr_ty: Type) -> HashMap<String, FnInfo> {
-    intrinsics::register_runtime_intrinsics(ptr_ty)
+fn register_runtime_intrinsics() -> HashMap<String, FnInfo> {
+    intrinsics::register_runtime_intrinsics()
 }
 
 fn is_non_opaque_struct_type(

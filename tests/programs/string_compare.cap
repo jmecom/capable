@@ -38,6 +38,12 @@ pub fn main(rc: RootCap) -> i32 {
     c.println("literal ok")
   }
 
+  c.assert("abc".compare("abc") == 0)
+  c.assert("abc".compare("abd") < 0)
+  c.assert("abd".compare("abc") > 0)
+  c.assert("abc".compare("ab") > 0)
+  c.assert("ab".compare("abc") < 0)
+
   c.println("string_compare ok")
   return 0
 }

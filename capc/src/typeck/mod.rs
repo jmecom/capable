@@ -10,8 +10,15 @@
 
 mod check;
 mod collect;
+mod infer;
+mod kinds;
 mod lower;
+mod moveck;
 mod monomorphize;
+mod patterns;
+mod resolve;
+mod safety;
+mod type_params;
 
 use std::collections::{HashMap, HashSet};
 
@@ -19,9 +26,31 @@ use crate::ast::*;
 use crate::error::TypeError;
 use crate::hir::{HirModule, HirTraitImpl};
 
-pub(super) const RESERVED_TYPE_PARAMS: [&str; 8] = [
-    "i32", "i64", "u32", "u8", "bool", "unit", "never", "Self",
-];
+use infer::{
+    apply_enum_type_args, enum_payload_matches, infer_enum_args, resolve_enum_type_args,
+    ty_equivalent_for_set,
+};
+use kinds::{
+    is_affine_type, is_string_ty, stdlib_string_ty, type_contains_capability,
+    type_contains_non_linear_capability, type_contains_ref, type_kind, validate_type_args,
+};
+use moveck::{
+    ensure_affine_states_match, ensure_linear_all_consumed, ensure_linear_scope_consumed,
+    ensure_linear_scopes_consumed_from, merge_branch_states, merge_match_states, stmt_is_total,
+};
+use patterns::{bind_pattern, leftmost_local_in_chain};
+use resolve::{
+    desugar_impl_methods, lower_type, path_to_string, resolve_enum_variant, resolve_impl_target,
+    resolve_method_target, resolve_path, resolve_trait_name, resolve_type_name,
+};
+use safety::{validate_import_safety, validate_package_safety};
+use type_params::{
+    build_type_arg_suffix,
+    build_type_param_bounds, build_type_params, merge_type_params, type_param_names,
+};
+
+pub(super) const RESERVED_TYPE_PARAMS: [&str; 9] =
+    ["i32", "i64", "u32", "u64", "u8", "bool", "unit", "never", "Self"];
 
 /// Resolved type used after lowering. No spans, fully qualified paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,98 +65,13 @@ pub enum Ty {
     Param(String),
 }
 
-/// Build type argument suffix for method names (e.g., "__u8" for Vec<u8>).
-/// This is used to distinguish type-specific impl methods from generic ones.
-pub(crate) fn build_type_arg_suffix(type_args: &[Ty]) -> String {
-    if type_args.is_empty() {
-        return String::new();
-    }
-    let args: Vec<String> = type_args
-        .iter()
-        .filter_map(|arg| match arg {
-            Ty::Builtin(b) => Some(format!("{:?}", b).to_lowercase()),
-            Ty::Path(name, _) => name.rsplit_once('.').map(|(_, t)| t.to_string()),
-            Ty::Param(_) => None, // Skip type params, only concrete types
-            _ => None,
-        })
-        .collect();
-    if args.is_empty() {
-        String::new()
-    } else {
-        format!("__{}", args.join("_"))
-    }
-}
-
-pub(super) fn build_type_params(params: &[TypeParam]) -> Result<HashSet<String>, TypeError> {
-    let mut set = HashSet::new();
-    for param in params {
-        let name = param.name.item.as_str();
-        if RESERVED_TYPE_PARAMS.contains(&name) {
-            return Err(TypeError::new(
-                format!("type parameter `{}` is reserved", param.name.item),
-                param.name.span,
-            ));
-        }
-        if !set.insert(param.name.item.clone()) {
-            return Err(TypeError::new(
-                format!("duplicate type parameter `{}`", param.name.item),
-                param.name.span,
-            ));
-        }
-    }
-    Ok(set)
-}
-
-fn build_type_param_bounds(
-    params: &[TypeParam],
-    use_map: &UseMap,
-    module_name: &str,
-) -> HashMap<String, Vec<String>> {
-    let mut bounds = HashMap::new();
-    for param in params {
-        let mut resolved = Vec::new();
-        for bound in &param.bounds {
-            resolved.push(resolve_trait_name(bound, use_map, module_name));
-        }
-        bounds.insert(param.name.item.clone(), resolved);
-    }
-    bounds
-}
-
-pub(super) fn type_param_names(params: &[TypeParam]) -> Vec<String> {
-    params.iter().map(|param| param.name.item.clone()).collect()
-}
-
-fn merge_type_params(
-    base: &HashSet<String>,
-    params: &[TypeParam],
-) -> Result<HashSet<String>, TypeError> {
-    let mut set = base.clone();
-    for param in params {
-        let name = param.name.item.as_str();
-        if RESERVED_TYPE_PARAMS.contains(&name) {
-            return Err(TypeError::new(
-                format!("type parameter `{}` is reserved", param.name.item),
-                param.name.span,
-            ));
-        }
-        if set.contains(&param.name.item) {
-            return Err(TypeError::new(
-                format!("duplicate type parameter `{}`", param.name.item),
-                param.name.span,
-            ));
-        }
-        set.insert(param.name.item.clone());
-    }
-    Ok(set)
-}
-
 /// Built-in primitive types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuiltinType {
     I32,
     I64,
     U32,
+    U64,
     U8,
     Bool,
     Unit,
@@ -145,6 +89,7 @@ pub fn is_numeric_type(ty: &Ty) -> bool {
         Ty::Builtin(BuiltinType::I32)
             | Ty::Builtin(BuiltinType::I64)
             | Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U64)
             | Ty::Builtin(BuiltinType::U8)
     )
 }
@@ -158,23 +103,25 @@ pub fn is_orderable_type(ty: &Ty) -> bool {
 pub fn is_unsigned_type(ty: &Ty) -> bool {
     matches!(
         ty,
-        Ty::Builtin(BuiltinType::U32) | Ty::Builtin(BuiltinType::U8)
+        Ty::Builtin(BuiltinType::U32)
+            | Ty::Builtin(BuiltinType::U64)
+            | Ty::Builtin(BuiltinType::U8)
     )
 }
 
 /// Collected type information for expressions within a single function.
 #[derive(Debug, Default, Clone)]
 struct TypeTable {
-    expr_types: HashMap<Span, Ty>,
+    expr_types: HashMap<ExprId, Ty>,
 }
 
 impl TypeTable {
-    fn record(&mut self, span: Span, ty: Ty) {
-        self.expr_types.insert(span, ty);
+    fn record(&mut self, id: ExprId, ty: Ty) {
+        self.expr_types.insert(id, ty);
     }
 
-    fn get(&self, span: Span) -> Option<&Ty> {
-        self.expr_types.get(&span)
+    fn get(&self, id: ExprId) -> Option<&Ty> {
+        self.expr_types.get(&id)
     }
 }
 
@@ -223,7 +170,9 @@ fn substitute_self(ty: &Ty, target: &Ty) -> Ty {
         Ty::Ref(inner) => Ty::Ref(Box::new(substitute_self(inner, target))),
         Ty::Path(name, args) => Ty::Path(
             name.clone(),
-            args.iter().map(|arg| substitute_self(arg, target)).collect(),
+            args.iter()
+                .map(|arg| substitute_self(arg, target))
+                .collect(),
         ),
         Ty::Builtin(_) | Ty::Param(_) => ty.clone(),
     }
@@ -388,19 +337,13 @@ impl Scopes {
         for scope in self.stack.iter_mut().rev() {
             if let Some(info) = scope.get_mut(name) {
                 if info.state == MoveState::Moved {
-                    return Err(TypeError::new(
-                        format!("use of moved value `{name}`"),
-                        span,
-                    ));
+                    return Err(TypeError::new(format!("use of moved value `{name}`"), span));
                 }
                 info.state = MoveState::Moved;
                 return Ok(());
             }
         }
-        Err(TypeError::new(
-            format!("unknown identifier `{name}`"),
-            span,
-        ))
+        Err(TypeError::new(format!("unknown identifier `{name}`"), span))
     }
 }
 
@@ -432,807 +375,6 @@ impl UseMap {
     }
 }
 
-fn resolve_path(path: &Path, use_map: &UseMap) -> Vec<String> {
-    if path.segments.len() > 1 {
-        let first = &path.segments[0].item;
-        if let Some(prefix) = use_map.aliases.get(first) {
-            let mut resolved = prefix.clone();
-            for seg in path.segments.iter().skip(1) {
-                resolved.push(seg.item.clone());
-            }
-            return resolved;
-        }
-    }
-    path.segments.iter().map(|seg| seg.item.clone()).collect()
-}
-
-fn path_to_string(path: &Path) -> String {
-    let mut out = String::new();
-    for (i, seg) in path.segments.iter().enumerate() {
-        if i > 0 {
-            out.push('.');
-        }
-        out.push_str(&seg.item);
-    }
-    out
-}
-
-/// Resolve a method receiver type to (module, type name, type args).
-/// Builtins with methods (string/u8) are mapped to their stdlib modules.
-fn resolve_method_target(
-    receiver_ty: &Ty,
-    module_name: &str,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(String, String, Vec<Ty>), TypeError> {
-    let base_ty = match receiver_ty {
-        Ty::Ref(inner) | Ty::Ptr(inner) => inner.as_ref(),
-        _ => receiver_ty,
-    };
-    let (receiver_name, receiver_args) = match base_ty {
-        Ty::Path(name, args) => (name.as_str(), args),
-        Ty::Builtin(BuiltinType::U8) => {
-            return Ok((
-                "sys.bytes".to_string(),
-                "u8".to_string(),
-                Vec::new(),
-            ));
-        }
-        _ => {
-            return Err(TypeError::new(
-                "method receiver must be a struct or enum value".to_string(),
-                span,
-            ));
-        }
-    };
-
-    if let Some(info) = struct_map.get(receiver_name) {
-        let type_name = receiver_name
-            .rsplit_once('.')
-            .map(|(_, t)| t)
-            .unwrap_or(receiver_name)
-            .to_string();
-        return Ok((info.module.clone(), type_name, receiver_args.clone()));
-    }
-
-    if enum_map.contains_key(receiver_name) {
-        let type_name = receiver_name
-            .rsplit_once('.')
-            .map(|(_, t)| t)
-            .unwrap_or(receiver_name)
-            .to_string();
-        let mod_part = receiver_name
-            .rsplit_once('.')
-            .map(|(m, _)| m)
-            .unwrap_or(module_name);
-        return Ok((mod_part.to_string(), type_name, receiver_args.clone()));
-    }
-
-    if receiver_name.contains('.') {
-        let (mod_part, type_part) = receiver_name.rsplit_once('.').ok_or_else(|| {
-            TypeError::new("invalid type path".to_string(), span)
-        })?;
-        return Ok((
-            mod_part.to_string(),
-            type_part.to_string(),
-            receiver_args.clone(),
-        ));
-    }
-
-    if let Some(info) = struct_map.get(&format!("{module_name}.{receiver_name}")) {
-        return Ok((info.module.clone(), receiver_name.to_string(), receiver_args.clone()));
-    }
-    if enum_map.contains_key(&format!("{module_name}.{receiver_name}")) {
-        return Ok((module_name.to_string(), receiver_name.to_string(), receiver_args.clone()));
-    }
-
-    Err(TypeError::new(
-        format!("unknown struct or enum `{receiver_name}`"),
-        span,
-    ))
-}
-
-fn resolve_impl_target(
-    target: &Type,
-    use_map: &UseMap,
-    stdlib: &StdlibIndex,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    type_params: &HashSet<String>,
-    module_name: &str,
-    span: Span,
-) -> Result<(String, String, Ty), TypeError> {
-    let target_ty = lower_type(target, use_map, stdlib, type_params)?;
-    let (impl_module, type_name) = match &target_ty {
-        Ty::Path(target_name, target_args) => {
-            // Build suffix for concrete type args (e.g., "__u8" for Vec<u8>)
-            let type_arg_suffix = if target_args.is_empty() {
-                String::new()
-            } else {
-                let args: Vec<String> = target_args
-                    .iter()
-                    .filter_map(|arg| match arg {
-                        Ty::Builtin(b) => Some(format!("{:?}", b).to_lowercase()),
-                        Ty::Path(name, _) => name.rsplit_once('.').map(|(_, t)| t.to_string()),
-                        Ty::Param(_) => None, // Skip type params, only concrete types
-                        _ => None,
-                    })
-                    .collect();
-                if args.is_empty() {
-                    String::new()
-                } else {
-                    format!("__{}", args.join("_"))
-                }
-            };
-
-            // Check struct_map first
-            if let Some(info) = struct_map.get(target_name) {
-                let base_name = target_name
-                    .rsplit_once('.')
-                    .map(|(_, t)| t)
-                    .unwrap_or(target_name);
-                let type_name = format!("{}{}", base_name, type_arg_suffix);
-                (info.module.clone(), type_name)
-            // Check enum_map
-            } else if enum_map.contains_key(target_name) {
-                let base_name = target_name
-                    .rsplit_once('.')
-                    .map(|(_, t)| t)
-                    .unwrap_or(target_name);
-                let type_name = format!("{}{}", base_name, type_arg_suffix);
-                let mod_part = target_name
-                    .rsplit_once('.')
-                    .map(|(m, _)| m)
-                    .unwrap_or(module_name);
-                (mod_part.to_string(), type_name)
-            } else if target_name.contains('.') {
-                let (mod_part, type_part) = target_name.rsplit_once('.').ok_or_else(|| {
-                    TypeError::new("invalid type path".to_string(), span)
-                })?;
-                let type_name = format!("{}{}", type_part, type_arg_suffix);
-                (mod_part.to_string(), type_name)
-            } else if let Some(info) = struct_map.get(&format!("{module_name}.{target_name}")) {
-                let type_name = format!("{}{}", target_name, type_arg_suffix);
-                (info.module.clone(), type_name)
-            } else if enum_map.contains_key(&format!("{module_name}.{target_name}")) {
-                let type_name = format!("{}{}", target_name, type_arg_suffix);
-                (module_name.to_string(), type_name)
-            } else {
-                return Err(TypeError::new(
-                    "impl target must be a struct or enum type name".to_string(),
-                    span,
-                ));
-            }
-        }
-        Ty::Builtin(BuiltinType::I32) => (module_name.to_string(), "i32".to_string()),
-        Ty::Builtin(BuiltinType::U32) => (module_name.to_string(), "u32".to_string()),
-        Ty::Builtin(BuiltinType::U8) => (module_name.to_string(), "u8".to_string()),
-        Ty::Builtin(BuiltinType::Bool) => (module_name.to_string(), "bool".to_string()),
-        _ => {
-            return Err(TypeError::new(
-                "impl target must be a struct or enum type name".to_string(),
-                span,
-            ));
-        }
-    };
-    if impl_module != module_name {
-        return Err(TypeError::new(
-            "impl blocks must be declared in the defining module".to_string(),
-            span,
-        ));
-    }
-    Ok((impl_module, type_name, target_ty))
-}
-
-fn validate_impl_method(
-    type_name: &str,
-    target_ty: &Ty,
-    target_ast: &Type,
-    _module_name: &str,
-    method: &Function,
-    use_map: &UseMap,
-    stdlib: &StdlibIndex,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    type_params: &HashSet<String>,
-    _span: Span,
-) -> Result<Vec<Param>, TypeError> {
-    if method.name.item.contains("__") {
-        return Err(TypeError::new(
-            "method name in impl should be unqualified (write sum, not Pair__sum)".to_string(),
-            method.name.span,
-        ));
-    }
-
-    let Some(first_param) = method.params.first() else {
-        return Err(TypeError::new(
-            format!("first parameter must be self: {type_name}"),
-            method.name.span,
-        ));
-    };
-    if first_param.name.item != "self" {
-        return Err(TypeError::new(
-            format!("first parameter must be self: {type_name}"),
-            first_param.name.span,
-        ));
-    }
-
-    let mut params = method.params.clone();
-    let expected = target_ty.clone();
-    let expected_ptr = Ty::Ptr(Box::new(target_ty.clone()));
-    let expected_ref = Ty::Ref(Box::new(target_ty.clone()));
-    let mut receiver_is_ref = false;
-
-    if let Some(ty) = &first_param.ty {
-        let lowered = lower_type(ty, use_map, stdlib, type_params)?;
-        if lowered != expected && lowered != expected_ptr && lowered != expected_ref {
-            return Err(TypeError::new(
-                format!(
-                    "first parameter must be self: {type_name} (found {lowered:?})"
-                ),
-                ty.span(),
-            ));
-        }
-        receiver_is_ref = lowered == expected_ref;
-    } else {
-        params[0].ty = Some(target_ast.clone());
-    }
-
-    for param in params.iter().skip(1) {
-        if param.ty.is_none() {
-            return Err(TypeError::new(
-                format!("parameter `{}` requires a type annotation", param.name.item),
-                param.name.span,
-            ));
-        }
-    }
-
-    let ret_ty = lower_type(&method.ret, use_map, stdlib, type_params)?;
-    if receiver_is_ref && type_contains_capability(&ret_ty, struct_map, enum_map) {
-        let receiver_kind = type_kind(target_ty, struct_map, enum_map);
-        if receiver_kind != TypeKind::Unrestricted {
-            return Err(TypeError::new(
-                "methods returning capabilities must take `self` by value".to_string(),
-                method.ret.span(),
-            ));
-        }
-    }
-
-    Ok(params)
-}
-
-fn desugar_impl_method(
-    type_name: &str,
-    method: &Function,
-    params: Vec<Param>,
-    type_params: Vec<TypeParam>,
-) -> Function {
-    let name = Spanned::new(
-        format!("{type_name}__{}", method.name.item),
-        method.name.span,
-    );
-    Function {
-        name,
-        type_params,
-        params,
-        ret: method.ret.clone(),
-        body: method.body.clone(),
-        is_pub: method.is_pub,
-        doc: method.doc.clone(),
-        span: method.span,
-    }
-}
-
-fn desugar_impl_methods(
-    impl_block: &ImplBlock,
-    module_name: &str,
-    use_map: &UseMap,
-    stdlib: &StdlibIndex,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    trait_map: &HashMap<String, TraitInfo>,
-) -> Result<Vec<Function>, TypeError> {
-    let impl_type_params = build_type_params(&impl_block.type_params)?;
-    let (_impl_module, type_name, target_ty) = resolve_impl_target(
-        &impl_block.target,
-        use_map,
-        stdlib,
-        struct_map,
-        enum_map,
-        &impl_type_params,
-        module_name,
-        impl_block.span,
-    )?;
-    let trait_name = impl_block
-        .trait_path
-        .as_ref()
-        .map(|path| resolve_trait_name(path, use_map, module_name));
-    if let Some(trait_name) = &trait_name {
-        let Some(trait_info) = trait_map.get(trait_name) else {
-            return Err(TypeError::new(
-                format!("unknown trait `{trait_name}`"),
-                impl_block.span,
-            ));
-        };
-        if trait_info.module != module_name && !trait_info.is_pub {
-            return Err(TypeError::new(
-                format!("trait `{trait_name}` is private"),
-                impl_block.span,
-            ));
-        }
-    }
-    let mut method_names = std::collections::HashSet::new();
-    let mut methods = Vec::with_capacity(impl_block.methods.len());
-    for method in &impl_block.methods {
-        if !method_names.insert(method.name.item.clone()) {
-            return Err(TypeError::new(
-                format!("duplicate method `{}` in impl block", method.name.item),
-                method.name.span,
-            ));
-        }
-        if trait_name.is_some() && !method.type_params.is_empty() {
-            return Err(TypeError::new(
-                "trait impl methods cannot declare type parameters".to_string(),
-                method.name.span,
-            ));
-        }
-        let method_type_params = merge_type_params(&impl_type_params, &method.type_params)?;
-        let mut combined_type_params = impl_block.type_params.clone();
-        combined_type_params.extend(method.type_params.clone());
-        let params = validate_impl_method(
-            &type_name,
-            &target_ty,
-            &impl_block.target,
-            module_name,
-            method,
-            use_map,
-            stdlib,
-            struct_map,
-            enum_map,
-            &method_type_params,
-            method.span,
-        )?;
-        if let Some(trait_name) = &trait_name {
-            let trait_info = trait_map
-                .get(trait_name)
-                .expect("trait already validated");
-            let trait_method = trait_info
-                .methods
-                .get(&method.name.item)
-                .ok_or_else(|| {
-                    TypeError::new(
-                        format!(
-                            "method `{}` is not declared in trait `{trait_name}`",
-                            method.name.item
-                        ),
-                        method.name.span,
-                    )
-                })?;
-            let mut lowered_params = Vec::new();
-            for param in &params {
-                let Some(ty) = &param.ty else {
-                    return Err(TypeError::new(
-                        format!("parameter `{}` requires a type annotation", param.name.item),
-                        param.name.span,
-                    ));
-                };
-                lowered_params.push(lower_type(ty, use_map, stdlib, &method_type_params)?);
-            }
-            let lowered_ret = lower_type(&method.ret, use_map, stdlib, &method_type_params)?;
-            let mut expected_params = Vec::new();
-            for ty in &trait_method.params {
-                expected_params.push(substitute_self(ty, &target_ty));
-            }
-            let expected_ret = substitute_self(&trait_method.ret, &target_ty);
-            if lowered_params.len() != expected_params.len() {
-                return Err(TypeError::new(
-                    format!(
-                        "method `{}` has wrong arity for trait `{trait_name}`",
-                        method.name.item
-                    ),
-                    method.name.span,
-                ));
-            }
-            for (actual, expected) in lowered_params.iter().zip(expected_params.iter()) {
-                if actual != expected {
-                    return Err(TypeError::new(
-                        format!(
-                            "method `{}` has wrong parameter type for trait `{trait_name}`",
-                            method.name.item
-                        ),
-                        method.name.span,
-                    ));
-                }
-            }
-            if lowered_ret != expected_ret {
-                return Err(TypeError::new(
-                    format!(
-                        "method `{}` has wrong return type for trait `{trait_name}`",
-                        method.name.item
-                    ),
-                    method.name.span,
-                ));
-            }
-            let name = Spanned::new(
-                trait_method_name(trait_name, &type_name, &method.name.item),
-                method.name.span,
-            );
-            methods.push(Function {
-                name,
-                type_params: combined_type_params,
-                params,
-                ret: method.ret.clone(),
-                body: method.body.clone(),
-                is_pub: method.is_pub,
-                doc: method.doc.clone(),
-                span: method.span,
-            });
-        } else {
-            methods.push(desugar_impl_method(
-                &type_name,
-                method,
-                params,
-                combined_type_params,
-            ));
-        }
-    }
-    if let Some(trait_name) = &trait_name {
-        let trait_info = trait_map
-            .get(trait_name)
-            .expect("trait already validated");
-        for name in trait_info.methods.keys() {
-            if !method_names.contains(name) {
-                return Err(TypeError::new(
-                    format!("missing method `{name}` for trait `{trait_name}`"),
-                    impl_block.span,
-                ));
-            }
-        }
-    }
-    Ok(methods)
-}
-
-/// Convert AST types into resolved Ty (builtins + fully qualified paths).
-fn lower_type(
-    ty: &Type,
-    use_map: &UseMap,
-    stdlib: &StdlibIndex,
-    type_params: &HashSet<String>,
-) -> Result<Ty, TypeError> {
-    match ty {
-        Type::Ptr { target, .. } => Ok(Ty::Ptr(Box::new(lower_type(
-            target,
-            use_map,
-            stdlib,
-            type_params,
-        )?))),
-        Type::Ref { target, .. } => Ok(Ty::Ref(Box::new(lower_type(
-            target,
-            use_map,
-            stdlib,
-            type_params,
-        )?))),
-        Type::Path { path, args, .. } => {
-            let resolved = resolve_path(path, use_map);
-            let path_segments = resolved.iter().map(|seg| seg.as_str()).collect::<Vec<_>>();
-            let args: Vec<Ty> = args
-                .iter()
-                .map(|arg| lower_type(arg, use_map, stdlib, type_params))
-                .collect::<Result<_, _>>()?;
-            if path_segments.len() == 1 {
-                if type_params.contains(path_segments[0]) {
-                    if !args.is_empty() {
-                        return Err(TypeError::new(
-                            format!("type parameter `{}` cannot take arguments", path_segments[0]),
-                            path.span,
-                        ));
-                    }
-                    return Ok(Ty::Param(path_segments[0].to_string()));
-                }
-                let builtin = match path_segments[0] {
-                    "i32" => Some(BuiltinType::I32),
-                    "i64" => Some(BuiltinType::I64),
-                    "u32" => Some(BuiltinType::U32),
-                    "u8" => Some(BuiltinType::U8),
-                    "bool" => Some(BuiltinType::Bool),
-                    "unit" => Some(BuiltinType::Unit),
-                    "never" => Some(BuiltinType::Never),
-                    _ => None,
-                };
-                if let Some(builtin) = builtin {
-                    return Ok(Ty::Builtin(builtin));
-                }
-                let resolved_joined = resolved.join(".");
-                let alias = resolve_type_name(path, use_map, stdlib);
-                let joined = if alias != resolved_joined {
-                    alias
-                } else {
-                    resolved_joined
-                };
-                if joined == "Vec" || joined == "sys.vec.Vec" {
-                    if args.len() != 1 {
-                        return Err(TypeError::new(
-                            format!("Vec expects 1 type argument, found {}", args.len()),
-                            path.span,
-                        ));
-                    }
-                    return Ok(Ty::Path("sys.vec.Vec".to_string(), args));
-                }
-                return Ok(Ty::Path(joined, args));
-            }
-            let joined = path_segments.join(".");
-            if joined == "Vec" || joined == "sys.vec.Vec" {
-                if args.len() != 1 {
-                    return Err(TypeError::new(
-                        format!("Vec expects 1 type argument, found {}", args.len()),
-                        path.span,
-                    ));
-                }
-                return Ok(Ty::Path("sys.vec.Vec".to_string(), args));
-            }
-            Ok(Ty::Path(joined, args))
-        }
-    }
-}
-
-/// Resolve a path to an enum type if the last segment is a variant.
-fn resolve_enum_variant(
-    path: &Path,
-    use_map: &UseMap,
-    enum_map: &HashMap<String, EnumInfo>,
-    module_name: &str,
-) -> Option<Ty> {
-    let resolved = resolve_path(path, use_map);
-    if resolved.len() < 2 {
-        return None;
-    }
-    let (enum_path, variant) = resolved.split_at(resolved.len() - 1);
-    let enum_name = enum_path.join(".");
-
-    // First try the resolved path as-is
-    if let Some(info) = enum_map.get(&enum_name) {
-        if info.variants.iter().any(|name| name == &variant[0]) {
-            return Some(Ty::Path(enum_name, Vec::new()));
-        }
-    }
-
-    // If not found, try prepending current module (for local enums)
-    if enum_path.len() == 1 {
-        let qualified = format!("{}.{}", module_name, enum_name);
-        if let Some(info) = enum_map.get(&qualified) {
-            if info.variants.iter().any(|name| name == &variant[0]) {
-                return Some(Ty::Path(qualified, Vec::new()));
-            }
-        }
-    }
-
-    None
-}
-
-fn resolve_type_name(path: &Path, use_map: &UseMap, stdlib: &StdlibIndex) -> String {
-    let resolved = resolve_path(path, use_map);
-    if resolved.len() == 1 {
-        if let Some(full) = stdlib.types.get(&resolved[0]) {
-            return full.clone();
-        }
-    }
-    resolved.join(".")
-}
-
-fn resolve_trait_name(path: &Path, use_map: &UseMap, module_name: &str) -> String {
-    let resolved = resolve_path(path, use_map);
-    if resolved.len() == 1 {
-        return format!("{module_name}.{}", resolved[0]);
-    }
-    resolved.join(".")
-}
-
-pub(super) fn is_string_ty(ty: &Ty) -> bool {
-    matches!(ty, Ty::Path(name, _) if name == "sys.string.string" || name == "string")
-}
-
-fn stdlib_string_ty(stdlib: &StdlibIndex) -> Ty {
-    let name = stdlib
-        .types
-        .get("string")
-        .cloned()
-        .unwrap_or_else(|| "sys.string.string".to_string());
-    Ty::Path(name, Vec::new())
-}
-
-fn type_contains_ref(ty: &Type) -> Option<Span> {
-    match ty {
-        Type::Ref { span, .. } => Some(*span),
-        Type::Ptr { target, .. } => type_contains_ref(target),
-        Type::Path { args, .. } => {
-            for arg in args {
-                if let Some(span) = type_contains_ref(arg) {
-                    return Some(span);
-                }
-            }
-            None
-        }
-    }
-}
-
-fn type_contains_capability(
-    ty: &Ty,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-) -> bool {
-    let mut visiting = HashSet::new();
-    type_contains_capability_inner(ty, struct_map, enum_map, &mut visiting)
-}
-
-fn type_contains_capability_inner(
-    ty: &Ty,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    visiting: &mut HashSet<String>,
-) -> bool {
-    match ty {
-        Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => false,
-        Ty::Param(_) => true,
-        Ty::Path(name, args) => {
-            if name == "sys.result.Result" {
-                return args
-                    .iter()
-                    .any(|arg| type_contains_capability_inner(arg, struct_map, enum_map, visiting));
-            }
-            if args
-                .iter()
-                .any(|arg| type_contains_capability_inner(arg, struct_map, enum_map, visiting))
-            {
-                return true;
-            }
-            if let Some(info) = struct_map.get(name) {
-                if info.is_capability {
-                    return true;
-                }
-                if !visiting.insert(name.clone()) {
-                    return false;
-                }
-                let contains = info.fields.values().any(|field| {
-                    type_contains_capability_inner(field, struct_map, enum_map, visiting)
-                });
-                visiting.remove(name);
-                return contains;
-            }
-            if let Some(info) = enum_map.get(name) {
-                if !visiting.insert(name.clone()) {
-                    return false;
-                }
-                let contains = info.payloads.values().any(|payload| {
-                    if let Some(payload_ty) = payload {
-                        type_contains_capability_inner(payload_ty, struct_map, enum_map, visiting)
-                    } else {
-                        false
-                    }
-                });
-                visiting.remove(name);
-                return contains;
-            }
-            false
-        }
-    }
-}
-
-/// Move-only types are anything not unrestricted.
-fn is_affine_type(
-    ty: &Ty,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-) -> bool {
-    type_kind(ty, struct_map, enum_map) != TypeKind::Unrestricted
-}
-
-/// Compute kind with cycle protection for recursive types.
-fn type_kind(
-    ty: &Ty,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-) -> TypeKind {
-    let mut visiting = HashSet::new();
-    type_kind_inner(ty, struct_map, enum_map, &mut visiting)
-}
-
-/// Linear dominates affine, which dominates unrestricted.
-fn combine_kind(left: TypeKind, right: TypeKind) -> TypeKind {
-    match (left, right) {
-        (TypeKind::Linear, _) | (_, TypeKind::Linear) => TypeKind::Linear,
-        (TypeKind::Affine, _) | (_, TypeKind::Affine) => TypeKind::Affine,
-        _ => TypeKind::Unrestricted,
-    }
-}
-
-/// Recursively compute type kind with recursion cycle protection.
-fn type_kind_inner(
-    ty: &Ty,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    visiting: &mut HashSet<String>,
-) -> TypeKind {
-    match ty {
-        Ty::Builtin(_) | Ty::Ptr(_) | Ty::Ref(_) => TypeKind::Unrestricted,
-        Ty::Param(_) => TypeKind::Affine,
-        Ty::Path(name, args) => {
-            if name == "sys.result.Result" {
-                return args.iter().fold(TypeKind::Unrestricted, |acc, arg| {
-                    combine_kind(acc, type_kind_inner(arg, struct_map, enum_map, visiting))
-                });
-            }
-            if visiting.contains(name) {
-                return TypeKind::Unrestricted;
-            }
-            if let Some(info) = struct_map.get(name) {
-                visiting.insert(name.clone());
-                let fields_kind = info.fields.values().fold(TypeKind::Unrestricted, |acc, field| {
-                    combine_kind(acc, type_kind_inner(field, struct_map, enum_map, visiting))
-                });
-                visiting.remove(name);
-                return combine_kind(info.kind, fields_kind);
-            }
-            if let Some(info) = enum_map.get(name) {
-                visiting.insert(name.clone());
-                let payload_kind = info.payloads.values().fold(TypeKind::Unrestricted, |acc, payload| {
-                    if let Some(payload_ty) = payload {
-                        combine_kind(acc, type_kind_inner(payload_ty, struct_map, enum_map, visiting))
-                    } else {
-                        acc
-                    }
-                });
-                visiting.remove(name);
-                return payload_kind;
-            }
-            TypeKind::Unrestricted
-        }
-    }
-}
-
-fn validate_type_args(
-    ty: &Ty,
-    struct_map: &HashMap<String, StructInfo>,
-    enum_map: &HashMap<String, EnumInfo>,
-    span: Span,
-) -> Result<(), TypeError> {
-    match ty {
-        Ty::Builtin(_) | Ty::Param(_) => Ok(()),
-        Ty::Ptr(inner) | Ty::Ref(inner) => validate_type_args(inner, struct_map, enum_map, span),
-        Ty::Path(name, args) => {
-            if let Some(info) = struct_map.get(name) {
-                if args.len() != info.type_params.len() {
-                    return Err(TypeError::new(
-                        format!(
-                            "type `{}` expects {} type argument(s), found {}",
-                            name,
-                            info.type_params.len(),
-                            args.len()
-                        ),
-                        span,
-                    ));
-                }
-            } else if let Some(info) = enum_map.get(name) {
-                if args.len() != info.type_params.len() {
-                    return Err(TypeError::new(
-                        format!(
-                            "type `{}` expects {} type argument(s), found {}",
-                            name,
-                            info.type_params.len(),
-                            args.len()
-                        ),
-                        span,
-                    ));
-                }
-            }
-            for arg in args {
-                validate_type_args(arg, struct_map, enum_map, span)?;
-            }
-            Ok(())
-        }
-    }
-}
-
 pub fn type_check(module: &Module) -> Result<crate::hir::HirProgram, TypeError> {
     type_check_program(module, &[], &[])
 }
@@ -1243,50 +385,49 @@ pub fn type_check_program(
     stdlib: &[Module],
     user_modules: &[Module],
 ) -> Result<crate::hir::HirProgram, TypeError> {
-    let use_map = UseMap::new(module);
-    let stdlib_names: HashSet<String> = stdlib
+    let module = crate::desugar::desugar_module(module);
+    let stdlib = stdlib
         .iter()
-        .map(|m| path_to_string(&m.name))
-        .collect();
+        .map(crate::desugar::desugar_module)
+        .collect::<Vec<_>>();
+    let user_modules = user_modules
+        .iter()
+        .map(crate::desugar::desugar_module)
+        .collect::<Vec<_>>();
+
+    let use_map = UseMap::new(&module);
+    let stdlib_names: HashSet<String> = stdlib.iter().map(|m| path_to_string(&m.name)).collect();
     let mut package_map: HashMap<String, PackageSafety> = HashMap::new();
-    for m in stdlib {
+    for m in &stdlib {
         package_map.insert(path_to_string(&m.name), m.package);
     }
-    for m in user_modules {
+    for m in &user_modules {
         package_map.insert(path_to_string(&m.name), m.package);
     }
     package_map.insert(path_to_string(&module.name), module.package);
-    let stdlib_index = collect::build_stdlib_index(stdlib)?;
+    let stdlib_index = collect::build_stdlib_index(&stdlib)?;
     let modules = stdlib
         .iter()
         .chain(user_modules.iter())
-        .chain(std::iter::once(module))
+        .chain(std::iter::once(&module))
         .collect::<Vec<_>>();
     let module_name = module.name.to_string();
-    check::validate_package_safety(module, false)
-        .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
-    check::validate_import_safety(module, &package_map, &stdlib_names)
-        .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
-    for user_module in user_modules {
-        check::validate_package_safety(user_module, false)
-            .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
-        check::validate_import_safety(
-            user_module,
-            &package_map,
-            &stdlib_names,
-        )
-        .map_err(|err| err.with_context(format!("in module `{}`", user_module.name)))?;
+    validate_package_safety(&module, false)
+        .map_err(|err| err.in_module(module.name.to_string()).with_context(format!("in module `{}`", module.name)))?;
+    validate_import_safety(&module, &package_map, &stdlib_names)
+        .map_err(|err| err.in_module(module.name.to_string()).with_context(format!("in module `{}`", module.name)))?;
+    for user_module in &user_modules {
+        validate_package_safety(user_module, false)
+            .map_err(|err| err.in_module(user_module.name.to_string()).with_context(format!("in module `{}`", user_module.name)))?;
+        validate_import_safety(user_module, &package_map, &stdlib_names)
+            .map_err(|err| err.in_module(user_module.name.to_string()).with_context(format!("in module `{}`", user_module.name)))?;
     }
-    for stdlib_module in stdlib {
-        check::validate_package_safety(stdlib_module, true)
-            .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
+    for stdlib_module in &stdlib {
+        validate_package_safety(stdlib_module, true)
+            .map_err(|err| err.in_module(stdlib_module.name.to_string()).with_context(format!("in module `{}`", stdlib_module.name)))?;
         if stdlib_module.package == PackageSafety::Safe {
-            check::validate_import_safety(
-                stdlib_module,
-                &package_map,
-                &stdlib_names,
-            )
-            .map_err(|err| err.with_context(format!("in module `{}`", stdlib_module.name)))?;
+            validate_import_safety(stdlib_module, &package_map, &stdlib_names)
+                .map_err(|err| err.in_module(stdlib_module.name.to_string()).with_context(format!("in module `{}`", stdlib_module.name)))?;
         }
     }
     let struct_map = collect::collect_structs(&modules, &module_name, &stdlib_index)
@@ -1295,14 +436,9 @@ pub fn type_check_program(
         .map_err(|err| err.with_context("while collecting enums"))?;
     let trait_map = collect::collect_traits(&modules, &stdlib_index)
         .map_err(|err| err.with_context("while collecting traits"))?;
-    let trait_impls = collect::collect_trait_impls(
-        &modules,
-        &stdlib_index,
-        &struct_map,
-        &enum_map,
-        &trait_map,
-    )
-    .map_err(|err| err.with_context("while collecting trait impls"))?;
+    let trait_impls =
+        collect::collect_trait_impls(&modules, &stdlib_index, &struct_map, &enum_map, &trait_map)
+            .map_err(|err| err.with_context("while collecting trait impls"))?;
     collect::validate_type_defs(&modules, &stdlib_index, &struct_map, &enum_map)
         .map_err(|err| err.with_context("while validating type arguments"))?;
     collect::validate_copy_structs(&modules, &struct_map, &enum_map, &stdlib_index)
@@ -1315,7 +451,7 @@ pub fn type_check_program(
         &enum_map,
         &trait_map,
     )
-        .map_err(|err| err.with_context("while collecting functions"))?;
+    .map_err(|err| err.with_context("while collecting functions"))?;
 
     let mut type_tables: FunctionTypeTables = HashMap::new();
 
@@ -1325,6 +461,12 @@ pub fn type_check_program(
         for item in &module.items {
             match item {
                 Item::Function(func) => {
+                    if crate::runtime_intrinsics::is_runtime_intrinsic(
+                        &module_name,
+                        &func.name.item,
+                    ) {
+                        continue;
+                    }
                     let mut table = TypeTable::default();
                     check::check_function(
                         func,
@@ -1338,7 +480,7 @@ pub fn type_check_program(
                         &module_name,
                         Some(&mut table),
                     )
-                    .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
+                    .map_err(|err| err.in_module(module_name.clone()).with_context(format!("in module `{}`", module_name)))?;
                     type_tables.insert(function_key(&module_name, &func.name.item), table);
                 }
                 Item::Impl(impl_block) => {
@@ -1352,6 +494,12 @@ pub fn type_check_program(
                         &trait_map,
                     )?;
                     for method in methods {
+                        if crate::runtime_intrinsics::is_runtime_intrinsic(
+                            &module_name,
+                            &method.name.item,
+                        ) {
+                            continue;
+                        }
                         let mut table = TypeTable::default();
                         check::check_function(
                             &method,
@@ -1365,7 +513,7 @@ pub fn type_check_program(
                             &module_name,
                             Some(&mut table),
                         )
-                        .map_err(|err| err.with_context(format!("in module `{}`", module_name)))?;
+                        .map_err(|err| err.in_module(module_name.clone()).with_context(format!("in module `{}`", module_name)))?;
                         type_tables.insert(function_key(&module_name, &method.name.item), table);
                     }
                 }
@@ -1375,10 +523,13 @@ pub fn type_check_program(
         Ok(())
     };
 
-    for module in user_modules {
+    for module in &stdlib {
         check_module(module)?;
     }
-    check_module(module)?;
+    for module in &user_modules {
+        check_module(module)?;
+    }
+    check_module(&module)?;
 
     let hir_stdlib: Result<Vec<HirModule>, TypeError> = stdlib
         .iter()
@@ -1394,9 +545,8 @@ pub fn type_check_program(
                 &use_map,
                 &stdlib_index,
                 Some(&type_tables),
-                true,
             )
-            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
+            .map_err(|err| err.in_module(m.name.to_string()).with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
@@ -1414,14 +564,13 @@ pub fn type_check_program(
                 &use_map,
                 &stdlib_index,
                 Some(&type_tables),
-                false,
             )
-            .map_err(|err| err.with_context(format!("in module `{}`", m.name)))
+            .map_err(|err| err.in_module(m.name.to_string()).with_context(format!("in module `{}`", m.name)))
         })
         .collect();
 
     let hir_entry = lower::lower_module(
-        module,
+        &module,
         &functions,
         &struct_map,
         &enum_map,
@@ -1430,9 +579,8 @@ pub fn type_check_program(
         &use_map,
         &stdlib_index,
         Some(&type_tables),
-        false,
     )
-    .map_err(|err| err.with_context(format!("in module `{}`", module.name)))?;
+    .map_err(|err| err.in_module(module.name.to_string()).with_context(format!("in module `{}`", module.name)))?;
 
     let hir_trait_impls: Vec<HirTraitImpl> = trait_impls
         .iter()
@@ -1452,27 +600,4 @@ pub fn type_check_program(
         trait_impls: hir_trait_impls,
     };
     monomorphize::monomorphize_program(hir_program)
-}
-
-pub(super) trait SpanExt {
-    fn span(&self) -> Span;
-}
-
-impl SpanExt for Expr {
-    fn span(&self) -> Span {
-        match self {
-            Expr::Literal(lit) => lit.span,
-            Expr::Path(path) => path.span,
-            Expr::Call(call) => call.span,
-            Expr::MethodCall(method_call) => method_call.span,
-            Expr::FieldAccess(field) => field.span,
-            Expr::Index(index) => index.span,
-            Expr::StructLiteral(lit) => lit.span,
-            Expr::Unary(unary) => unary.span,
-            Expr::Binary(binary) => binary.span,
-            Expr::Match(m) => m.span,
-            Expr::Try(try_expr) => try_expr.span,
-            Expr::Grouping(group) => group.span,
-        }
-    }
 }

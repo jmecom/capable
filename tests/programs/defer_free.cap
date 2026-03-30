@@ -1,0 +1,32 @@
+package safe
+module defer_free
+use sys::system
+use sys::string
+use sys::vec
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  let text = string::text_new()
+  defer text.free()
+  try text.push_str("hi") else {
+    c.assert(false)
+    return 1
+  }
+
+  let bytes = vec::new<u8>()
+  defer bytes.free()
+  try bytes.push('o') else {
+    c.assert(false)
+    return 1
+  }
+  try bytes.push('k') else {
+    c.assert(false)
+    return 1
+  }
+
+  c.assert(text.as_string().eq("hi"))
+  c.assert(bytes.as_string().eq("ok"))
+  c.println("defer free ok")
+  return 0
+}

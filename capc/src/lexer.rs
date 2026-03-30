@@ -33,6 +33,8 @@ pub enum TokenKind {
     Fn,
     #[token("let")]
     Let,
+    #[token("try")]
+    Try,
     #[token("if")]
     If,
     #[token("else")]

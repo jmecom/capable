@@ -27,12 +27,12 @@ module fs {
   pub fn filesystem(root: &RootCap) -> Filesystem
 
   // attenuate: Filesystem -> Dir(root)
-  pub fn root_dir(fs: &Filesystem) -> Dir
+  pub fn root_dir(fs: Filesystem) -> Dir
 
   // attenuate: Dir -> Dir(subdir) (consume Dir to avoid “backtracking” unless you re-mint)
   pub fn subdir(dir: Dir, name: string) -> Dir
 
-  // attenuate: Dir -> File caps
+  // child handle: Dir -> File caps
   pub fn open_read(dir: &Dir, name: string) -> FileRead
   pub fn open_write(dir: &Dir, name: string) -> FileWrite
 
@@ -41,8 +41,9 @@ module fs {
 }
 
 Notes:
-	•	Use borrows (&T) for “authority checks / minting” and moves (T) for “consuming path-like capabilities.” That matches the Austral-style feel: you can derive from a reference, but the derived things themselves are linear-ish.  ￼
-	•	If you don’t have & in the language yet, you can still do attenuation with moves only, but it gets annoying (you’ll constantly lose the parent cap). Borrowing is the ergonomic escape hatch that doesn’t require Rust’s full borrow checker if you keep it simple (read-only refs, no aliasing mutation).
+	•	Use borrows (&T) for reusable effects and fresh linear child handles.
+	•	Use moves (T) when the result is itself a reusable capability.
+	•	This keeps `Dir -> Dir(subdir)` explicit while still allowing `Dir -> FileRead` without consuming the directory.
 
 3) Why your Token test is not “too restrictive”
 

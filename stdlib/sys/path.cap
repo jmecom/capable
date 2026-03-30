@@ -1,0 +1,217 @@
+/// Path helpers for ordinary string manipulation.
+package safe
+module sys::path
+
+use sys::buffer
+use sys::fs
+use sys::string
+use sys::vec
+
+fn trim_trailing_slashes(raw_path: string) -> string {
+  let end = raw_path.len()
+  while (end > 0 && raw_path.byte_at(end - 1) == '/') {
+    end = end - 1
+  }
+  if (end == raw_path.len()) {
+    return raw_path
+  }
+  return match (raw_path.slice_range(0, end)) {
+    Ok(out) => { out }
+    Err(_) => { panic() }
+  }
+}
+
+/// Clean a user-supplied relative path and reject traversal.
+/// Empty paths become `index.html`.
+pub fn clean_relative_with_alloc(alloc: buffer::Alloc, raw_path: string) -> Result<string, unit> {
+  let out = alloc.text_new()
+  let rest = raw_path
+  while (true) {
+    let seg = ""
+    let done = false
+    match (rest.split_once_view('/')) {
+      Ok(parts) => {
+        seg = parts.left
+        rest = parts.right
+      }
+      Err(_) => {
+        seg = rest
+        done = true
+      }
+    }
+    if (seg == "..") {
+      out.free()
+      return Err(())
+    }
+    if (seg.len() > 0 && seg != ".") {
+      if (!out.is_empty()) {
+        match (out.push_byte('/')) {
+          Ok(_) => { }
+          Err(_) => {
+            out.free()
+            return Err(())
+          }
+        }
+      }
+      match (out.push_str(seg)) {
+        Ok(_) => { }
+        Err(_) => {
+          out.free()
+          return Err(())
+        }
+      }
+    }
+    if (done) {
+      break
+    }
+  }
+  if (out.is_empty()) {
+    out.free()
+    return Ok("index.html")
+  }
+  let result = out.copy_string()
+  out.free()
+  return match (result) {
+    Ok(path) => { Ok(path) }
+    Err(_) => { Err(()) }
+  }
+}
+
+/// Clean a user-supplied relative path with the process default allocator.
+pub fn clean_relative(raw_path: string) -> Result<string, unit> {
+  return clean_relative_with_alloc(buffer::default_alloc(), raw_path)
+}
+
+/// Split a path into slash-delimited segments without copying.
+pub fn segments_view_with_alloc(alloc: buffer::Alloc, raw_path: string) -> vec::Vec<string> {
+  return raw_path.split_view_with_alloc(alloc, '/')
+}
+
+/// Split a path into slash-delimited segments without copying.
+pub fn segments_view(raw_path: string) -> vec::Vec<string> {
+  return raw_path.split_view('/')
+}
+
+/// Return the basename of a path as a view.
+pub fn basename_view(raw_path: string) -> string {
+  let path = trim_trailing_slashes(raw_path)
+  if (path.is_empty()) {
+    return path
+  }
+  return match (path.last_index_of_byte('/')) {
+    Ok(i) => {
+      match (path.slice_range(i + 1, path.len())) {
+        Ok(out) => { out }
+        Err(_) => { panic() }
+      }
+    }
+    Err(_) => { path }
+  }
+}
+
+/// Return the basename without the final extension as a view.
+pub fn stem_view(raw_path: string) -> string {
+  let base = basename_view(raw_path)
+  if (base.is_empty()) {
+    return base
+  }
+  match (base.last_index_of_byte('.')) {
+    Ok(i) => {
+      if (i == 0) {
+        return base
+      }
+      return match (base.slice_range(0, i)) {
+        Ok(out) => { out }
+        Err(_) => { panic() }
+      }
+    }
+    Err(_) => { return base }
+  }
+}
+
+/// Return the dirname of a path as a view.
+pub fn dirname_view(raw_path: string) -> string {
+  let path = trim_trailing_slashes(raw_path)
+  let result = ""
+  match (path.last_index_of_byte('/')) {
+    Ok(i) => {
+      if (i == 0) {
+        result = ""
+      } else {
+        match (path.slice_range(0, i)) {
+          Ok(out) => { result = out }
+          Err(_) => { panic() }
+        }
+      }
+    }
+    Err(_) => { result = "" }
+  }
+  return result
+}
+
+fn extension_cut(raw_path: string) -> i32 {
+  let base = basename_view(raw_path)
+  if (base.is_empty()) {
+    return raw_path.len()
+  }
+  let dot = 0
+  match (base.last_index_of_byte('.')) {
+    Ok(found) => { dot = found }
+    Err(_) => { return raw_path.len() }
+  }
+  if (dot == 0) {
+    return raw_path.len()
+  }
+  return raw_path.len() - base.len() + dot
+}
+
+/// Replace or add a path extension using the process default allocator.
+/// `ext` may be provided with or without a leading `.`.
+pub fn replace_extension(raw_path: string, ext: string) -> string {
+  return replace_extension_with_alloc(buffer::default_alloc(), raw_path, ext)
+}
+
+/// Replace or add a path extension using the provided allocator.
+/// `ext` may be provided with or without a leading `.`.
+pub fn replace_extension_with_alloc(alloc: buffer::Alloc, raw_path: string, ext: string) -> string {
+  let cut = extension_cut(raw_path)
+  let out = string::text_new_with_alloc(alloc)
+  defer out.free()
+  if (cut > 0) {
+    let prefix = match (raw_path.slice_range(0, cut)) {
+      Ok(part) => { part }
+      Err(_) => { panic() }
+    }
+    match (out.push_str(prefix)) {
+      Ok(_) => { }
+      Err(_) => { panic() }
+    }
+  }
+  if (!ext.is_empty()) {
+    if (!ext.starts_with(".")) {
+      match (out.push_byte('.')) {
+        Ok(_) => { }
+        Err(_) => { panic() }
+      }
+    }
+    match (out.push_str(ext)) {
+      Ok(_) => { }
+      Err(_) => { panic() }
+    }
+  }
+  let result = out.copy_string()
+  return match (result) {
+    Ok(path) => { path }
+    Err(_) => { panic() }
+  }
+}
+
+/// Join two path segments using the process default allocator.
+pub fn join(a: string, b: string) -> string {
+  return fs::join(a, b)
+}
+
+/// Join two path segments using an explicit allocator.
+pub fn join_with_alloc(alloc: buffer::Alloc, a: string, b: string) -> string {
+  return fs::join_with_alloc(alloc, a, b)
+}

@@ -2,49 +2,46 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::ast::Module;
 use crate::error::ParseError;
 use crate::parser::parse_module;
-use crate::ast::Module;
+
+#[derive(Debug, Clone)]
+pub struct LoadedModule {
+    pub path: PathBuf,
+    pub source: String,
+    pub module: Module,
+}
 
 pub fn stdlib_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../stdlib")
 }
 
 pub fn load_stdlib() -> Result<Vec<Module>, ParseError> {
-    let root = stdlib_root().join("sys");
-    let mut modules = Vec::new();
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(&root).map_err(|err| {
-        ParseError::new(format!("failed to read stdlib dir {root:?}: {err}"), crate::ast::Span::new(0, 0))
-    })? {
-        let entry = entry.map_err(|err| {
-            ParseError::new(format!("failed to read stdlib entry: {err}"), crate::ast::Span::new(0, 0))
-        })?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("cap") {
-            entries.push(path);
-        }
-    }
-    entries.sort();
-    for path in entries {
-        let module = load_module_from_path(&path)
-            .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
-        validate_module_path(&module, &path, &stdlib_root()).map_err(|err| {
-            err.with_context(format!("while loading module `{}`", module.name))
-        })?;
-        modules.push(module);
-    }
-    Ok(modules)
+    let mut graph = ModuleGraph::new();
+    graph
+        .load_stdlib_with_sources()
+        .map(|modules| modules.into_iter().map(|loaded| loaded.module).collect())
 }
 
-pub fn load_module_from_path(path: &Path) -> Result<Module, ParseError> {
+pub(crate) fn load_module_from_path_with_source(path: &Path) -> Result<LoadedModule, ParseError> {
     let source = fs::read_to_string(path).map_err(|err| {
         ParseError::new(
             format!("failed to read {}: {err}", path.display()),
             crate::ast::Span::new(0, 0),
         )
     })?;
-    parse_module(&source)
+    let module = parse_module(&source)
+        .map_err(|err| err.with_source(path.display().to_string(), source.clone()))?;
+    Ok(LoadedModule {
+        path: path.to_path_buf(),
+        source,
+        module,
+    })
+}
+
+pub fn load_module_from_path(path: &Path) -> Result<Module, ParseError> {
+    load_module_from_path_with_source(path).map(|loaded| loaded.module)
 }
 
 pub fn validate_module_path(
@@ -84,7 +81,7 @@ pub fn validate_module_path(
 }
 
 pub struct ModuleGraph {
-    cache: HashMap<PathBuf, Module>,
+    cache: HashMap<PathBuf, LoadedModule>,
 }
 
 impl ModuleGraph {
@@ -95,6 +92,11 @@ impl ModuleGraph {
     }
 
     pub fn load_stdlib(&mut self) -> Result<Vec<Module>, ParseError> {
+        self.load_stdlib_with_sources()
+            .map(|modules| modules.into_iter().map(|loaded| loaded.module).collect())
+    }
+
+    pub fn load_stdlib_with_sources(&mut self) -> Result<Vec<LoadedModule>, ParseError> {
         let root = stdlib_root().join("sys");
         let mut modules = Vec::new();
         let mut entries = Vec::new();
@@ -117,12 +119,14 @@ impl ModuleGraph {
         }
         entries.sort();
         for path in entries {
-            let module = self.load_cached(&path)
+            let loaded = self.load_cached(&path)
                 .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
-            validate_module_path(&module, &path, &stdlib_root()).map_err(|err| {
-                err.with_context(format!("while loading module `{}`", module.name))
-            })?;
-            modules.push(module);
+            validate_module_path(&loaded.module, &path, &stdlib_root())
+                .map_err(|err| {
+                    err.with_context(format!("while loading module `{}`", loaded.module.name))
+                        .with_source(path.display().to_string(), loaded.source.clone())
+                })?;
+            modules.push(loaded);
         }
         Ok(modules)
     }
@@ -132,6 +136,15 @@ impl ModuleGraph {
         entry_path: &Path,
         entry_module: &Module,
     ) -> Result<Vec<Module>, ParseError> {
+        self.load_user_modules_transitive_with_sources(entry_path, entry_module)
+            .map(|modules| modules.into_iter().map(|loaded| loaded.module).collect())
+    }
+
+    pub fn load_user_modules_transitive_with_sources(
+        &mut self,
+        entry_path: &Path,
+        entry_module: &Module,
+    ) -> Result<Vec<LoadedModule>, ParseError> {
         let dir = entry_path
             .parent()
             .ok_or_else(|| {
@@ -154,30 +167,31 @@ impl ModuleGraph {
             if self.cache.contains_key(&path) {
                 continue;
             }
-            let module = self.load_cached(&path)
+            let loaded = self.load_cached(&path)
                 .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
-            validate_module_path(&module, &path, &base_dir).map_err(|err| {
-                err.with_context(format!("while loading module `{}`", module.name))
+            validate_module_path(&loaded.module, &path, &base_dir).map_err(|err| {
+                err.with_context(format!("while loading module `{}`", loaded.module.name))
+                    .with_source(path.display().to_string(), loaded.source.clone())
             })?;
-            for use_decl in &module.uses {
+            for use_decl in &loaded.module.uses {
                 if let Some(dep_path) = resolve_use_path(&base_dir, use_decl)? {
                     queue.push_back((dep_path, base_dir.clone()));
                 }
             }
-            modules.push(module);
+            modules.push(loaded);
         }
 
         Ok(modules)
     }
 
-    fn load_cached(&mut self, path: &Path) -> Result<Module, ParseError> {
+    fn load_cached(&mut self, path: &Path) -> Result<LoadedModule, ParseError> {
         if let Some(module) = self.cache.get(path) {
             return Ok(module.clone());
         }
-        let module = load_module_from_path(path)
+        let loaded = load_module_from_path_with_source(path)
             .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
-        self.cache.insert(path.to_path_buf(), module.clone());
-        Ok(module)
+        self.cache.insert(path.to_path_buf(), loaded.clone());
+        Ok(loaded)
     }
 }
 
@@ -192,6 +206,8 @@ pub fn load_user_modules_transitive(
     entry_path: &Path,
     entry_module: &Module,
 ) -> Result<Vec<Module>, ParseError> {
+    let root = stdlib_root().join("sys");
+    let _ = root;
     let dir = entry_path
         .parent()
         .ok_or_else(|| {
@@ -215,18 +231,19 @@ pub fn load_user_modules_transitive(
         if cache.contains_key(&path) {
             continue;
         }
-        let module = load_module_from_path(&path)
+        let loaded = load_module_from_path_with_source(&path)
             .map_err(|err| err.with_context(format!("while reading {}", path.display())))?;
-        validate_module_path(&module, &path, &base_dir).map_err(|err| {
-            err.with_context(format!("while loading module `{}`", module.name))
+        validate_module_path(&loaded.module, &path, &base_dir).map_err(|err| {
+            err.with_context(format!("while loading module `{}`", loaded.module.name))
+                .with_source(path.display().to_string(), loaded.source.clone())
         })?;
-        for use_decl in &module.uses {
+        for use_decl in &loaded.module.uses {
             if let Some(dep_path) = resolve_use_path(&base_dir, use_decl)? {
                 queue.push_back((dep_path, base_dir.clone()));
             }
         }
-        cache.insert(path, module.clone());
-        modules.push(module);
+        cache.insert(path, loaded.module.clone());
+        modules.push(loaded.module);
     }
 
     Ok(modules)

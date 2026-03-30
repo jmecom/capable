@@ -1,17 +1,17 @@
 package safe
 module result_unit_ok
 use sys::system
+use sys::vec
 
 pub fn main(rc: RootCap) -> i32 {
   let c = rc.mint_console()
-  let alloc = rc.mint_alloc_default()
-  let v = alloc.vec_u8_new()
+  let v = vec::new<u8>()
+  defer v.free()
   let ok = match v.push('*') {
     Ok(unit_val) => { 1 }
     Err(e) => { 0 }
   }
   c.assert(ok == 1)
   c.println("result unit ok - got Ok(unit)")
-  alloc.vec_u8_free(v)
   return 0
 }

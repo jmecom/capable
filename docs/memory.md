@@ -6,7 +6,8 @@ borrow checker, and how that shapes the stdlib and ABI.
 ## Goals
 - Safe code is memory-safe, so capability security remains meaningful.
 - Unsafe operations are explicit and auditable.
-- Allocation is explicit (Zig-like) and testable.
+- Allocation policy stays controllable without forcing ordinary code to thread
+  allocator handles everywhere.
 - The core model is simple enough to keep the language small and predictable.
 
 ## Safe vs unsafe
@@ -18,22 +19,26 @@ Safe code cannot:
 Unsafe code (`package unsafe`) may do all of the above. Tooling can audit and
 reject unsafe dependencies (`--safe-only`, `audit`).
 
-## Allocators are explicit
-- APIs that allocate take an explicit `Alloc` handle (or are methods that already
-  carry one).
-- The runtime currently backs `Alloc` with libc malloc/free, but the ABI keeps
-  allocator passing explicit for future custom allocators.
+## Allocators and the default surface
+- Ordinary code uses the process default allocator through stdlib helpers like
+  `string::text_new()`, `vec::new<T>()`, and `fs.read_to_string(...)`.
+- Explicit `Alloc` handles still exist for low-level control, testing, and
+  future bounded/custom allocators.
+- `sys::buffer` is the low-level memory layer. Most application code should not
+  need to talk to it directly.
 
 ## Owned vs borrowed data
 Capable separates owned buffers from borrowed views.
 
 ### Owned
 - `Vec<T>` is an owned, growable buffer.
-- `Text` is an owned UTF-8 buffer backed by `Vec<u8>`.
+- `Text` is an owned UTF-8 buffer backed by `Vec<u8>`. Use it as a builder.
 - Owned types are move-only to reduce double-free patterns.
+- In ordinary code, the intended cleanup pattern is `defer x.free()` soon after
+  creation. Use plain `free()` when you need early release.
 
 ### Borrowed
-- `Slice<T>` and `MutSlice<T>` are non-owning views.
+- `string`, `Slice<T>`, and `MutSlice<T>` are non-owning views.
 - Safe indexing and slicing are bounds-checked.
 
 Because Capable does not have a full lifetime system, safe code is restricted
@@ -66,5 +71,6 @@ code. The surface is intentionally small and explicit:
 ## Roadmap
 - Introduce a lightweight lifetime model or scoped borrows to relax slice
   escape restrictions without losing safety.
-- Expand allocator ergonomics without losing explicit allocation.
+- Keep the default-first allocator surface simple while preserving explicit
+  allocator escape hatches.
 - Keep the unsafe surface small and auditable.
