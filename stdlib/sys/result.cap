@@ -2,10 +2,62 @@
 package safe
 module sys::result
 
+use sys::option
+
 /// Result for fallible operations.
 pub enum Result<T, E> {
   /// Success value.
   Ok(T),
   /// Error value.
   Err(E)
+}
+
+impl<T, E> Result<T, E> {
+  /// True if Ok.
+  pub fn is_ok(self) -> bool {
+    return match self {
+      Ok(_) => { true }
+      Err(_) => { false }
+    }
+  }
+
+  /// True if Err.
+  pub fn is_err(self) -> bool {
+    return match self {
+      Ok(_) => { false }
+      Err(_) => { true }
+    }
+  }
+
+  /// Unwrap the Ok value or panic.
+  pub fn unwrap(self) -> T {
+    return match self {
+      Ok(val) => { val }
+      Err(_) => { panic() }
+    }
+  }
+
+  /// Return the Ok value or a default.
+  pub fn unwrap_or(self, default: T) -> T {
+    return match self {
+      Ok(val) => { val }
+      Err(_) => { default }
+    }
+  }
+
+  /// Convert to Option<T>, dropping the error.
+  pub fn ok(self) -> option::Option<T> {
+    return match self {
+      Ok(val) => { option::Option::Some(val) }
+      Err(_) => { option::Option::None }
+    }
+  }
+
+  /// Convert to Option<E>, dropping the success value.
+  pub fn err(self) -> option::Option<E> {
+    return match self {
+      Ok(_) => { option::Option::None }
+      Err(err) => { option::Option::Some(err) }
+    }
+  }
 }

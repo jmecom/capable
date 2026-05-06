@@ -451,6 +451,20 @@ fn run_result_construct() {
 }
 
 #[test]
+fn run_result_helpers() {
+    let out_dir = make_out_dir("result_helpers");
+    let out_dir = out_dir.to_str().expect("utf8 out dir");
+    let (code, stdout, _stderr) = run_capc(&[
+        "run",
+        "--out-dir",
+        out_dir,
+        "tests/programs/result_helpers.cap",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("result helpers ok"), "stdout was: {stdout:?}");
+}
+
+#[test]
 fn run_malloc_demo() {
     let out_dir = make_out_dir("malloc_demo");
     let out_dir = out_dir.to_str().expect("utf8 out dir");

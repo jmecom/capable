@@ -1,0 +1,46 @@
+package safe
+module result_helpers
+
+use sys::option
+use sys::system
+
+fn make(flag: bool) -> Result<i32, string> {
+  if (flag) {
+    return Ok(7)
+  }
+  return Err("bad")
+}
+
+pub fn main(rc: RootCap) -> i32 {
+  let c = rc.mint_console()
+
+  c.assert(make(true).is_ok())
+  c.assert(!make(true).is_err())
+  c.assert(make(false).is_err())
+  c.assert(!make(false).is_ok())
+  c.assert(make(true).unwrap() == 7)
+  c.assert(make(false).unwrap_or(9) == 9)
+
+  match (make(true).ok()) {
+    option::Option::Some(v) => { c.assert(v == 7) }
+    option::Option::None => { c.assert(false) }
+  }
+
+  match (make(false).ok()) {
+    option::Option::Some(_) => { c.assert(false) }
+    option::Option::None => { c.assert(true) }
+  }
+
+  match (make(false).err()) {
+    option::Option::Some(e) => { c.assert(e.eq("bad")) }
+    option::Option::None => { c.assert(false) }
+  }
+
+  match (make(true).err()) {
+    option::Option::Some(_) => { c.assert(false) }
+    option::Option::None => { c.assert(true) }
+  }
+
+  c.println("result helpers ok")
+  return 0
+}

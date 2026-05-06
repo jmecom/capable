@@ -6,20 +6,20 @@ use sys::string
 
 fn demo_string_view(c: Console) -> unit {
   let s = " hello,world \n"
-  let trimmed = s.trim_view()
+  let trimmed = s.trim()
   c.println("-- string view --")
   c.println(trimmed)
   c.println("len:")
   c.println_i32(trimmed.len())
 
-  try let parts = trimmed.split_once_view(',') else {
+  try let parts = trimmed.split_once(',') else {
     c.println("comma not found")
     return
   }
   c.println(parts.left)
   c.println(parts.right)
 
-  let words = trimmed.split_view(',')
+  let words = trimmed.split(',')
   defer words.free()
   c.println("split count:")
   c.println_i32(words.len())

@@ -44,7 +44,7 @@ pub fn main(rc: RootCap) -> i32 {
     return 1
   }
   c.assert(owned2.eq("cap"))
-  try let t3 = "owned".copy_text() else {
+  try let t3 = "owned".to_text() else {
     panic()
   }
   defer t3.free()

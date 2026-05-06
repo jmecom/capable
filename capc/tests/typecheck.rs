@@ -257,28 +257,6 @@ fn typecheck_match_result_non_exhaustive_fails() {
 }
 
 #[test]
-fn typecheck_result_ok_helper_removed() {
-    let source = load_program("should_fail_result_ok_removed.cap");
-    let module = parse_module(&source).expect("parse module");
-    let stdlib = load_stdlib().expect("load stdlib");
-    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err
-        .to_string()
-        .contains("unknown method `sys.result.Result__ok`"));
-}
-
-#[test]
-fn typecheck_result_unwrap_or_helper_removed() {
-    let source = load_program("should_fail_result_unwrap_or_removed.cap");
-    let module = parse_module(&source).expect("parse module");
-    let stdlib = load_stdlib().expect("load stdlib");
-    let err = type_check_program(&module, &stdlib, &[]).expect_err("expected type error");
-    assert!(err
-        .to_string()
-        .contains("unknown method `sys.result.Result__unwrap_or`"));
-}
-
-#[test]
 fn parse_if_let_fails() {
     let source = load_program("should_fail_if_let.cap");
     let err = parse_module(&source).expect_err("expected parse error");

@@ -23,7 +23,9 @@ reject unsafe dependencies (`--safe-only`, `audit`).
 - Ordinary code uses the process default allocator through stdlib helpers like
   `string::text_new()`, `vec::new<T>()`, and `fs.read_to_string(...)`.
 - Explicit `Alloc` handles still exist for low-level control, testing, and
-  future bounded/custom allocators.
+  future bounded/custom allocators. Prefer `Alloc` receiver helpers where they
+  exist; `_with_alloc` APIs are the explicit escape hatch for APIs that must
+  pass an allocator through to runtime-backed intrinsics.
 - `sys::buffer` is the low-level memory layer. Most application code should not
   need to talk to it directly.
 
@@ -40,6 +42,9 @@ Capable separates owned buffers from borrowed views.
 ### Borrowed
 - `string`, `Slice<T>`, and `MutSlice<T>` are non-owning views.
 - Safe indexing and slicing are bounds-checked.
+- String helpers whose names include `_view`, plus default helpers like
+  `trim`, `split`, and `split_once`, avoid copying string pieces where possible.
+  Use `copy_*`, `to_text`, or `copy_string` when you need owned data.
 
 Because Capable does not have a full lifetime system, safe code is restricted
 from letting slices escape:
