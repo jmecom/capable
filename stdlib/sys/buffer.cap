@@ -85,6 +85,16 @@ impl Alloc {
     return MutSlice<u8> { ptr: ptr, len: len }
   }
 
+  /// Copy a byte slice into memory owned by this Alloc.
+  pub fn copy_slice(self, data: Slice<u8>) -> Result<Slice<u8>, AllocErr> {
+    return copy_slice(self, data)
+  }
+
+  /// Copy bytes into a new owned string view using this Alloc.
+  pub fn copy_string_from_bytes(self, data: Slice<u8>) -> Result<string, AllocErr> {
+    return string::copy_from_bytes_with_alloc(self, data)
+  }
+
   /// Create a Vec<u8> with this Alloc (heap-backed).
   pub fn vec_u8_new(self) -> vec::Vec<u8> {
     return vec::new_with_alloc<u8>(self)

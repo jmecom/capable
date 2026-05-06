@@ -74,7 +74,7 @@ lexer ──> parser ──> AST
 ## Useful References
 
 - `TUTORIAL.md` for a quick language tour.
-- `CURRENT_STATUS.md` for the implemented language/runtime behavior.
-- `PROBLEMS.md` for the current design wrinkles.
 - `docs/POLICY.md` for safety and invariants.
+- `docs/ABI.md` and `docs/memory.md` for runtime and ownership conventions.
+- `stdlib/README.md` for stdlib API conventions and runtime-backed intrinsics.
 - `capc/tests/run.rs` for golden output expectations.

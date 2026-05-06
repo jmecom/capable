@@ -635,7 +635,7 @@ impl Vec<u8> {
   /// Borrow the bytes as a string view (no copy).
   /// The view is invalid after freeing this Vec.
   pub fn as_string(self) -> string {
-    return match (string::from_bytes(self.as_slice())) {
+    return match (string::view_from_bytes(self.as_slice())) {
       Ok(s) => { s }
       Err(_) => { panic() }
     }
@@ -659,7 +659,7 @@ impl Vec<u8> {
   /// Copy contents into a new owned string view.
   pub fn copy_string(self) -> Result<string, buffer::AllocErr> {
     let owned = self.copy_slice()?
-    return string::from_bytes(owned)
+    return string::view_from_bytes(owned)
   }
 }
 

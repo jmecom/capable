@@ -344,9 +344,10 @@ fn build_greeting() -> Result<string, buffer::AllocErr> {
 ```
 
 Helpers:
-- `string.split`, `split_once`, `trim_*`, `contains`, `index_of_*`.
+- `string.split`, `split_once`, and `trim_*` return views where possible.
+- `copy_split_*`, `copy_trim_*`, and `copy_*` helpers allocate owned copies.
 - `string.concat(other)` creates a new owned string view.
-- `string.copy_text()` makes an owned `Text` builder when you need one.
+- `string.to_text()` makes an owned `Text` builder when you need one.
 - `Text.as_string()` borrows cheaply; `Text.copy_string()` allocates a copy.
 - `Vec<u8>.as_string()` borrows bytes as text; `Vec<u8>.copy_string()` allocates a copy.
 - `Text.slice_range` returns a `string` view into its buffer.

@@ -175,7 +175,7 @@ pub fn replace_extension(raw_path: string, ext: string) -> string {
 /// `ext` may be provided with or without a leading `.`.
 pub fn replace_extension_with_alloc(alloc: buffer::Alloc, raw_path: string, ext: string) -> string {
   let cut = extension_cut(raw_path)
-  let out = string::text_new_with_alloc(alloc)
+  let out = alloc.text_new()
   defer out.free()
   if (cut > 0) {
     let prefix = match (raw_path.slice_range(0, cut)) {
